@@ -18,6 +18,7 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
         int h = 100;
         int oosCount = 1000;
         Parameters p = TRBSVUSyntheticDemandGenerator.sampleParameters(60, h, 17L);
+        require(p.contextCoefficientScale() == 1.0, "Default context coefficient scale changed.");
         checkParameters(p);
         Replication normal = generate(p, Distribution.NORMAL, Volatility.LOW, oosCount);
         Replication repeat = generate(p, Distribution.NORMAL, Volatility.LOW, oosCount);

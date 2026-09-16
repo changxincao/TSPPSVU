@@ -48,6 +48,7 @@ public final class TRBSVUSyntheticDemandGenerator {
      */
     public static final class Parameters {
         private final int historicalPeriods;
+        private final double contextCoefficientScale;
         private final double[] base;
         private final double[] market;
         private final double[] trend;
@@ -56,8 +57,9 @@ public final class TRBSVUSyntheticDemandGenerator {
         private final double[] volatilityQuantile;
         private final double[] commonLoading;
 
-        private Parameters(int historicalPeriods, int lanes) {
+        private Parameters(int historicalPeriods, int lanes, double contextCoefficientScale) {
             this.historicalPeriods = historicalPeriods;
+            this.contextCoefficientScale = contextCoefficientScale;
             base = new double[lanes];
             market = new double[lanes];
             trend = new double[lanes];
@@ -74,6 +76,8 @@ public final class TRBSVUSyntheticDemandGenerator {
         public int historicalPeriods() {
             return historicalPeriods;
         }
+
+        public double contextCoefficientScale() { return contextCoefficientScale; }
 
         public double[] base() { return base.clone(); }
         public double[] market() { return market.clone(); }
@@ -132,18 +136,26 @@ public final class TRBSVUSyntheticDemandGenerator {
     }
 
     public static Parameters sampleParameters(int laneCount, int historicalPeriods, long seed) {
+        return sampleParameters(laneCount, historicalPeriods, seed, 1.0);
+    }
+
+    public static Parameters sampleParameters(int laneCount, int historicalPeriods, long seed,
+                                              double contextCoefficientScale) {
         if (laneCount <= 0 || historicalPeriods <= 0) {
             throw new IllegalArgumentException("Lane and history counts must be positive.");
         }
-        Parameters p = new Parameters(historicalPeriods, laneCount);
+        if (!(contextCoefficientScale > 0.0) || !Double.isFinite(contextCoefficientScale)) {
+            throw new IllegalArgumentException("Context coefficient scale must be finite and positive.");
+        }
+        Parameters p = new Parameters(historicalPeriods, laneCount, contextCoefficientScale);
         Random random = new Random(seed);
         Random loadingRandom = new Random(seed ^ COMMON_LOADING_SALT);
         for (int j = 0; j < laneCount; j++) {
             p.base[j] = uniform(random, 10.0, 30.0);
-            p.market[j] = p.base[j] * uniform(random, 0.3, 0.6);
-            p.trend[j] = p.base[j] * uniform(random, 0.2, 0.4);
-            p.promotion[j] = p.base[j] * uniform(random, 0.3, 0.6);
-            p.attention[j] = p.base[j] * uniform(random, 0.3, 0.6);
+            p.market[j] = contextCoefficientScale * p.base[j] * uniform(random, 0.3, 0.6);
+            p.trend[j] = contextCoefficientScale * p.base[j] * uniform(random, 0.2, 0.4);
+            p.promotion[j] = contextCoefficientScale * p.base[j] * uniform(random, 0.3, 0.6);
+            p.attention[j] = contextCoefficientScale * p.base[j] * uniform(random, 0.3, 0.6);
             p.volatilityQuantile[j] = random.nextDouble();
             p.commonLoading[j] = uniform(loadingRandom, 0.2, 0.6);
         }
