@@ -26,6 +26,7 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
                         && Arrays.equals(p.market(), explicitDefault.market())
                         && Arrays.equals(p.commonLoading(), explicitDefault.commonLoading()),
                 "Explicit default structure changed the historical DGP.");
+        checkWideSameMeanPairing(h);
         checkParameters(p);
         checkAlternativeStructures(h);
         Replication normal = generate(p, Distribution.NORMAL, Volatility.LOW, oosCount);
@@ -98,6 +99,28 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
         }
     }
 
+    private static void checkWideSameMeanPairing(int h) {
+        Parameters original = TRBSVUSyntheticDemandGenerator.sampleParameters(
+                60, h, 43L, 1.0, ContextStructure.DENSE_PROPORTIONAL);
+        Parameters wide = TRBSVUSyntheticDemandGenerator.sampleParameters(
+                60, h, 43L, 1.0, ContextStructure.DENSE_WIDE_SAME_MEAN);
+        require(Arrays.equals(original.base(), wide.base())
+                        && Arrays.equals(original.volatilityQuantile(), wide.volatilityQuantile())
+                        && Arrays.equals(original.commonLoading(), wide.commonLoading()),
+                "Wide same-mean structure changed a non-context random stream.");
+        for (int j = 0; j < original.laneCount(); j++) {
+            require(close(wide.market()[j] / wide.base()[j],
+                            3.0 * (original.market()[j] / original.base()[j] - 0.3))
+                            && close(wide.trend()[j] / wide.base()[j],
+                            3.0 * (original.trend()[j] / original.base()[j] - 0.2))
+                            && close(wide.promotion()[j] / wide.base()[j],
+                            3.0 * (original.promotion()[j] / original.base()[j] - 0.3))
+                            && close(wide.attention()[j] / wide.base()[j],
+                            3.0 * (original.attention()[j] / original.base()[j] - 0.3)),
+                    "Wide same-mean coefficients are not quantile-paired with the baseline.");
+        }
+    }
+
     private static Replication generate(Parameters p, Distribution family,
                                         Volatility regime, int oosCount) {
         return TRBSVUSyntheticDemandGenerator.generate(p, family, regime,
@@ -143,6 +166,10 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
 
     private static boolean inRange(double value, double lower, double upper) {
         return value >= lower - 1e-12 && value <= upper + 1e-12;
+    }
+
+    private static boolean close(double left, double right) {
+        return Math.abs(left - right) <= 1e-12;
     }
 
     private static void checkDemand(Sample sample, int lanes) {

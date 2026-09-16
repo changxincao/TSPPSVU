@@ -28,7 +28,8 @@ public final class TRBSVUSyntheticDemandGenerator {
     }
 
     public enum ContextStructure {
-        DENSE_PROPORTIONAL, DENSE_RANDOM_SHARES, TWO_ACTIVE, SIGNED_CENTERED, GROUPED_CENTERED
+        DENSE_PROPORTIONAL, DENSE_WIDE_SAME_MEAN, DENSE_RANDOM_SHARES, TWO_ACTIVE,
+        SIGNED_CENTERED, GROUPED_CENTERED
     }
 
     public enum Volatility {
@@ -214,6 +215,13 @@ public final class TRBSVUSyntheticDemandGenerator {
     private static void restructure(double[] ratios, ContextStructure structure, Random random,
                                     int lane) {
         if (structure == ContextStructure.DENSE_PROPORTIONAL) return;
+        if (structure == ContextStructure.DENSE_WIDE_SAME_MEAN) {
+            ratios[0] = 3.0 * (ratios[0] - 0.3);
+            ratios[1] = 3.0 * (ratios[1] - 0.2);
+            ratios[2] = 3.0 * (ratios[2] - 0.3);
+            ratios[3] = 3.0 * (ratios[3] - 0.3);
+            return;
+        }
         double total = 0.0;
         for (double ratio : ratios) total += ratio;
         java.util.Arrays.fill(ratios, 0.0);
