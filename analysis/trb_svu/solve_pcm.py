@@ -62,6 +62,9 @@ def solve(root: Path) -> dict[str, object]:
     # Input-file parsing above and Java/Python process overhead are deliberately excluded.
     started = time.perf_counter()
     model = dro.Model()
+    policy = str(meta.get("policy", "demand_and_second_moment_lift_affine"))
+    if policy not in {"demand_affine", "demand_and_second_moment_lift_affine"}:
+        raise ValueError(f"Unsupported PCM policy: {policy}")
     selected = model.dvar(i_count, vtype="B", name="carrier_selected")
     demand = model.rvar(j_count, name="demand")
     lift = model.rvar(j_count + 1, name="second_moment_lift")
@@ -71,7 +74,8 @@ def solve(root: Path) -> dict[str, object]:
 
     for decision in (flow, spot, shortfall):
         decision.adapt(demand)
-        decision.adapt(lift)
+        if policy == "demand_and_second_moment_lift_affine":
+            decision.adapt(lift)
 
     ambiguity = model.ambiguity()
     ambiguity.suppset(
@@ -119,8 +123,10 @@ def solve(root: Path) -> dict[str, object]:
         "selected": np.rint(y).astype(int).tolist(),
         "selected_count": int(np.rint(y).sum()),
         "integrality_error": integrality_error,
-        "policy": "demand_and_second_moment_lift_affine",
-        "exactness": "optimal_for_lifted_affine_approximation_not_unrestricted_recourse",
+        "policy": policy,
+        "exactness": ("optimal_for_lifted_affine_approximation_not_unrestricted_recourse"
+                      if policy == "demand_and_second_moment_lift_affine"
+                      else "optimal_for_demand_affine_approximation_not_unrestricted_recourse"),
     }
     (root / "solution.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
     return result

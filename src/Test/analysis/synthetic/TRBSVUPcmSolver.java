@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
 
 /** RSOME/MOSEK adapter for the documented lifted-affine PCM-DRO benchmark. */
@@ -25,23 +26,35 @@ public final class TRBSVUPcmSolver {
 
     public Solution solve(ProcurementParams params, List<Sample> weighted,
                           double kappa, Settings settings) throws Exception {
+        return solve(params, weighted, kappa, settings, true);
+    }
+
+    public Solution solve(ProcurementParams params, List<Sample> weighted,
+                          double kappa, Settings settings, boolean adaptToLift) throws Exception {
         if (weighted.isEmpty() || !(kappa >= 1.0) || !Double.isFinite(kappa))
             throw new IllegalArgumentException("Invalid PCM samples or kappa.");
         Moments moments = moments(weighted, params.J, kappa);
         Path directory = Files.createTempDirectory(Path.of("tmp"), "trb_svu_pcm_");
+        Throwable primaryFailure = null;
         try {
-            writeInput(directory, params, moments, settings);
+            writeInput(directory, params, moments, settings, adaptToLift);
             System.out.printf(java.util.Locale.ROOT,
                     "PCM_SOLVE_BEGIN scenarios=%d positiveWeights=%d ess=%.10f kappa=%.17g threads=%d limitSec=%d%n",
                     weighted.size(), TRBSVUExperiment1Runner.positiveCount(weighted),
                     TRBSVUExperiment1Runner.ess(weighted), kappa,
                     settings.threads(), settings.timeLimitSeconds());
-            Process process = new ProcessBuilder(python.toString(), script.toString(), directory.toString())
-                    .redirectErrorStream(true).inheritIO().start();
-            boolean ended = process.waitFor(settings.timeLimitSeconds() + 120L, TimeUnit.SECONDS);
+            ProcessBuilder builder = new ProcessBuilder(python.toString(), script.toString(), directory.toString())
+                    .redirectErrorStream(true).inheritIO();
+            builder.environment().put("PYTHONUNBUFFERED", "1");
+            Process process = builder.start();
+            // MOSEK's mioMaxTime starts only after RSOME has constructed and
+            // reformulated the conic model.  Large PCM instances can spend
+            // many minutes in that build phase, so the outer watchdog must
+            // not consume the optimizer's requested time limit.
+            boolean ended = process.waitFor(settings.timeLimitSeconds() + 3600L, TimeUnit.SECONDS);
             if (!ended) {
-                process.destroyForcibly();
-                throw new IllegalStateException("PCM process exceeded solver limit plus 120 seconds.");
+                destroyProcessTree(process);
+                throw new IllegalStateException("PCM process exceeded solver limit plus 3600 seconds build grace.");
             }
             if (process.exitValue() != 0)
                 throw new IllegalStateException("PCM solve failed with exit code " + process.exitValue()
@@ -52,12 +65,44 @@ public final class TRBSVUPcmSolver {
                     solution.solverStatus, solution.certifiedOptimal, solution.objValue,
                     solution.solveTimeSec, selectedCount(solution.y));
             return solution;
+        } catch (Exception | Error failure) {
+            primaryFailure = failure;
+            throw failure;
         } finally {
-            for (String file : List.of("solution.json", "lane_capacity.csv", "rate.csv",
-                    "carriers.json", "lanes.json", "meta.json"))
-                Files.deleteIfExists(directory.resolve(file));
-            Files.deleteIfExists(directory);
+            try {
+                deleteTemporaryDirectory(directory);
+            } catch (Exception cleanupFailure) {
+                if (primaryFailure != null) primaryFailure.addSuppressed(cleanupFailure);
+                else throw cleanupFailure;
+            }
         }
+    }
+
+    private static void destroyProcessTree(Process process) throws Exception {
+        List<ProcessHandle> descendants = new ArrayList<>(process.descendants().toList());
+        for (ProcessHandle child : descendants) child.destroyForcibly();
+        process.destroyForcibly();
+        process.waitFor(10, TimeUnit.SECONDS);
+        for (ProcessHandle child : descendants) {
+            if (child.isAlive()) child.onExit().get(10, TimeUnit.SECONDS);
+        }
+    }
+
+    private static void deleteTemporaryDirectory(Path directory) throws Exception {
+        Exception last = null;
+        for (int attempt = 0; attempt < 10; attempt++) {
+            try {
+                for (String file : List.of("solution.json", "lane_capacity.csv", "rate.csv",
+                        "carriers.json", "lanes.json", "meta.json"))
+                    Files.deleteIfExists(directory.resolve(file));
+                Files.deleteIfExists(directory);
+                return;
+            } catch (java.nio.file.AccessDeniedException failure) {
+                last = failure;
+                Thread.sleep(200L);
+            }
+        }
+        throw last;
     }
 
     private static int selectedCount(double[] selection) {
@@ -105,10 +150,12 @@ public final class TRBSVUPcmSolver {
     }
 
     private static void writeInput(Path root, ProcurementParams p, Moments m,
-                                   Settings settings) throws Exception {
+                                   Settings settings, boolean adaptToLift) throws Exception {
         Files.writeString(root.resolve("meta.json"), "{\"carriers\":" + p.I
                 + ",\"lanes\":" + p.J + ",\"alpha\":" + p.alpha + ",\"beta\":" + p.beta
                 + ",\"total_variance_bound\":" + m.totalVariance
+                + ",\"policy\":\"" + (adaptToLift
+                ? "demand_and_second_moment_lift_affine" : "demand_affine") + "\""
                 + ",\"threads\":" + settings.threads() + ",\"time_limit_seconds\":"
                 + settings.timeLimitSeconds() + "}", StandardCharsets.UTF_8);
         Files.writeString(root.resolve("lanes.json"), "{\"mean\":" + json(m.mean)
@@ -152,7 +199,7 @@ public final class TRBSVUPcmSolver {
         solution.solverStatus = status;
         solution.bestBound = objective;
         solution.relativeGap = 0.0;
-        solution.certifiedOptimal = true; // For the stated lifted-affine PCM model only.
+        solution.certifiedOptimal = true; // For the stated PCM decision-rule approximation only.
         return solution;
     }
 
