@@ -17,7 +17,8 @@ import java.util.Locale;
 /** Isolated one-method timing probe for a frozen full-scale synthetic case. */
 public final class TRBSVUCurrentScaleTimingMain {
     private static final double RETENTION = 0.8;
-    private static final double BANDWIDTH = 5.0;
+    private static final double BANDWIDTH = Double.parseDouble(
+            System.getProperty("trb.timing.bandwidth", "5.0"));
     private static final double LAMBDA = 0.5;
     private static final double W1_RADIUS = 0.1;
     private static final double PCM_KAPPA = 1.5;
@@ -32,6 +33,7 @@ public final class TRBSVUCurrentScaleTimingMain {
         Path output = Path.of(args[2]).toAbsolutePath().normalize();
         int threads = Integer.parseInt(args[3]);
         int limitSeconds = Integer.parseInt(args[4]);
+        if (!(BANDWIDTH > 0.0)) throw new IllegalArgumentException("Invalid bandwidth: " + BANDWIDTH);
         TRBSVUSyntheticCase instance = TRBSVUSyntheticCaseIO.loadText(instanceFile);
         int betaOverride = Integer.getInteger("trb.timing.betaOverride", instance.params.beta);
         double capacityScale = Double.parseDouble(System.getProperty("trb.timing.capacityScale", "1.0"));
