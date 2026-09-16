@@ -1,4 +1,4 @@
-﻿package Test.analysis.covariate;
+package Test.analysis.covariate;
 
 import Basic.CovariateVector;
 import Basic.Sample;

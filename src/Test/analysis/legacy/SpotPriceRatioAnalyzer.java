@@ -1,4 +1,4 @@
-﻿package Test.analysis.legacy;
+package Test.analysis.legacy;
 
 import Basic.ProcurementParams;
 

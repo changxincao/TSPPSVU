@@ -23,6 +23,14 @@
 /output/
 /out_*/
 
+# Local experiment data/results. Only reusable helper code is versioned.
+/analysis/*
+!/analysis/trb_svu/
+!/analysis/trb_svu/**
+/analysis/trb_svu/__pycache__/
+/记录/
+/fFreight_with_indicators_and_holidays.csv
+
 # Solver/runtime noise
 *.log
 *.lck

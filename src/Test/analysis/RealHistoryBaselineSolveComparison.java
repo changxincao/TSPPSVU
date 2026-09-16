@@ -1,4 +1,4 @@
-﻿package Test.analysis;
+package Test.analysis;
 
 /**
  * 兼容入口：实际实现已迁移到 Test.analysis.realhistory 子包。

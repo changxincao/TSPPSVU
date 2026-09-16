@@ -1,4 +1,4 @@
-﻿package Test.analysis.realhistory;
+package Test.analysis.realhistory;
 
 import Basic.ProcurementParams;
 import Helper.basicHelper.Config;

@@ -1,4 +1,4 @@
-﻿package Test.analysis.synthetic;
+package Test.analysis.synthetic;
 
 import Basic.PeriodData;
 import Basic.ProcurementParams;

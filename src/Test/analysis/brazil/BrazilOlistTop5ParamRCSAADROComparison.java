@@ -1,6 +1,7 @@
 package Test.analysis.brazil;
 
 import Basic.ProcurementParams;
+import Basic.PeriodData;
 import Basic.Sample;
 import Helper.basicHelper.Config;
 import Helper.basicHelper.GlobalSummaryCollector;
@@ -164,10 +165,10 @@ public class BrazilOlistTop5ParamRCSAADROComparison {
         return cfg;
     }
 
-    private static double[] buildBaselineDemand(List<WeeklyWideLoader.WeeklyPeriod> periods) {
+    private static double[] buildBaselineDemand(List<PeriodData> periods) {
         int jSize = periods.get(0).demandSum.length;
         double[] sum = new double[jSize];
-        for (WeeklyWideLoader.WeeklyPeriod p : periods) {
+        for (PeriodData p : periods) {
             for (int j = 0; j < jSize; j++) {
                 sum[j] += p.demandSum[j];
             }

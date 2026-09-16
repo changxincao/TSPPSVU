@@ -1,4 +1,4 @@
-﻿package Test.analysis;
+package Test.analysis;
 
 import Basic.ProcurementParams;
 import java.io.IOException;
