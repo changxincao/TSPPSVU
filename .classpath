@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<classpath>
+	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-21">
+		<attributes>
+			<attribute name="org.eclipse.jdt.launching.CLASSPATH_ATTR_LIBRARY_PATH_ENTRY" value="D:/软件/cplex/ILOG/CPLEX_Studio2211/cplex/bin/x64_win64"/>
+			<attribute name="module" value="true"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry kind="src" path="src"/>
+	<classpathentry kind="lib" path="D:/软件/cplex/ILOG/CPLEX_Studio2211/cplex/lib/cplex.jar"/>
+	<classpathentry kind="lib" path="D:/软件/Mosek/11.0/tools/platform/win64x86/bin/mosek.jar"/>
+	<classpathentry kind="output" path="bin"/>
+</classpath>

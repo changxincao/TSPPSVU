@@ -1,0 +1,2 @@
+@echo off
+java -Djava.library.path=D:\??\cplex\ILOG\CPLEX_Studio2211\cplex\bin\x64_win64 -cp "bin;src;D:\??\cplex\ILOG\CPLEX_Studio2211\cplex\lib\cplex.jar;D:\??\Mosek\11.0\tools\platform\win64x86\bin\mosek.jar" Test.BrazilOlistTopParamScenarioComparison 1 5 50 15 I15 lbbd_only

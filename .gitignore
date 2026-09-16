@@ -1,0 +1,39 @@
+# Java/Eclipse build products
+/bin/
+*.class
+
+# Python virtual environments and caches
+/.venv-rsome/
+**/__pycache__/
+*.py[cod]
+
+# Local IDE/agent state
+/.history/
+/.claude/
+/.omx/
+/.serena/
+/.spec-workflow/
+/.codex_tmp_literature_sheet/
+/_codex对话归档/
+
+# Temporary and generated runtime directories
+/tmp/
+/tmp_ascii/
+/$root/
+/output/
+/out_*/
+
+# Solver/runtime noise
+*.log
+*.lck
+*.pid
+hs_err_pid*
+
+# Packaged local backup; source files are tracked separately
+/TransportationProcurement (2).zip
+
+# Accidental recursively nested project-name directory
+/TransportationProcurement/
+
+# Windows reserved-name artifact
+/nul
