@@ -73,17 +73,20 @@ public final class TRBSVUResultWriter {
         double[] trend = parameters.trend(), promotion = parameters.promotion();
         double[] attention = parameters.attention();
         double[] quantile = parameters.volatilityQuantile();
+        double[] commonLoading = parameters.commonLoading();
         double[] cv = parameters.volatilityParameters(volatility);
         double[] typical = parameters.typicalDemand();
         try (BufferedWriter out = writer(directory.resolve("dgp_parameters.csv"))) {
             out.write("lane_index,distribution,volatility,base,market_coefficient,trend_coefficient,"
-                    + "promotion_coefficient,attention_coefficient,volatility_quantile,cv,typical_demand");
+                    + "promotion_coefficient,attention_coefficient,volatility_quantile,cv,"
+                    + "common_factor_loading,common_variance_share,typical_demand");
             out.newLine();
             for (int j = 0; j < parameters.laneCount(); j++) {
                 out.write(String.format(Locale.ROOT,
-                        "%d,%s,%s,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g%n",
+                        "%d,%s,%s,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g%n",
                         j, distribution, volatility, base[j], market[j], trend[j], promotion[j],
-                        attention[j], quantile[j], cv[j], typical[j]));
+                        attention[j], quantile[j], cv[j], commonLoading[j],
+                        commonLoading[j] * commonLoading[j], typical[j]));
             }
         }
     }

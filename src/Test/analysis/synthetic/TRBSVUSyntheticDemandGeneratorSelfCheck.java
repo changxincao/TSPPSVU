@@ -107,6 +107,9 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
                 require(inRange(c, lower, upper), "Volatility range mismatch.");
             }
         }
+        for (double loading : p.commonLoading()) {
+            require(inRange(loading, 0.2, 0.6), "Common-factor loading range mismatch.");
+        }
     }
 
     private static double horizonAverageTrend(Parameters p) {

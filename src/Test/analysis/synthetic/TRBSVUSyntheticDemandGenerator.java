@@ -16,6 +16,8 @@ import java.util.Random;
  */
 public final class TRBSVUSyntheticDemandGenerator {
     private static final LocalDate FIRST_WEEK = LocalDate.of(2000, 1, 3);
+    private static final long COMMON_LOADING_SALT = 0x6A09E667F3BCC909L;
+    private static final long COMMON_NOISE_SALT = 0xBB67AE8584CAA73BL;
 
     private TRBSVUSyntheticDemandGenerator() {
     }
@@ -52,6 +54,7 @@ public final class TRBSVUSyntheticDemandGenerator {
         private final double[] promotion;
         private final double[] attention;
         private final double[] volatilityQuantile;
+        private final double[] commonLoading;
 
         private Parameters(int historicalPeriods, int lanes) {
             this.historicalPeriods = historicalPeriods;
@@ -61,6 +64,7 @@ public final class TRBSVUSyntheticDemandGenerator {
             promotion = new double[lanes];
             attention = new double[lanes];
             volatilityQuantile = new double[lanes];
+            commonLoading = new double[lanes];
         }
 
         public int laneCount() {
@@ -77,6 +81,7 @@ public final class TRBSVUSyntheticDemandGenerator {
         public double[] promotion() { return promotion.clone(); }
         public double[] attention() { return attention.clone(); }
         public double[] volatilityQuantile() { return volatilityQuantile.clone(); }
+        public double[] commonLoading() { return commonLoading.clone(); }
 
         /** E[mu_j(theta)] over the historical horizon; procurement scale only. */
         public double[] typicalDemand() {
@@ -132,6 +137,7 @@ public final class TRBSVUSyntheticDemandGenerator {
         }
         Parameters p = new Parameters(historicalPeriods, laneCount);
         Random random = new Random(seed);
+        Random loadingRandom = new Random(seed ^ COMMON_LOADING_SALT);
         for (int j = 0; j < laneCount; j++) {
             p.base[j] = uniform(random, 10.0, 30.0);
             p.market[j] = p.base[j] * uniform(random, 0.3, 0.6);
@@ -139,6 +145,7 @@ public final class TRBSVUSyntheticDemandGenerator {
             p.promotion[j] = p.base[j] * uniform(random, 0.3, 0.6);
             p.attention[j] = p.base[j] * uniform(random, 0.3, 0.6);
             p.volatilityQuantile[j] = random.nextDouble();
+            p.commonLoading[j] = uniform(loadingRandom, 0.2, 0.6);
         }
         return p;
     }
@@ -151,6 +158,14 @@ public final class TRBSVUSyntheticDemandGenerator {
     public static Replication generate(Parameters parameters, Distribution distribution,
                                        Volatility regime, int oosCount,
                                        long contextSeed, long historyNoiseSeed, long oosNoiseSeed) {
+        return generate(parameters, distribution, regime, oosCount, contextSeed,
+                historyNoiseSeed, oosNoiseSeed, true);
+    }
+
+    static Replication generate(Parameters parameters, Distribution distribution,
+                                Volatility regime, int oosCount,
+                                long contextSeed, long historyNoiseSeed, long oosNoiseSeed,
+                                boolean useCommonFactor) {
         if (parameters == null || distribution == null || regime == null || oosCount <= 0) {
             throw new IllegalArgumentException("Parameters, DGP cell and OOS count are required.");
         }
@@ -158,12 +173,15 @@ public final class TRBSVUSyntheticDemandGenerator {
         Random contextRandom = new Random(contextSeed);
         Random historyRandom = new Random(historyNoiseSeed);
         Random oosRandom = new Random(oosNoiseSeed);
+        Random historyCommonRandom = new Random(historyNoiseSeed ^ COMMON_NOISE_SALT);
+        Random oosCommonRandom = new Random(oosNoiseSeed ^ COMMON_NOISE_SALT);
         double[] cv = parameters.volatilityParameters(regime);
         List<Sample> history = new ArrayList<>(h);
         for (int t = 0; t < h; t++) {
             CovariateVector context = context(t, h, contextRandom);
             double[] demand = drawDemand(parameters.nominalDemand(context), cv,
-                    distribution, historyRandom);
+                    parameters.commonLoading, distribution, historyRandom,
+                    historyCommonRandom, useCommonFactor);
             history.add(sample(t, t, context, demand, 1.0 / h));
         }
 
@@ -171,7 +189,8 @@ public final class TRBSVUSyntheticDemandGenerator {
         double[] testNominal = parameters.nominalDemand(testContext);
         List<Sample> oos = new ArrayList<>(oosCount);
         for (int draw = 0; draw < oosCount; draw++) {
-            double[] demand = drawDemand(testNominal, cv, distribution, oosRandom);
+            double[] demand = drawDemand(testNominal, cv, parameters.commonLoading,
+                    distribution, oosRandom, oosCommonRandom, useCommonFactor);
             oos.add(sample(draw, h, testContext.copy(), demand, 1.0 / oosCount));
         }
         return new Replication(parameters, history, testContext, oos);
@@ -184,18 +203,26 @@ public final class TRBSVUSyntheticDemandGenerator {
         });
     }
 
-    private static double[] drawDemand(double[] nominal, double[] cv,
-                                       Distribution distribution, Random random) {
+    private static double[] drawDemand(double[] nominal, double[] cv, double[] commonLoading,
+                                       Distribution distribution, Random idiosyncraticRandom,
+                                       Random commonRandom, boolean useCommonFactor) {
         double[] demand = new double[nominal.length];
+        double commonShock = useCommonFactor ? commonRandom.nextGaussian() : 0.0;
         for (int j = 0; j < demand.length; j++) {
+            double loading = useCommonFactor ? commonLoading[j] : 0.0;
+            double idiosyncraticLoading = Math.sqrt(1.0 - loading * loading);
             if (distribution == Distribution.NORMAL) {
                 do {
-                    demand[j] = nominal[j] * (1.0 + cv[j] * random.nextGaussian());
+                    double standardizedShock = loading * commonShock
+                            + idiosyncraticLoading * idiosyncraticRandom.nextGaussian();
+                    demand[j] = nominal[j] * (1.0 + cv[j] * standardizedShock);
                 } while (demand[j] < 0.0);
             } else {
                 double logVariance = Math.log1p(cv[j] * cv[j]);
+                double standardizedShock = loading * commonShock
+                        + idiosyncraticLoading * idiosyncraticRandom.nextGaussian();
                 demand[j] = nominal[j] * Math.exp(-0.5 * logVariance
-                        + Math.sqrt(logVariance) * random.nextGaussian());
+                        + Math.sqrt(logVariance) * standardizedShock);
             }
         }
         return demand;
