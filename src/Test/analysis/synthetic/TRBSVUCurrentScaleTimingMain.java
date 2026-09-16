@@ -19,7 +19,8 @@ public final class TRBSVUCurrentScaleTimingMain {
     private static final double RETENTION = 0.8;
     private static final double BANDWIDTH = Double.parseDouble(
             System.getProperty("trb.timing.bandwidth", "5.0"));
-    private static final double LAMBDA = 0.5;
+    private static final double LAMBDA = Double.parseDouble(
+            System.getProperty("trb.timing.lambda", "0.5"));
     private static final double W1_RADIUS = 0.1;
     private static final double PCM_KAPPA = 1.5;
 

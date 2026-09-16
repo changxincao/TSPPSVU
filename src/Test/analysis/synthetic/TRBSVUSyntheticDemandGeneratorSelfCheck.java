@@ -2,6 +2,7 @@ package Test.analysis.synthetic;
 
 import Basic.CovariateVector;
 import Basic.Sample;
+import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.ContextStructure;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.Distribution;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.Parameters;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.Replication;
@@ -19,7 +20,14 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
         int oosCount = 1000;
         Parameters p = TRBSVUSyntheticDemandGenerator.sampleParameters(60, h, 17L);
         require(p.contextCoefficientScale() == 1.0, "Default context coefficient scale changed.");
+        Parameters explicitDefault = TRBSVUSyntheticDemandGenerator.sampleParameters(
+                60, h, 17L, 1.0, ContextStructure.DENSE_PROPORTIONAL);
+        require(Arrays.equals(p.base(), explicitDefault.base())
+                        && Arrays.equals(p.market(), explicitDefault.market())
+                        && Arrays.equals(p.commonLoading(), explicitDefault.commonLoading()),
+                "Explicit default structure changed the historical DGP.");
         checkParameters(p);
+        checkAlternativeStructures(h);
         Replication normal = generate(p, Distribution.NORMAL, Volatility.LOW, oosCount);
         Replication repeat = generate(p, Distribution.NORMAL, Volatility.LOW, oosCount);
         Replication lognormal = generate(p, Distribution.LOGNORMAL, Volatility.HIGH, oosCount);
@@ -72,6 +80,22 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
         }
         System.out.println("PASS synthetic DGP: 60 lanes, 100 historical periods, "
                 + "1000 fixed-context OOS draws; six cells, paired contexts, reproducible demands.");
+    }
+
+    private static void checkAlternativeStructures(int h) {
+        for (ContextStructure structure : ContextStructure.values()) {
+            Parameters parameters = TRBSVUSyntheticDemandGenerator.sampleParameters(
+                    20, h, 41L, 1.3, structure, 0.6, 0.8);
+            for (double loading : parameters.commonLoading())
+                require(inRange(loading, 0.6, 0.8), "Custom common-loading range mismatch.");
+            for (int corner = 0; corner < 16; corner++) {
+                double[] x = new double[4];
+                for (int k = 0; k < x.length; k++) x[k] = (corner >>> k) & 1;
+                for (double value : parameters.nominalDemand(new CovariateVector(x)))
+                    require(Double.isFinite(value) && value > 0.0,
+                            "Alternative context structure produced nonpositive nominal demand.");
+            }
+        }
     }
 
     private static Replication generate(Parameters p, Distribution family,

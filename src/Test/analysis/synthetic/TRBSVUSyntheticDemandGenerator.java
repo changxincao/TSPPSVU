@@ -18,12 +18,17 @@ public final class TRBSVUSyntheticDemandGenerator {
     private static final LocalDate FIRST_WEEK = LocalDate.of(2000, 1, 3);
     private static final long COMMON_LOADING_SALT = 0x6A09E667F3BCC909L;
     private static final long COMMON_NOISE_SALT = 0xBB67AE8584CAA73BL;
+    private static final long CONTEXT_STRUCTURE_SALT = 0x3C6EF372FE94F82BL;
 
     private TRBSVUSyntheticDemandGenerator() {
     }
 
     public enum Distribution {
         NORMAL, LOGNORMAL
+    }
+
+    public enum ContextStructure {
+        DENSE_PROPORTIONAL, DENSE_RANDOM_SHARES, TWO_ACTIVE, SIGNED_CENTERED, GROUPED_CENTERED
     }
 
     public enum Volatility {
@@ -49,6 +54,7 @@ public final class TRBSVUSyntheticDemandGenerator {
     public static final class Parameters {
         private final int historicalPeriods;
         private final double contextCoefficientScale;
+        private final ContextStructure contextStructure;
         private final double[] base;
         private final double[] market;
         private final double[] trend;
@@ -57,9 +63,11 @@ public final class TRBSVUSyntheticDemandGenerator {
         private final double[] volatilityQuantile;
         private final double[] commonLoading;
 
-        private Parameters(int historicalPeriods, int lanes, double contextCoefficientScale) {
+        private Parameters(int historicalPeriods, int lanes, double contextCoefficientScale,
+                           ContextStructure contextStructure) {
             this.historicalPeriods = historicalPeriods;
             this.contextCoefficientScale = contextCoefficientScale;
+            this.contextStructure = contextStructure;
             base = new double[lanes];
             market = new double[lanes];
             trend = new double[lanes];
@@ -78,6 +86,7 @@ public final class TRBSVUSyntheticDemandGenerator {
         }
 
         public double contextCoefficientScale() { return contextCoefficientScale; }
+        public ContextStructure contextStructure() { return contextStructure; }
 
         public double[] base() { return base.clone(); }
         public double[] market() { return market.clone(); }
@@ -92,8 +101,12 @@ public final class TRBSVUSyntheticDemandGenerator {
             double[] result = new double[laneCount()];
             double averageTrend = (historicalPeriods - 1.0) / (2.0 * historicalPeriods);
             for (int j = 0; j < result.length; j++) {
-                result[j] = base[j] + 0.5 * (market[j] + promotion[j] + attention[j])
-                        + averageTrend * trend[j];
+                if (isCentered(contextStructure)) {
+                    result[j] = base[j] + (averageTrend - 0.5) * trend[j];
+                } else {
+                    result[j] = base[j] + 0.5 * (market[j] + promotion[j] + attention[j])
+                            + averageTrend * trend[j];
+                }
             }
             return result;
         }
@@ -104,8 +117,15 @@ public final class TRBSVUSyntheticDemandGenerator {
             if (x.length != 4) throw new IllegalArgumentException("Context must have M,T,A,C.");
             double[] result = new double[laneCount()];
             for (int j = 0; j < result.length; j++) {
-                result[j] = base[j] + market[j] * x[0] + trend[j] * x[1]
-                        + promotion[j] * x[2] + attention[j] * x[3];
+                if (isCentered(contextStructure)) {
+                    result[j] = base[j] + market[j] * (x[0] - 0.5)
+                            + trend[j] * (x[1] - 0.5)
+                            + promotion[j] * (x[2] - 0.5)
+                            + attention[j] * (x[3] - 0.5);
+                } else {
+                    result[j] = base[j] + market[j] * x[0] + trend[j] * x[1]
+                            + promotion[j] * x[2] + attention[j] * x[3];
+                }
             }
             return result;
         }
@@ -141,25 +161,96 @@ public final class TRBSVUSyntheticDemandGenerator {
 
     public static Parameters sampleParameters(int laneCount, int historicalPeriods, long seed,
                                               double contextCoefficientScale) {
+        return sampleParameters(laneCount, historicalPeriods, seed, contextCoefficientScale,
+                ContextStructure.DENSE_PROPORTIONAL);
+    }
+
+    public static Parameters sampleParameters(int laneCount, int historicalPeriods, long seed,
+                                              double contextCoefficientScale,
+                                              ContextStructure contextStructure) {
+        return sampleParameters(laneCount, historicalPeriods, seed, contextCoefficientScale,
+                contextStructure, 0.2, 0.6);
+    }
+
+    public static Parameters sampleParameters(int laneCount, int historicalPeriods, long seed,
+                                              double contextCoefficientScale,
+                                              ContextStructure contextStructure,
+                                              double commonLoadingLower,
+                                              double commonLoadingUpper) {
         if (laneCount <= 0 || historicalPeriods <= 0) {
             throw new IllegalArgumentException("Lane and history counts must be positive.");
         }
         if (!(contextCoefficientScale > 0.0) || !Double.isFinite(contextCoefficientScale)) {
             throw new IllegalArgumentException("Context coefficient scale must be finite and positive.");
         }
-        Parameters p = new Parameters(historicalPeriods, laneCount, contextCoefficientScale);
+        if (contextStructure == null) throw new IllegalArgumentException("Context structure is required.");
+        if (isCentered(contextStructure) && contextCoefficientScale >= 2.0) {
+            throw new IllegalArgumentException("Centered context scale must be below 2 to keep demand positive.");
+        }
+        if (!(commonLoadingLower >= 0.0 && commonLoadingLower <= commonLoadingUpper
+                && commonLoadingUpper < 1.0)) {
+            throw new IllegalArgumentException("Common loading interval must lie in [0,1). ");
+        }
+        Parameters p = new Parameters(historicalPeriods, laneCount, contextCoefficientScale,
+                contextStructure);
         Random random = new Random(seed);
         Random loadingRandom = new Random(seed ^ COMMON_LOADING_SALT);
+        Random structureRandom = new Random(seed ^ CONTEXT_STRUCTURE_SALT);
         for (int j = 0; j < laneCount; j++) {
             p.base[j] = uniform(random, 10.0, 30.0);
-            p.market[j] = contextCoefficientScale * p.base[j] * uniform(random, 0.3, 0.6);
-            p.trend[j] = contextCoefficientScale * p.base[j] * uniform(random, 0.2, 0.4);
-            p.promotion[j] = contextCoefficientScale * p.base[j] * uniform(random, 0.3, 0.6);
-            p.attention[j] = contextCoefficientScale * p.base[j] * uniform(random, 0.3, 0.6);
+            double[] ratios = {uniform(random, 0.3, 0.6), uniform(random, 0.2, 0.4),
+                    uniform(random, 0.3, 0.6), uniform(random, 0.3, 0.6)};
+            restructure(ratios, contextStructure, structureRandom, j);
+            p.market[j] = contextCoefficientScale * p.base[j] * ratios[0];
+            p.trend[j] = contextCoefficientScale * p.base[j] * ratios[1];
+            p.promotion[j] = contextCoefficientScale * p.base[j] * ratios[2];
+            p.attention[j] = contextCoefficientScale * p.base[j] * ratios[3];
             p.volatilityQuantile[j] = random.nextDouble();
-            p.commonLoading[j] = uniform(loadingRandom, 0.2, 0.6);
+            p.commonLoading[j] = uniform(loadingRandom, commonLoadingLower, commonLoadingUpper);
         }
         return p;
+    }
+
+    private static void restructure(double[] ratios, ContextStructure structure, Random random,
+                                    int lane) {
+        if (structure == ContextStructure.DENSE_PROPORTIONAL) return;
+        double total = 0.0;
+        for (double ratio : ratios) total += ratio;
+        java.util.Arrays.fill(ratios, 0.0);
+        if (structure == ContextStructure.GROUPED_CENTERED) {
+            ratios[lane % ratios.length] = 1.0;
+            return;
+        }
+        if (structure == ContextStructure.SIGNED_CENTERED) {
+            double absoluteSum = 0.0;
+            for (int k = 0; k < ratios.length; k++) {
+                ratios[k] = random.nextGaussian();
+                absoluteSum += Math.abs(ratios[k]);
+            }
+            for (int k = 0; k < ratios.length; k++) ratios[k] /= absoluteSum;
+            return;
+        }
+        if (structure == ContextStructure.TWO_ACTIVE) {
+            int first = random.nextInt(ratios.length);
+            int second = random.nextInt(ratios.length - 1);
+            if (second >= first) second++;
+            double share = uniform(random, 0.35, 0.65);
+            ratios[first] = total * share;
+            ratios[second] = total * (1.0 - share);
+            return;
+        }
+        double[] draws = new double[ratios.length];
+        double sum = 0.0;
+        for (int k = 0; k < draws.length; k++) {
+            draws[k] = -Math.log(1.0 - random.nextDouble());
+            sum += draws[k];
+        }
+        for (int k = 0; k < ratios.length; k++) ratios[k] = total * draws[k] / sum;
+    }
+
+    private static boolean isCentered(ContextStructure structure) {
+        return structure == ContextStructure.SIGNED_CENTERED
+                || structure == ContextStructure.GROUPED_CENTERED;
     }
 
     /**

@@ -79,14 +79,16 @@ public final class TRBSVUResultWriter {
         try (BufferedWriter out = writer(directory.resolve("dgp_parameters.csv"))) {
             out.write("lane_index,distribution,volatility,base,market_coefficient,trend_coefficient,"
                     + "promotion_coefficient,attention_coefficient,volatility_quantile,cv,"
-                    + "common_factor_loading,common_variance_share,context_coefficient_scale,typical_demand");
+                    + "common_factor_loading,common_variance_share,context_coefficient_scale,"
+                    + "context_structure,typical_demand");
             out.newLine();
             for (int j = 0; j < parameters.laneCount(); j++) {
                 out.write(String.format(Locale.ROOT,
-                        "%d,%s,%s,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g%n",
+                        "%d,%s,%s,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%s,%.17g%n",
                         j, distribution, volatility, base[j], market[j], trend[j], promotion[j],
                         attention[j], quantile[j], cv[j], commonLoading[j],
-                        commonLoading[j] * commonLoading[j], parameters.contextCoefficientScale(), typical[j]));
+                        commonLoading[j] * commonLoading[j], parameters.contextCoefficientScale(),
+                        parameters.contextStructure(), typical[j]));
             }
         }
     }
