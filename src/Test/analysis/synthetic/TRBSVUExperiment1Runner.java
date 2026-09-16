@@ -14,6 +14,7 @@ import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** Experiment 1: one pre-generated case, 30 train-only validation origins, shared OOS. */
 public final class TRBSVUExperiment1Runner {
@@ -85,26 +86,47 @@ public final class TRBSVUExperiment1Runner {
     }
 
     public Result run(TRBSVUSyntheticCase instance) throws Exception {
+        return run(instance, Set.of("D", "SAA-All", "Tuned-SAA", "CSAA-Exp",
+                "CSAA-Gau", "CSAA-Epa", "CSAA-Tri", "RF-CSAA"));
+    }
+
+    /** Runs only the requested Experiment 1 methods; each method remains a complete
+     * validation -> parameter selection -> final solve -> OOS evaluation chain. */
+    public Result run(TRBSVUSyntheticCase instance, Set<String> requestedMethods) throws Exception {
         if (instance.history.size() != 100 || instance.oos.isEmpty())
             throw new IllegalArgumentException("Experiment 1 expects 100 history periods and OOS draws.");
+        if (requestedMethods == null || requestedMethods.isEmpty())
+            throw new IllegalArgumentException("No Experiment 1 methods requested.");
+        Set<String> known = Set.of("D", "SAA-All", "Tuned-SAA", "CSAA-Exp",
+                "CSAA-Gau", "CSAA-Epa", "CSAA-Tri", "RF-CSAA");
+        if (!known.containsAll(requestedMethods))
+            throw new IllegalArgumentException("Unknown Experiment 1 method(s): " + requestedMethods);
         Map<String, Double> validation = new LinkedHashMap<>();
         Map<String, Map<Double, Double>> curves = new LinkedHashMap<>();
         List<TRBSVUValidationTrace> validationDetails = new ArrayList<>();
-        ValidationScore deterministicScore = validate(instance, 0, null, validationDetails);
-        validation.put("D", deterministicScore.mean());
-        curves.put("D", Map.of(Double.NaN, deterministicScore.mean()));
-        ValidationScore saaScore = validate(instance, 1, null, validationDetails);
-        validation.put("SAA-All", saaScore.mean());
-        curves.put("SAA-All", Map.of(Double.NaN, saaScore.mean()));
-        Tuning retentionTune = tune(RETENTION,
-                fraction -> validate(instance, 2, fraction, validationDetails));
-        double retention = retentionTune.parameter();
-        validation.put("Tuned-SAA", retentionTune.cost());
-        curves.put("Tuned-SAA", retentionTune.curve());
+        if (requestedMethods.contains("D")) {
+            ValidationScore score = validate(instance, 0, null, validationDetails);
+            validation.put("D", score.mean());
+            curves.put("D", Map.of(Double.NaN, score.mean()));
+        }
+        if (requestedMethods.contains("SAA-All")) {
+            ValidationScore score = validate(instance, 1, null, validationDetails);
+            validation.put("SAA-All", score.mean());
+            curves.put("SAA-All", Map.of(Double.NaN, score.mean()));
+        }
+        double retention = Double.NaN;
+        if (requestedMethods.contains("Tuned-SAA")) {
+            Tuning tuning = tune(RETENTION,
+                    fraction -> validate(instance, 2, fraction, validationDetails));
+            retention = tuning.parameter();
+            validation.put("Tuned-SAA", tuning.cost());
+            curves.put("Tuned-SAA", tuning.curve());
+        }
         EnumMap<Kernel, Double> selectedBandwidth = new EnumMap<>(Kernel.class);
         EnumMap<Kernel, List<Double>> bandwidthOrder = new EnumMap<>(Kernel.class);
         EnumMap<Kernel, Double> contextualSd = new EnumMap<>(Kernel.class);
         for (Kernel family : Kernel.values()) {
+            if (!requestedMethods.contains(name(family))) continue;
             Tuning tuning = tune(BANDWIDTH, candidate ->
                     validate(instance, 3, new ContextualChoice(family.name(), candidate, 0.0),
                             validationDetails));
@@ -117,6 +139,7 @@ public final class TRBSVUExperiment1Runner {
         }
         ContextualChoice chosen = null;
         for (Kernel family : Kernel.values()) {
+            if (!requestedMethods.contains(name(family))) continue;
             String methodName = name(family);
             if (chosen == null || TRBSVUStatistics.better(validation.get(methodName), contextualSd.get(family),
                     selectedBandwidth.get(family), chosen.validationCost(),
@@ -125,28 +148,35 @@ public final class TRBSVUExperiment1Runner {
                         validation.get(methodName), contextualSd.get(family),
                         bandwidthOrder.get(family));
         }
-        ValidationScore rfScore = validate(instance, 4, null, validationDetails);
-        validation.put("RF-CSAA", rfScore.mean());
-        curves.put("RF-CSAA", Map.of(Double.NaN, rfScore.mean()));
-        if (TRBSVUStatistics.better(rfScore.mean(), rfScore.sd(), Double.POSITIVE_INFINITY,
-                chosen.validationCost(), selectedContextualSd(chosen, contextualSd),
-                chosen.bandwidth()))
-            chosen = new ContextualChoice("RF", Double.NaN, validation.get("RF-CSAA"),
-                    rfScore.sd(), List.of());
+        if (requestedMethods.contains("RF-CSAA")) {
+            ValidationScore rfScore = validate(instance, 4, null, validationDetails);
+            validation.put("RF-CSAA", rfScore.mean());
+            curves.put("RF-CSAA", Map.of(Double.NaN, rfScore.mean()));
+            if (chosen == null || TRBSVUStatistics.better(rfScore.mean(), rfScore.sd(),
+                    Double.POSITIVE_INFINITY, chosen.validationCost(),
+                    selectedContextualSd(chosen, contextualSd), chosen.bandwidth()))
+                chosen = new ContextualChoice("RF", Double.NaN, validation.get("RF-CSAA"),
+                        rfScore.sd(), List.of());
+        }
 
         Map<String, List<Sample>> finalWeights = new LinkedHashMap<>();
         EnumMap<Kernel, Double> finalBandwidth = new EnumMap<>(selectedBandwidth);
-        finalWeights.put("D", TRBSVUScenarioWeights.arithmeticMean(instance.history));
-        finalWeights.put("SAA-All", TRBSVUScenarioWeights.equal(instance.history));
-        finalWeights.put("Tuned-SAA", TRBSVUScenarioWeights.recent(instance.history, retention));
+        if (requestedMethods.contains("D"))
+            finalWeights.put("D", TRBSVUScenarioWeights.arithmeticMean(instance.history));
+        if (requestedMethods.contains("SAA-All"))
+            finalWeights.put("SAA-All", TRBSVUScenarioWeights.equal(instance.history));
+        if (requestedMethods.contains("Tuned-SAA"))
+            finalWeights.put("Tuned-SAA", TRBSVUScenarioWeights.recent(instance.history, retention));
         for (Kernel family : Kernel.values()) {
+            if (!requestedMethods.contains(name(family))) continue;
             WeightResult result = firstValidByValidationRank(instance.history,
                     instance.testContext, family, bandwidthOrder.get(family));
             finalBandwidth.put(family, result.effectiveBandwidth());
             finalWeights.put(name(family), result.weights());
         }
-        finalWeights.put("RF-CSAA", forest.weights(instance.history,
-                instance.testContext, forestSeed(instance, instance.history)));
+        if (requestedMethods.contains("RF-CSAA"))
+            finalWeights.put("RF-CSAA", forest.weights(instance.history,
+                    instance.testContext, forestSeed(instance, instance.history)));
         System.out.println("Experiment 1 validation selected gamma=" + retention
                 + " contextual=" + chosen + " B=" + selectedBandwidth);
 
