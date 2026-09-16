@@ -34,13 +34,24 @@ public final class TRBSVUCurrentScaleTimingMain {
         int limitSeconds = Integer.parseInt(args[4]);
         TRBSVUSyntheticCase instance = TRBSVUSyntheticCaseIO.loadText(instanceFile);
         int betaOverride = Integer.getInteger("trb.timing.betaOverride", instance.params.beta);
-        if (betaOverride != instance.params.beta) {
+        double capacityScale = Double.parseDouble(System.getProperty("trb.timing.capacityScale", "1.0"));
+        if (!(capacityScale > 0.0)) throw new IllegalArgumentException("Invalid capacity scale: " + capacityScale);
+        if (betaOverride != instance.params.beta || capacityScale != 1.0) {
             if (betaOverride < instance.params.alpha || betaOverride > instance.params.I)
                 throw new IllegalArgumentException("Invalid beta override: " + betaOverride);
             ProcurementParams source = instance.params;
+            double[][] scaledCapacity = new double[source.I][source.J];
+            for (int i = 0; i < source.I; i++) {
+                for (int j = 0; j < source.J; j++) scaledCapacity[i][j] = capacityScale * source.q[i][j];
+            }
             ProcurementParams adjusted = new ProcurementParams(source.carriers, source.J,
-                    source.e, source.p, source.h, source.q, source.r, source.eligible,
+                    source.e.clone(), source.p.clone(), source.h.clone(), scaledCapacity,
+                    copy(source.r), copy(source.eligible),
                     source.alpha, betaOverride);
+            for (int i = 0; i < adjusted.I; i++) {
+                if (adjusted.p[i] > adjusted.M[i] + 1e-9)
+                    throw new IllegalArgumentException("Capacity scale makes MQC exceed capacity for carrier " + (i + 1));
+            }
             instance = new TRBSVUSyntheticCase(adjusted, instance.lanes, instance.history,
                     instance.testContext, instance.oos, instance.seeds);
         }
@@ -55,13 +66,17 @@ public final class TRBSVUCurrentScaleTimingMain {
         try {
             Solution solution = solve(name, instance, unconditional, contextual, settings);
             double wall = (System.nanoTime() - started) / 1.0e9;
+            TRBSVUSolveMethods.Oos oos = TRBSVUSolveMethods.evaluate(instance.params, solution.y, instance.oos);
             write(output, String.format(Locale.ROOT,
-                    "method\tstatus\tcertified\tobjective\tbest_bound\tgap\tmodel_and_solve_seconds\twall_seconds\tselected\tselected_indices\talpha\tbeta\tthreads\tlimit_seconds\tparameter%n"
-                            + "%s\t%s\t%s\t%.17g\t%.17g\t%.17g\t%.6f\t%.6f\t%d\t%s\t%d\t%d\t%d\t%d\t%s%n",
+                    "method\tstatus\tcertified\tobjective\tbest_bound\tgap\tmodel_and_solve_seconds\twall_seconds\tselected\tselected_indices\talpha\tbeta\tcapacity_scale\tthreads\tlimit_seconds\tparameter\toos_mean\toos_sd\toos_q95\toos_cvar95\toos_max\ttransport_cost\tspot_cost\tpenalty_cost\tspot_share\tcapacity_utilization\tmean_lane_capacity_utilization%n"
+                            + "%s\t%s\t%s\t%.17g\t%.17g\t%.17g\t%.6f\t%.6f\t%d\t%s\t%d\t%d\t%.6f\t%d\t%d\t%s\t%.17g\t%.17g\t%.17g\t%.17g\t%.17g\t%.17g\t%.17g\t%.17g\t%.17g\t%.17g\t%.17g%n",
                     name, solution.solverStatus, solution.certifiedOptimal, solution.objValue,
                     solution.bestBound, solution.relativeGap, solution.solveTimeSec, wall,
                     selected(solution.y), selectedIndices(solution.y), instance.params.alpha,
-                    instance.params.beta, threads, limitSeconds, parameter(name)));
+                    instance.params.beta, capacityScale, threads, limitSeconds, parameter(name),
+                    oos.mean(), oos.standardDeviation(), oos.q95(), oos.cvar95(), oos.maximum(),
+                    oos.meanTransportCost(), oos.meanSpotCost(), oos.meanPenalty(), oos.spotShare(),
+                    oos.capacityUtilization(), oos.meanLaneCapacityUtilization()));
         } catch (Throwable failure) {
             double wall = (System.nanoTime() - started) / 1.0e9;
             write(output, "method\tstatus\tcertified\tobjective\tbest_bound\tgap\tmodel_and_solve_seconds\twall_seconds\tselected\tthreads\tlimit_seconds\tparameter\terror\n"
@@ -158,5 +173,17 @@ public final class TRBSVUCurrentScaleTimingMain {
     private static void write(Path output, String content) throws Exception {
         Files.createDirectories(output.getParent());
         Files.writeString(output, content, StandardCharsets.UTF_8);
+    }
+
+    private static double[][] copy(double[][] source) {
+        double[][] result = new double[source.length][];
+        for (int i = 0; i < source.length; i++) result[i] = source[i].clone();
+        return result;
+    }
+
+    private static boolean[][] copy(boolean[][] source) {
+        boolean[][] result = new boolean[source.length][];
+        for (int i = 0; i < source.length; i++) result[i] = source[i].clone();
+        return result;
     }
 }
