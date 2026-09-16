@@ -28,8 +28,8 @@ public final class TRBSVUSyntheticDemandGenerator {
     }
 
     public enum ContextStructure {
-        DENSE_PROPORTIONAL, DENSE_WIDE_SAME_MEAN, DENSE_RANDOM_SHARES, TWO_ACTIVE,
-        SIGNED_CENTERED, GROUPED_CENTERED
+        DENSE_PROPORTIONAL, DENSE_WIDE_SAME_MEAN, DENSE_WIDE_SIGNED_SAME_MEAN,
+        DENSE_RANDOM_SHARES, TWO_ACTIVE, ONE_ACTIVE, SIGNED_CENTERED, GROUPED_CENTERED
     }
 
     public enum Volatility {
@@ -222,6 +222,13 @@ public final class TRBSVUSyntheticDemandGenerator {
             ratios[3] = 3.0 * (ratios[3] - 0.3);
             return;
         }
+        if (structure == ContextStructure.DENSE_WIDE_SIGNED_SAME_MEAN) {
+            ratios[0] = -0.2 + (1.3 / 0.3) * (ratios[0] - 0.3);
+            ratios[1] = -0.2 + (1.0 / 0.2) * (ratios[1] - 0.2);
+            ratios[2] = -0.2 + (1.3 / 0.3) * (ratios[2] - 0.3);
+            ratios[3] = -0.2 + (1.3 / 0.3) * (ratios[3] - 0.3);
+            return;
+        }
         double total = 0.0;
         for (double ratio : ratios) total += ratio;
         java.util.Arrays.fill(ratios, 0.0);
@@ -245,6 +252,10 @@ public final class TRBSVUSyntheticDemandGenerator {
             double share = uniform(random, 0.35, 0.65);
             ratios[first] = total * share;
             ratios[second] = total * (1.0 - share);
+            return;
+        }
+        if (structure == ContextStructure.ONE_ACTIVE) {
+            ratios[random.nextInt(ratios.length)] = total;
             return;
         }
         double[] draws = new double[ratios.length];

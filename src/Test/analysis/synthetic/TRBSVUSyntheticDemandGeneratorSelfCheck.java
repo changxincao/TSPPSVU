@@ -104,9 +104,14 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
                 60, h, 43L, 1.0, ContextStructure.DENSE_PROPORTIONAL);
         Parameters wide = TRBSVUSyntheticDemandGenerator.sampleParameters(
                 60, h, 43L, 1.0, ContextStructure.DENSE_WIDE_SAME_MEAN);
+        Parameters signed = TRBSVUSyntheticDemandGenerator.sampleParameters(
+                60, h, 43L, 1.0, ContextStructure.DENSE_WIDE_SIGNED_SAME_MEAN);
         require(Arrays.equals(original.base(), wide.base())
                         && Arrays.equals(original.volatilityQuantile(), wide.volatilityQuantile())
-                        && Arrays.equals(original.commonLoading(), wide.commonLoading()),
+                        && Arrays.equals(original.commonLoading(), wide.commonLoading())
+                        && Arrays.equals(original.base(), signed.base())
+                        && Arrays.equals(original.volatilityQuantile(), signed.volatilityQuantile())
+                        && Arrays.equals(original.commonLoading(), signed.commonLoading()),
                 "Wide same-mean structure changed a non-context random stream.");
         for (int j = 0; j < original.laneCount(); j++) {
             require(close(wide.market()[j] / wide.base()[j],
@@ -118,6 +123,19 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
                             && close(wide.attention()[j] / wide.base()[j],
                             3.0 * (original.attention()[j] / original.base()[j] - 0.3)),
                     "Wide same-mean coefficients are not quantile-paired with the baseline.");
+            require(close(signed.market()[j] / signed.base()[j],
+                            -0.2 + (1.3 / 0.3)
+                                    * (original.market()[j] / original.base()[j] - 0.3))
+                            && close(signed.trend()[j] / signed.base()[j],
+                            -0.2 + (1.0 / 0.2)
+                                    * (original.trend()[j] / original.base()[j] - 0.2))
+                            && close(signed.promotion()[j] / signed.base()[j],
+                            -0.2 + (1.3 / 0.3)
+                                    * (original.promotion()[j] / original.base()[j] - 0.3))
+                            && close(signed.attention()[j] / signed.base()[j],
+                            -0.2 + (1.3 / 0.3)
+                                    * (original.attention()[j] / original.base()[j] - 0.3)),
+                    "Signed wide coefficients are not quantile-paired with the baseline.");
         }
     }
 
