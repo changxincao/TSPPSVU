@@ -6,6 +6,7 @@ import Basic.Sample;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
@@ -19,6 +20,7 @@ public final class TRBSVUSyntheticDemandGenerator {
     private static final long COMMON_LOADING_SALT = 0x6A09E667F3BCC909L;
     private static final long COMMON_NOISE_SALT = 0xBB67AE8584CAA73BL;
     private static final long CONTEXT_STRUCTURE_SALT = 0x3C6EF372FE94F82BL;
+    private static final long BASE_STRUCTURE_SALT = 0xA54FF53A5F1D36F1L;
 
     private TRBSVUSyntheticDemandGenerator() {
     }
@@ -28,8 +30,13 @@ public final class TRBSVUSyntheticDemandGenerator {
     }
 
     public enum ContextStructure {
-        DENSE_PROPORTIONAL, DENSE_WIDE_SAME_MEAN, DENSE_WIDE_SIGNED_SAME_MEAN,
+        DENSE_PROPORTIONAL, DENSE_WIDE_POSITIVE, DENSE_WIDE_SAME_MEAN,
+        DENSE_WIDE_SIGNED_SAME_MEAN,
         DENSE_RANDOM_SHARES, TWO_ACTIVE, ONE_ACTIVE, SIGNED_CENTERED, GROUPED_CENTERED
+    }
+
+    public enum BaseStructure {
+        UNIFORM_10_30, THREE_LEVEL_WIDE
     }
 
     public enum Volatility {
@@ -56,6 +63,7 @@ public final class TRBSVUSyntheticDemandGenerator {
         private final int historicalPeriods;
         private final double contextCoefficientScale;
         private final ContextStructure contextStructure;
+        private final BaseStructure baseStructure;
         private final double[] base;
         private final double[] market;
         private final double[] trend;
@@ -65,10 +73,11 @@ public final class TRBSVUSyntheticDemandGenerator {
         private final double[] commonLoading;
 
         private Parameters(int historicalPeriods, int lanes, double contextCoefficientScale,
-                           ContextStructure contextStructure) {
+                           ContextStructure contextStructure, BaseStructure baseStructure) {
             this.historicalPeriods = historicalPeriods;
             this.contextCoefficientScale = contextCoefficientScale;
             this.contextStructure = contextStructure;
+            this.baseStructure = baseStructure;
             base = new double[lanes];
             market = new double[lanes];
             trend = new double[lanes];
@@ -88,6 +97,7 @@ public final class TRBSVUSyntheticDemandGenerator {
 
         public double contextCoefficientScale() { return contextCoefficientScale; }
         public ContextStructure contextStructure() { return contextStructure; }
+        public BaseStructure baseStructure() { return baseStructure; }
 
         public double[] base() { return base.clone(); }
         public double[] market() { return market.clone(); }
@@ -170,12 +180,31 @@ public final class TRBSVUSyntheticDemandGenerator {
                                               double contextCoefficientScale,
                                               ContextStructure contextStructure) {
         return sampleParameters(laneCount, historicalPeriods, seed, contextCoefficientScale,
-                contextStructure, 0.2, 0.6);
+                contextStructure, BaseStructure.UNIFORM_10_30, 0.2, 0.6);
     }
 
     public static Parameters sampleParameters(int laneCount, int historicalPeriods, long seed,
                                               double contextCoefficientScale,
                                               ContextStructure contextStructure,
+                                              BaseStructure baseStructure) {
+        return sampleParameters(laneCount, historicalPeriods, seed, contextCoefficientScale,
+                contextStructure, baseStructure, 0.2, 0.6);
+    }
+
+    public static Parameters sampleParameters(int laneCount, int historicalPeriods, long seed,
+                                              double contextCoefficientScale,
+                                              ContextStructure contextStructure,
+                                              double commonLoadingLower,
+                                              double commonLoadingUpper) {
+        return sampleParameters(laneCount, historicalPeriods, seed, contextCoefficientScale,
+                contextStructure, BaseStructure.UNIFORM_10_30,
+                commonLoadingLower, commonLoadingUpper);
+    }
+
+    public static Parameters sampleParameters(int laneCount, int historicalPeriods, long seed,
+                                              double contextCoefficientScale,
+                                              ContextStructure contextStructure,
+                                              BaseStructure baseStructure,
                                               double commonLoadingLower,
                                               double commonLoadingUpper) {
         if (laneCount <= 0 || historicalPeriods <= 0) {
@@ -185,6 +214,7 @@ public final class TRBSVUSyntheticDemandGenerator {
             throw new IllegalArgumentException("Context coefficient scale must be finite and positive.");
         }
         if (contextStructure == null) throw new IllegalArgumentException("Context structure is required.");
+        if (baseStructure == null) throw new IllegalArgumentException("Base structure is required.");
         if (isCentered(contextStructure) && contextCoefficientScale >= 2.0) {
             throw new IllegalArgumentException("Centered context scale must be below 2 to keep demand positive.");
         }
@@ -193,12 +223,13 @@ public final class TRBSVUSyntheticDemandGenerator {
             throw new IllegalArgumentException("Common loading interval must lie in [0,1). ");
         }
         Parameters p = new Parameters(historicalPeriods, laneCount, contextCoefficientScale,
-                contextStructure);
+                contextStructure, baseStructure);
         Random random = new Random(seed);
         Random loadingRandom = new Random(seed ^ COMMON_LOADING_SALT);
         Random structureRandom = new Random(seed ^ CONTEXT_STRUCTURE_SALT);
+        int[] baseLevels = baseLevels(laneCount, seed ^ BASE_STRUCTURE_SALT);
         for (int j = 0; j < laneCount; j++) {
-            p.base[j] = uniform(random, 10.0, 30.0);
+            p.base[j] = base(baseStructure, baseLevels[j], random.nextDouble());
             double[] ratios = {uniform(random, 0.3, 0.6), uniform(random, 0.2, 0.4),
                     uniform(random, 0.3, 0.6), uniform(random, 0.3, 0.6)};
             restructure(ratios, contextStructure, structureRandom, j);
@@ -215,6 +246,13 @@ public final class TRBSVUSyntheticDemandGenerator {
     private static void restructure(double[] ratios, ContextStructure structure, Random random,
                                     int lane) {
         if (structure == ContextStructure.DENSE_PROPORTIONAL) return;
+        if (structure == ContextStructure.DENSE_WIDE_POSITIVE) {
+            ratios[0] = 0.1 + (0.8 / 0.3) * (ratios[0] - 0.3);
+            ratios[1] = 0.1 + (0.8 / 0.2) * (ratios[1] - 0.2);
+            ratios[2] = 0.1 + (0.8 / 0.3) * (ratios[2] - 0.3);
+            ratios[3] = 0.1 + (0.8 / 0.3) * (ratios[3] - 0.3);
+            return;
+        }
         if (structure == ContextStructure.DENSE_WIDE_SAME_MEAN) {
             ratios[0] = 3.0 * (ratios[0] - 0.3);
             ratios[1] = 3.0 * (ratios[1] - 0.2);
@@ -270,6 +308,24 @@ public final class TRBSVUSyntheticDemandGenerator {
     private static boolean isCentered(ContextStructure structure) {
         return structure == ContextStructure.SIGNED_CENTERED
                 || structure == ContextStructure.GROUPED_CENTERED;
+    }
+
+    private static int[] baseLevels(int lanes, long seed) {
+        List<Integer> levels = new ArrayList<>(lanes);
+        for (int j = 0; j < lanes; j++) levels.add(j % 3);
+        Collections.shuffle(levels, new Random(seed));
+        int[] result = new int[lanes];
+        for (int j = 0; j < lanes; j++) result[j] = levels.get(j);
+        return result;
+    }
+
+    private static double base(BaseStructure structure, int level, double quantile) {
+        if (structure == BaseStructure.UNIFORM_10_30) return 10.0 + 20.0 * quantile;
+        return switch (level) {
+            case 0 -> 5.0 + 10.0 * quantile;
+            case 1 -> 25.0 + 25.0 * quantile;
+            default -> 75.0 + 50.0 * quantile;
+        };
     }
 
     /**

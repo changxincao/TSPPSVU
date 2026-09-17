@@ -2,6 +2,7 @@ package Test.analysis.synthetic;
 
 import Basic.CovariateVector;
 import Basic.Sample;
+import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.BaseStructure;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.ContextStructure;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.Distribution;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.Parameters;
@@ -27,6 +28,7 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
                         && Arrays.equals(p.commonLoading(), explicitDefault.commonLoading()),
                 "Explicit default structure changed the historical DGP.");
         checkWideSameMeanPairing(h);
+        checkThreeLevelWidePositive(h);
         checkParameters(p);
         checkAlternativeStructures(h);
         Replication normal = generate(p, Distribution.NORMAL, Volatility.LOW, oosCount);
@@ -137,6 +139,33 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
                                     * (original.attention()[j] / original.base()[j] - 0.3)),
                     "Signed wide coefficients are not quantile-paired with the baseline.");
         }
+    }
+
+    private static void checkThreeLevelWidePositive(int h) {
+        Parameters original = TRBSVUSyntheticDemandGenerator.sampleParameters(
+                50, h, 47L, 1.0, ContextStructure.DENSE_PROPORTIONAL,
+                BaseStructure.UNIFORM_10_30);
+        Parameters candidate = TRBSVUSyntheticDemandGenerator.sampleParameters(
+                50, h, 47L, 1.0, ContextStructure.DENSE_WIDE_POSITIVE,
+                BaseStructure.THREE_LEVEL_WIDE);
+        require(Arrays.equals(original.volatilityQuantile(), candidate.volatilityQuantile())
+                        && Arrays.equals(original.commonLoading(), candidate.commonLoading()),
+                "Three-level candidate changed the paired volatility streams.");
+        int low = 0, medium = 0, high = 0;
+        for (int j = 0; j < candidate.laneCount(); j++) {
+            double base = candidate.base()[j];
+            if (inRange(base, 5.0, 15.0)) low++;
+            else if (inRange(base, 25.0, 50.0)) medium++;
+            else if (inRange(base, 75.0, 125.0)) high++;
+            else throw new AssertionError("Three-level base outside all declared intervals.");
+            require(inRange(candidate.market()[j] / base, 0.1, 0.9)
+                            && inRange(candidate.trend()[j] / base, 0.1, 0.9)
+                            && inRange(candidate.promotion()[j] / base, 0.1, 0.9)
+                            && inRange(candidate.attention()[j] / base, 0.1, 0.9),
+                    "Wide-positive coefficient outside U(0.1,0.9).");
+        }
+        require(low == 17 && medium == 17 && high == 16,
+                "Three-level base allocation is not balanced.");
     }
 
     private static Replication generate(Parameters p, Distribution family,
