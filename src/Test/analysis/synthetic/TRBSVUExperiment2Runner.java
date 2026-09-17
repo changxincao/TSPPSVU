@@ -93,7 +93,7 @@ public final class TRBSVUExperiment2Runner {
                             double[] pcmGrid, TRBSVUPcmSolver pcmSolver,
                             TRBSVUValidationCheckpoint checkpoint,
                             TRBSVUFinalCheckpoint finalCheckpoint) {
-        if (settings == null || contextual == null || validationOrigins < 1 || validationOrigins > 30)
+        if (settings == null || contextual == null || validationOrigins < 1)
             throw new IllegalArgumentException("Invalid Experiment 2 settings.");
         if (lambdaGrid.length == 0 || w1Grid.length == 0 || pcmGrid.length == 0 || pcmSolver == null)
             throw new IllegalArgumentException("Empty robustness grid.");
@@ -110,8 +110,11 @@ public final class TRBSVUExperiment2Runner {
 
     /** Pass Experiment 1's validation-selected C*, never an OOS-selected family. */
     public Result run(TRBSVUSyntheticCase instance, ContextualChoice selected) throws Exception {
-        if (instance.history.size() != 100 || selected == null)
-            throw new IllegalArgumentException("Experiment 2 requires 100 history periods and C*.");
+        int expectedHistory = TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS
+                + validationOrigins;
+        if (instance.history.size() < expectedHistory || selected == null)
+            throw new IllegalArgumentException("Experiment 2 requires at least " + expectedHistory
+                    + " history periods and C*.");
         Map<String, Method> methods = new LinkedHashMap<>();
         methods.put("RSAA", Method.RCSAA);
         methods.put("RCSAA", Method.RCSAA);
@@ -243,7 +246,8 @@ public final class TRBSVUExperiment2Runner {
                                         boolean isContextual, double kappa, String methodName,
                                         List<TRBSVUValidationTrace> details) throws Exception {
         double[] realizedCosts = new double[validationOrigins];
-        for (int t = 70; t < 70 + validationOrigins; t++) {
+        int firstOrigin = TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS;
+        for (int t = firstOrigin; t < firstOrigin + validationOrigins; t++) {
             if (checkpoint != null) {
                 var restored = checkpoint.load(methodName, kappa, t);
                 if (restored.isPresent()) {
@@ -252,11 +256,12 @@ public final class TRBSVUExperiment2Runner {
                     if (!trace.certifiedOptimal())
                         throw new IllegalStateException("Uncertified PCM validation checkpoint: " + methodName);
                     details.add(trace);
-                    realizedCosts[t - 70] = trace.realizedValidationCost();
+                    realizedCosts[t - firstOrigin] = trace.realizedValidationCost();
                     continue;
                 }
             }
-            TRBSVUSyntheticCase.ValidationWindow window = instance.validationWindow(t, 70);
+            TRBSVUSyntheticCase.ValidationWindow window = instance.validationWindow(t,
+                    TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS);
             WeightResult weightResult = isContextual
                     ? contextual.contextualWeightResult(instance, window.train(),
                             window.realized().theta, selected)
@@ -273,7 +278,7 @@ public final class TRBSVUExperiment2Runner {
                         + t + ", kappa=" + kappa + ", status=" + solution.solverStatus);
             double realized = TRBSVUSolveMethods.realizedCost(instance.params, solution.y,
                     window.realized().demand());
-            realizedCosts[t - 70] = realized;
+            realizedCosts[t - firstOrigin] = realized;
             TRBSVUValidationTrace trace = trace(methodName, kappa, t, window.train(), weighted,
                     weightResult.effectiveBandwidth(), solution, realized);
             details.add(trace);
@@ -294,7 +299,8 @@ public final class TRBSVUExperiment2Runner {
                                      boolean isContextual, Method method, double parameter,
                                      String methodName, List<TRBSVUValidationTrace> details) throws Exception {
         double[] realizedCosts = new double[validationOrigins];
-        for (int t = 70; t < 70 + validationOrigins; t++) {
+        int firstOrigin = TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS;
+        for (int t = firstOrigin; t < firstOrigin + validationOrigins; t++) {
             if (checkpoint != null) {
                 var restored = checkpoint.load(methodName, parameter, t);
                 if (restored.isPresent()) {
@@ -303,11 +309,12 @@ public final class TRBSVUExperiment2Runner {
                     if (!trace.certifiedOptimal())
                         throw new IllegalStateException("Uncertified validation checkpoint: " + methodName);
                     details.add(trace);
-                    realizedCosts[t - 70] = trace.realizedValidationCost();
+                    realizedCosts[t - firstOrigin] = trace.realizedValidationCost();
                     continue;
                 }
             }
-            TRBSVUSyntheticCase.ValidationWindow window = instance.validationWindow(t, 70);
+            TRBSVUSyntheticCase.ValidationWindow window = instance.validationWindow(t,
+                    TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS);
             CovariateVector query = window.realized().theta;
             WeightResult weightResult = isContextual
                     ? contextual.contextualWeightResult(instance, window.train(), query, selected)
@@ -328,7 +335,7 @@ public final class TRBSVUExperiment2Runner {
                         + ", status=" + solution.solverStatus + ", gap=" + solution.relativeGap);
             double realized = TRBSVUSolveMethods.realizedCost(instance.params, solution.y,
                     window.realized().demand());
-            realizedCosts[t - 70] = realized;
+            realizedCosts[t - firstOrigin] = realized;
             TRBSVUValidationTrace trace = trace(methodName, parameter, t, window.train(), weighted,
                     weightResult.effectiveBandwidth(), solution, realized);
             details.add(trace);
@@ -343,7 +350,8 @@ public final class TRBSVUExperiment2Runner {
 
     private static void verifyCheckpointWindow(TRBSVUSyntheticCase instance,
                                                TRBSVUValidationTrace trace, int origin) {
-        TRBSVUSyntheticCase.ValidationWindow expected = instance.validationWindow(origin, 70);
+        TRBSVUSyntheticCase.ValidationWindow expected = instance.validationWindow(origin,
+                TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS);
         int start = expected.train().get(0).period.tIndex;
         int end = expected.train().get(expected.train().size() - 1).period.tIndex;
         if (trace.trainingStart() != start || trace.trainingEnd() != end)

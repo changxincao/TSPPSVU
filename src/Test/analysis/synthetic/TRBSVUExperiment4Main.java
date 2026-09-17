@@ -57,7 +57,8 @@ public final class TRBSVUExperiment4Main {
         Path python = Path.of(".venv-rsome", "Scripts", "python.exe").toAbsolutePath();
         Path rfScript = Path.of("analysis", "trb_svu", "rf_leaf_weights.py").toAbsolutePath();
         TRBSVUExperiment1Runner contextual = new TRBSVUExperiment1Runner(settings,
-                new TRBSVUForestWeights(python.toString(), rfScript), 30);
+                new TRBSVUForestWeights(python.toString(), rfScript),
+                TRBSVUFormalProtocol.VALIDATION_ORIGINS);
 
         Path resultRoot = outputRoot.resolve(String.format("rep_%03d", replication));
         Files.createDirectories(resultRoot);

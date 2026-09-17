@@ -1,5 +1,5 @@
 param(
-    [string]$OutputRoot = "analysis/TRB_reviewer_revision/100_svu_experiment12_baseline_cases_20260915",
+    [string]$OutputRoot = "analysis/TRB_reviewer_revision/101_svu_experiment12_I15J50S75_20260917",
     [long]$BaseSeed = 20260915,
     [int]$Replications = 20,
     [int]$MaxParallel = 1,
@@ -80,11 +80,12 @@ function Test-CurrentCompletion([string]$Path, [int]$Replication) {
         $parts = $line -split '=', 2
         if ($parts.Count -eq 2) { $values[$parts[0]] = $parts[1] }
     }
-    return $values.protocolVersion -eq 'TRBSVU_EXP12_V3' `
+    return $values.protocolVersion -eq 'TRBSVU_EXP12_V4' `
         -and $values.baseSeed -eq [string]$BaseSeed `
         -and $values.replication -eq [string]$Replication `
         -and $values.algorithm -eq 'compact' `
-        -and $values.validationOrigins -eq '30' `
+        -and $values.validationTrainingPeriods -eq '50' `
+        -and $values.validationOrigins -eq '25' `
         -and $values.threads -eq [string]$SolverThreads `
         -and $values.limitSeconds -eq [string]$LimitSeconds `
         -and $values.instanceSha256 -eq $currentInstanceSha256 `
@@ -116,7 +117,7 @@ while ($pending.Count -gt 0 -or $running.Count -gt 0) {
         $arguments = @(
             "-Djava.library.path=$native", "-cp", $classpath,
             "Test.analysis.synthetic.TRBSVUExperiment12Main",
-            "both", $rep, $BaseSeed, "compact", $root, 30, $SolverThreads, $LimitSeconds
+            "both", $rep, $BaseSeed, "compact", $root, 25, $SolverThreads, $LimitSeconds
         )
         $process = Start-Process -FilePath $java -ArgumentList $arguments `
             -WorkingDirectory $project -RedirectStandardOutput $stdout `

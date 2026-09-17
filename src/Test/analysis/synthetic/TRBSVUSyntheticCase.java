@@ -70,7 +70,7 @@ public final class TRBSVUSyntheticCase {
                 demandParameters);
     }
 
-    /** First origin is history[70], using history[0..69] for the 70-row plan. */
+    /** Returns one fixed-length, past-only rolling validation window. */
     public ValidationWindow validationWindow(int realizedIndex, int trainingCount) {
         if (trainingCount <= 0 || realizedIndex < trainingCount
                 || realizedIndex >= history.size()) {

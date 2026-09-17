@@ -13,7 +13,8 @@ import Helper.basicHelper.OutputManager;
 
 public class DROModel {
 	// Strictly zero reference weights are outside the effective support. Positive
-	// weights are floored and renormalized once at this public adapter boundary.
+	// weights are canonically floored and normalized at this public adapter boundary;
+	// lower-level solvers repeat the positive floor only as a defensive numerical guard.
 	private static final double FORMAL_WEIGHT_FLOOR = 1e-8;
 
 	public Solution solve(Data data, Config cfg) throws SolutionError {

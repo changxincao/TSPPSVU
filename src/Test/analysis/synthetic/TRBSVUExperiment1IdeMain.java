@@ -31,13 +31,13 @@ import java.util.concurrent.TimeUnit;
 public final class TRBSVUExperiment1IdeMain {
     // Edit these defaults directly, or override them with --key=value program arguments in Eclipse.
     private static final Path DEFAULT_INPUT = Path.of("analysis", "TRB_reviewer_revision",
-            "100_svu_experiment12_baseline_cases_20260915");
+            "101_svu_experiment12_I15J50S75_20260917");
     private static final Path DEFAULT_OUTPUT = Path.of("analysis", "TRB_reviewer_revision",
-            "120_svu_experiment1_results_20260916");
+            "121_svu_experiment1_I15J50S75_20260917");
     private static final int DEFAULT_PARALLEL_TASKS = 6;
     private static final int DEFAULT_SOLVER_THREADS = 4;
     private static final int DEFAULT_LIMIT_SECONDS = 14_400;
-    private static final int DEFAULT_VALIDATION_ORIGINS = 30;
+    private static final int DEFAULT_VALIDATION_ORIGINS = TRBSVUFormalProtocol.VALIDATION_ORIGINS;
     private static final String DEFAULT_REPLICATIONS = "0-19";
     private static final String DEFAULT_METHODS = "ALL";
     private static final List<String> ALL_METHODS = List.of("D", "SAA-All", "Tuned-SAA",
@@ -124,13 +124,24 @@ public final class TRBSVUExperiment1IdeMain {
         int limit = Integer.parseInt(args[6]);
         Files.createDirectories(output);
         TRBSVUSyntheticCase instance = TRBSVUSyntheticCaseIO.loadText(instanceFile);
+        if (instance.params.I != TRBSVUFormalProtocol.CARRIERS
+                || instance.params.J != TRBSVUFormalProtocol.LANES
+                || instance.history.size() != TRBSVUFormalProtocol.HISTORY_PERIODS
+                || instance.oos.size() != TRBSVUFormalProtocol.OOS_DRAWS) {
+            throw new IllegalArgumentException("IDE formal runner requires I="
+                    + TRBSVUFormalProtocol.CARRIERS + ", J=" + TRBSVUFormalProtocol.LANES
+                    + ", S=" + TRBSVUFormalProtocol.HISTORY_PERIODS + ", OOS="
+                    + TRBSVUFormalProtocol.OOS_DRAWS + ".");
+        }
         String instanceHash = sha256(Files.readAllBytes(instanceFile));
         Path rfScript = Path.of("analysis", "trb_svu", "rf_leaf_weights.py").toAbsolutePath();
         Path python = Path.of(".venv-rsome", "Scripts", "python.exe").toAbsolutePath();
         String sourceHash = sourceFingerprint(Path.of("src"));
         String rfScriptHash = sha256(Files.readAllBytes(rfScript));
         String pythonEnvironment = "RF-CSAA".equals(method) ? pythonEnvironment(python) : "NOT_USED";
-        String protocol = sha256(("TRBSVU_EXP1_METHOD_V1|method=" + method + "|origins=" + origins
+        String protocol = sha256(("TRBSVU_EXP1_METHOD_V2|method=" + method + "|origins=" + origins
+                + "|validationTrainingPeriods="
+                + TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS
                 + "|threads=" + threads + "|limit=" + limit + "|instance=" + instanceHash
                 + "|retention=" + Arrays.toString(TRBSVUExperiment1Runner.RETENTION)
                 + "|bandwidth=" + Arrays.toString(TRBSVUExperiment1Runner.BANDWIDTH)
@@ -377,8 +388,10 @@ public final class TRBSVUExperiment1IdeMain {
             int solverThreads = integer(values, "solver-threads", DEFAULT_SOLVER_THREADS);
             int limit = integer(values, "limit-seconds", DEFAULT_LIMIT_SECONDS);
             int origins = integer(values, "validation-origins", DEFAULT_VALIDATION_ORIGINS);
-            if (parallel < 1 || solverThreads < 1 || limit < 1 || origins < 1 || origins > 30)
-                throw new IllegalArgumentException("Invalid positive parallel/solver/time setting or origins outside 1--30.");
+            if (parallel < 1 || solverThreads < 1 || limit < 1
+                    || origins != TRBSVUFormalProtocol.VALIDATION_ORIGINS)
+                throw new IllegalArgumentException("Invalid positive parallel/solver/time setting or formal origins != "
+                        + TRBSVUFormalProtocol.VALIDATION_ORIGINS + ".");
             return new Config(Path.of(values.getOrDefault("input", DEFAULT_INPUT.toString())),
                     Path.of(values.getOrDefault("output", DEFAULT_OUTPUT.toString())), parallel,
                     solverThreads, limit, origins,

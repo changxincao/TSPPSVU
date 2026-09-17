@@ -36,6 +36,15 @@ public final class TRBSVUCurrentScaleTimingMain {
         int limitSeconds = Integer.parseInt(args[4]);
         if (!(BANDWIDTH > 0.0)) throw new IllegalArgumentException("Invalid bandwidth: " + BANDWIDTH);
         TRBSVUSyntheticCase instance = TRBSVUSyntheticCaseIO.loadText(instanceFile);
+        if (instance.params.I != TRBSVUFormalProtocol.CARRIERS
+                || instance.params.J != TRBSVUFormalProtocol.LANES
+                || instance.history.size() != TRBSVUFormalProtocol.HISTORY_PERIODS
+                || instance.oos.size() != TRBSVUFormalProtocol.OOS_DRAWS) {
+            throw new IllegalArgumentException("Current-scale timing requires I="
+                    + TRBSVUFormalProtocol.CARRIERS + ", J=" + TRBSVUFormalProtocol.LANES
+                    + ", S=" + TRBSVUFormalProtocol.HISTORY_PERIODS + ", OOS="
+                    + TRBSVUFormalProtocol.OOS_DRAWS + ".");
+        }
         int betaOverride = Integer.getInteger("trb.timing.betaOverride", instance.params.beta);
         double capacityScale = Double.parseDouble(System.getProperty("trb.timing.capacityScale", "1.0"));
         double laneCapacityRatio = Double.parseDouble(
@@ -140,7 +149,8 @@ public final class TRBSVUCurrentScaleTimingMain {
             case "RF_CSAA" -> nominal(instance, new TRBSVUForestWeights(
                     Path.of(".venv-rsome", "Scripts", "python.exe").toString(),
                     Path.of("analysis", "trb_svu", "rf_leaf_weights.py"))
-                    .weights(instance.history, instance.testContext, instance.seeds.contexts() + 100L), settings);
+                    .weights(instance.history, instance.testContext,
+                            TRBSVUExperiment1Runner.forestSeed(instance, instance.history)), settings);
             case "RSAA" -> robust(instance, unconditional, Method.RCSAA, LAMBDA, settings);
             case "RCSAA" -> robust(instance, contextual, Method.RCSAA, LAMBDA, settings);
             case "U_CHI2" -> robust(instance, unconditional, Method.CHI_SQUARED, LAMBDA, settings);

@@ -17,7 +17,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
-/** Deliberately small checks; never launches the 20x60 formal grid. */
+/** Deliberately small checks; never launches the 15x50 formal grid. */
 public final class TRBSVURunnerSelfCheck {
     private TRBSVURunnerSelfCheck() { }
 

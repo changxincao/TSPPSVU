@@ -30,7 +30,7 @@ public final class TRBSVUExperiment12Main {
         }
         if (args.length < 5 || args.length > 8)
             throw new IllegalArgumentException("Usage: <1|both> <replicationIndex> <baseSeed> "
-                    + "<repair|compact> <outputDir> [validationOrigins=30] [threads=4] [limitSec=14400]");
+                    + "<repair|compact> <outputDir> [validationOrigins=25] [threads=4] [limitSec=14400]");
         String mode = args[0];
         if (!mode.equals("1") && !mode.equals("both"))
             throw new IllegalArgumentException("Mode must be 1 or both.");
@@ -41,7 +41,11 @@ public final class TRBSVUExperiment12Main {
         if (!algorithm.equals("repair") && !algorithm.equals("compact"))
             throw new IllegalArgumentException("RCSAA algorithm must be explicit: repair or compact.");
         Path outputDirectory = Path.of(args[4]);
-        int origins = args.length > 5 ? Integer.parseInt(args[5]) : 30;
+        int origins = args.length > 5 ? Integer.parseInt(args[5])
+                : TRBSVUFormalProtocol.VALIDATION_ORIGINS;
+        if (origins != TRBSVUFormalProtocol.VALIDATION_ORIGINS)
+            throw new IllegalArgumentException("Formal Experiment 1/2 requires "
+                    + TRBSVUFormalProtocol.VALIDATION_ORIGINS + " validation origins.");
         int threads = args.length > 6 ? Integer.parseInt(args[6]) : 4;
         int limitSeconds = args.length > 7 ? Integer.parseInt(args[7]) : 14400;
         Settings settings = algorithm.equals("repair")
@@ -72,7 +76,9 @@ public final class TRBSVUExperiment12Main {
         } else {
             // Baseline cell only. The remaining paired DGP cells belong to Experiment 3.
             TRBSVUSyntheticCase.Generated generated = TRBSVUSyntheticCase.generateDetailed(
-                    20, 60, 100, 1000, Distribution.NORMAL, Volatility.LOW, seeds);
+                    TRBSVUFormalProtocol.CARRIERS, TRBSVUFormalProtocol.LANES,
+                    TRBSVUFormalProtocol.HISTORY_PERIODS, TRBSVUFormalProtocol.OOS_DRAWS,
+                    Distribution.NORMAL, Volatility.LOW, seeds);
             instance = generated.instance();
             TRBSVUSyntheticCaseIO.saveText(instance, caseFile);
             TRBSVUResultWriter.writeInstance(instanceDirectory, instance);
@@ -88,8 +94,11 @@ public final class TRBSVUExperiment12Main {
         String javaSourceSha256 = javaSourceFingerprint(Path.of("src"));
         TRBSVUForestWeights forest = new TRBSVUForestWeights(rfPython.toString(), rfScript);
         String instanceSha256 = sha256(Files.readAllBytes(caseFile));
-        String commonProtocol = "TRBSVU_EXP12_V3|equality=true|algorithm=" + algorithm
+        String commonProtocol = TRBSVUFormalProtocol.EXPERIMENT12_VERSION
+                + "|equality=true|algorithm=" + algorithm
                 + "|threads=" + threads + "|limitSeconds=" + limitSeconds + "|tolerance=1e-4"
+                + "|validationTrainingPeriods="
+                + TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS
                 + "|validationOrigins=" + origins + "|rfTrees=500|rfSeed=frozen"
                 + "|rfScriptSha256=" + rfScriptSha256 + "|pcmScriptSha256=" + pcmScriptSha256
                 + "|javaSourceSha256=" + javaSourceSha256
@@ -105,7 +114,12 @@ public final class TRBSVUExperiment12Main {
                 + "|pcm=" + Arrays.toString(TRBSVUExperiment2Runner.PCM_KAPPA))
                 .getBytes(StandardCharsets.UTF_8));
         Path seedFile = instanceDirectory.resolve("manifest.txt");
-        String runManifest = "baseline=Normal-Low\nI=20\nJ=60\nH=100\nOOS=1000\n"
+        String runManifest = "baseline=Normal-Low\nI=" + TRBSVUFormalProtocol.CARRIERS
+                + "\nJ=" + TRBSVUFormalProtocol.LANES
+                + "\nH=" + TRBSVUFormalProtocol.HISTORY_PERIODS
+                + "\nOOS=" + TRBSVUFormalProtocol.OOS_DRAWS + "\n"
+                + "validationTrainingPeriods="
+                + TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS + "\n"
                 + "baseSeed=" + baseSeed + "\nreplication=" + index + "\n"
                 + "demandParameters=" + seeds.demandParameters() + "\n"
                 + "procurement=" + seeds.procurement() + "\n"
@@ -200,10 +214,12 @@ public final class TRBSVUExperiment12Main {
             writeAtomically(seedFile, completedManifest);
             writeAtomically(replication.resolve("run_manifest.txt"), completedManifest);
             writeAtomically(completionMarker,
-                    "protocolVersion=TRBSVU_EXP12_V3\n"
+                    "protocolVersion=" + TRBSVUFormalProtocol.EXPERIMENT12_VERSION + "\n"
                             + "baseSeed=" + baseSeed + "\n"
                             + "replication=" + index + "\n"
                             + "algorithm=" + algorithm + "\n"
+                            + "validationTrainingPeriods="
+                            + TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS + "\n"
                             + "validationOrigins=" + origins + "\n"
                             + "threads=" + threads + "\n"
                             + "limitSeconds=" + limitSeconds + "\n"
@@ -225,8 +241,10 @@ public final class TRBSVUExperiment12Main {
         boolean invalidContext = instance.testContext.dim() != 4
                 || instance.history.stream().anyMatch(sample -> sample.theta.dim() != 4)
                 || instance.oos.stream().anyMatch(sample -> sample.theta.dim() != 4);
-        if (instance.params.I != 20 || instance.params.J != 60
-                || instance.history.size() != 100 || instance.oos.size() != 1000
+        if (instance.params.I != TRBSVUFormalProtocol.CARRIERS
+                || instance.params.J != TRBSVUFormalProtocol.LANES
+                || instance.history.size() != TRBSVUFormalProtocol.HISTORY_PERIODS
+                || instance.oos.size() != TRBSVUFormalProtocol.OOS_DRAWS
                 || instance.params.alpha != expectedAlpha || instance.params.beta != expectedBeta
                 || invalidContext
                 || !instance.seeds.equals(expectedSeeds)) {

@@ -43,17 +43,18 @@ public final class TRBSVUGenerateExperiment3CasesMain {
                     random.nextLong(), random.nextLong(), random.nextLong(),
                     random.nextLong(), random.nextLong());
             Parameters parameters = TRBSVUSyntheticDemandGenerator.sampleParameters(
-                    60, 100, seeds.demandParameters());
+                    TRBSVUFormalProtocol.LANES, TRBSVUFormalProtocol.HISTORY_PERIODS,
+                    seeds.demandParameters());
             ProcurementParams market = TRBSVUProcurementGenerator.generate(
-                    20, parameters.typicalDemand(), seeds.procurement());
-            List<String> lanes = laneNames(60);
+                    TRBSVUFormalProtocol.CARRIERS, parameters.typicalDemand(), seeds.procurement());
+            List<String> lanes = laneNames(TRBSVUFormalProtocol.LANES);
             TRBSVUSyntheticCase reference = null;
 
             for (Distribution distribution : new Distribution[]{Distribution.NORMAL, Distribution.LOGNORMAL}) {
                 for (Volatility volatility : new Volatility[]{
                         Volatility.LOW, Volatility.MEDIUM, Volatility.HIGH}) {
                     Replication demand = TRBSVUSyntheticDemandGenerator.generate(parameters,
-                            distribution, volatility, 1000, seeds.contexts(),
+                            distribution, volatility, TRBSVUFormalProtocol.OOS_DRAWS, seeds.contexts(),
                             seeds.historicalNoise(), seeds.oosNoise());
                     TRBSVUSyntheticCase expected = new TRBSVUSyntheticCase(market, lanes,
                             demand.history, demand.testContext, demand.oos, seeds);
@@ -84,7 +85,11 @@ public final class TRBSVUGenerateExperiment3CasesMain {
                     writeAtomically(directory.resolve("manifest.txt"),
                             "experiment=3\nreplication=" + indexNumber + "\n"
                                     + "distribution=" + distribution + "\nvolatility=" + volatility + "\n"
-                                    + "I=20\nJ=60\nH=100\nOOS=1000\nbaseSeed=" + baseSeed + "\n"
+                                    + "I=" + TRBSVUFormalProtocol.CARRIERS
+                                    + "\nJ=" + TRBSVUFormalProtocol.LANES
+                                    + "\nH=" + TRBSVUFormalProtocol.HISTORY_PERIODS
+                                    + "\nOOS=" + TRBSVUFormalProtocol.OOS_DRAWS
+                                    + "\nbaseSeed=" + baseSeed + "\n"
                                     + "demandParameters=" + seeds.demandParameters() + "\n"
                                     + "procurement=" + seeds.procurement() + "\ncontexts=" + seeds.contexts() + "\n"
                                     + "historicalNoise=" + seeds.historicalNoise() + "\n"

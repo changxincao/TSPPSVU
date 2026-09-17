@@ -1,5 +1,6 @@
 param(
-    [string]$OutputRoot = "analysis/TRB_reviewer_revision/test_current_scale_timing_20260915",
+    [string]$OutputRoot = "analysis/TRB_reviewer_revision/test_current_scale_timing_I15J50S75_20260917",
+    [string]$Instance = "analysis/TRB_reviewer_revision/101_svu_experiment12_I15J50S75_20260917/rep_000/instance/instance.tsv",
     [int]$MaxParallel = 3,
     [int]$SolverThreads = 1,
     [int]$LimitSeconds = 1800
@@ -11,7 +12,10 @@ if ($MaxParallel -lt 1 -or $MaxParallel -gt 3 -or $SolverThreads -lt 1 -or $Limi
 }
 $project = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $root = [System.IO.Path]::GetFullPath((Join-Path $project $OutputRoot))
-$instance = Join-Path $project "analysis\TRB_reviewer_revision\100_svu_experiment12_baseline_cases_20260915\rep_000\instance\instance.tsv"
+$instance = [System.IO.Path]::GetFullPath((Join-Path $project $Instance))
+if (-not (Test-Path -LiteralPath $instance)) {
+    throw "Current-scale frozen instance not found: $instance"
+}
 $classes = Join-Path $root "classes"
 $logs = Join-Path $root "logs"
 $results = Join-Path $root "results"

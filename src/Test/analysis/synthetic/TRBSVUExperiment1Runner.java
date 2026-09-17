@@ -16,7 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** Experiment 1: one pre-generated case, 30 train-only validation origins, shared OOS. */
+/** Experiment 1: one pre-generated case, train-only rolling validation, shared OOS. */
 public final class TRBSVUExperiment1Runner {
     public static final double[] RETENTION = {0.4, 0.6, 0.8, 1.0};
     public static final double[] BANDWIDTH = {0.1, 0.5, 1, 3, 5, 10, 30, 50, 100};
@@ -76,8 +76,8 @@ public final class TRBSVUExperiment1Runner {
                                     int validationOrigins,
                                     TRBSVUValidationCheckpoint checkpoint,
                                     TRBSVUFinalCheckpoint finalCheckpoint) {
-        if (settings == null || forest == null || validationOrigins < 1 || validationOrigins > 30)
-            throw new IllegalArgumentException("Experiment 1 needs settings, RF weights and 1--30 origins.");
+        if (settings == null || forest == null || validationOrigins < 1)
+            throw new IllegalArgumentException("Experiment 1 needs settings, RF weights and validation origins.");
         this.settings = settings;
         this.forest = forest;
         this.validationOrigins = validationOrigins;
@@ -93,8 +93,9 @@ public final class TRBSVUExperiment1Runner {
     /** Runs only the requested Experiment 1 methods; each method remains a complete
      * validation -> parameter selection -> final solve -> OOS evaluation chain. */
     public Result run(TRBSVUSyntheticCase instance, Set<String> requestedMethods) throws Exception {
-        if (instance.history.size() != 100 || instance.oos.isEmpty())
-            throw new IllegalArgumentException("Experiment 1 expects 100 history periods and OOS draws.");
+        requireFormalValidationHistory(instance);
+        if (instance.oos.isEmpty())
+            throw new IllegalArgumentException("Experiment 1 requires OOS draws.");
         if (requestedMethods == null || requestedMethods.isEmpty())
             throw new IllegalArgumentException("No Experiment 1 methods requested.");
         Set<String> known = Set.of("D", "SAA-All", "Tuned-SAA", "CSAA-Exp",
@@ -247,7 +248,8 @@ public final class TRBSVUExperiment1Runner {
                                      List<TRBSVUValidationTrace> details) throws Exception {
         double[] realizedCosts = new double[validationOrigins];
         boolean valid = true;
-        for (int t = 70; t < 70 + validationOrigins; t++) {
+        int firstOrigin = TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS;
+        for (int t = firstOrigin; t < firstOrigin + validationOrigins; t++) {
             String methodName = validationMethodName(kind, parameter);
             double candidate = validationCandidate(kind, parameter);
             if (checkpoint != null) {
@@ -260,12 +262,13 @@ public final class TRBSVUExperiment1Runner {
                     else {
                         if (!trace.certifiedOptimal())
                             throw new IllegalStateException("Uncertified validation checkpoint: " + methodName);
-                        realizedCosts[t - 70] = trace.realizedValidationCost();
+                        realizedCosts[t - firstOrigin] = trace.realizedValidationCost();
                     }
                     continue;
                 }
             }
-            TRBSVUSyntheticCase.ValidationWindow window = instance.validationWindow(t, 70);
+            TRBSVUSyntheticCase.ValidationWindow window = instance.validationWindow(t,
+                    TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS);
             List<Sample> training = window.train();
             CovariateVector query = window.realized().theta;
             List<Sample> weighted = switch (kind) {
@@ -299,7 +302,7 @@ public final class TRBSVUExperiment1Runner {
                         + ", gap=" + solved.relativeGap);
             double realized = TRBSVUSolveMethods.realizedCost(instance.params, solved.y,
                     window.realized().demand());
-            realizedCosts[t - 70] = realized;
+            realizedCosts[t - firstOrigin] = realized;
             TRBSVUValidationTrace trace = trace(kind, parameter, t, training, weighted, solved, realized);
             details.add(trace);
             saveCheckpoint(trace);
@@ -319,7 +322,8 @@ public final class TRBSVUExperiment1Runner {
 
     private static void verifyCheckpointWindow(TRBSVUSyntheticCase instance,
                                                TRBSVUValidationTrace trace, int origin) {
-        TRBSVUSyntheticCase.ValidationWindow expected = instance.validationWindow(origin, 70);
+        TRBSVUSyntheticCase.ValidationWindow expected = instance.validationWindow(origin,
+                TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS);
         int start = expected.train().get(0).period.tIndex;
         int end = expected.train().get(expected.train().size() - 1).period.tIndex;
         if (trace.trainingStart() != start || trace.trainingEnd() != end)
@@ -418,9 +422,19 @@ public final class TRBSVUExperiment1Runner {
         };
     }
 
-    private static long forestSeed(TRBSVUSyntheticCase instance, List<Sample> training) {
+    static long forestSeed(TRBSVUSyntheticCase instance, List<Sample> training) {
         return instance.seeds.contexts()
                 + training.get(training.size() - 1).period.tIndex + 1L;
+    }
+
+    private void requireFormalValidationHistory(TRBSVUSyntheticCase instance) {
+        int expected = TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS + validationOrigins;
+        if (instance.history.size() < expected) {
+            throw new IllegalArgumentException("Experiment 1 requires at least " + expected
+                    + " history periods for "
+                    + TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS
+                    + " training periods and " + validationOrigins + " validation origins.");
+        }
     }
 
     private interface CandidateCost { ValidationScore evaluate(double value) throws Exception; }

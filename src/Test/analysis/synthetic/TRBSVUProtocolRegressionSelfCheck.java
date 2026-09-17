@@ -3,6 +3,8 @@ package Test.analysis.synthetic;
 import Model.Solution;
 import Test.analysis.synthetic.TRBSVUExperiment1Runner.ContextualChoice;
 import Test.analysis.synthetic.TRBSVUExperiment4Runner.Certificate;
+import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.Distribution;
+import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.Volatility;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -20,6 +22,27 @@ public final class TRBSVUProtocolRegressionSelfCheck {
         require(Arrays.equals(TRBSVUExperiment2Runner.LAMBDA,
                         new double[]{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 50, 100}),
                 "Experiment 2 lambda grid is not the locked 11-point grid.");
+        require(TRBSVUFormalProtocol.CARRIERS == 15
+                        && TRBSVUFormalProtocol.LANES == 50
+                        && TRBSVUFormalProtocol.HISTORY_PERIODS == 75
+                        && TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS == 50
+                        && TRBSVUFormalProtocol.VALIDATION_ORIGINS == 25,
+                "Formal scale or 50+25 validation protocol drifted.");
+        TRBSVUSyntheticCase seedCase = TRBSVUSyntheticCase.generate(7, 4, 75, 1,
+                Distribution.NORMAL, Volatility.LOW,
+                new TRBSVUSyntheticCase.Seeds(11, 13, 17, 19, 23));
+        require(TRBSVUExperiment1Runner.forestSeed(seedCase, seedCase.history)
+                        == seedCase.seeds.contexts() + 75L,
+                "RF seed is not derived from the final training period.");
+        TRBSVUSyntheticCase.ValidationWindow first = seedCase.validationWindow(50, 50);
+        TRBSVUSyntheticCase.ValidationWindow last = seedCase.validationWindow(74, 50);
+        require(first.train().get(0).period.tIndex == 0
+                        && first.train().get(49).period.tIndex == 49
+                        && first.realized().period.tIndex == 50
+                        && last.train().get(0).period.tIndex == 24
+                        && last.train().get(49).period.tIndex == 73
+                        && last.realized().period.tIndex == 74,
+                "Formal rolling validation windows are not 1:50->51 through 25:74->75.");
         ContextualChoice rf = new ContextualChoice("RF", Double.NaN, 1.0, 0.2, List.of());
         require(TRBSVUExperiment4Main.usesRandomForest(rf),
                 "Experiment 4 does not recognize the stored RF family name.");
