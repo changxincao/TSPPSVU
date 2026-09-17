@@ -49,20 +49,16 @@ public final class TRBSVUValidationCheckpointSelfCheck {
                 throw new AssertionError("Checkpoint round trip changed data.");
             if (checkpoint.load("CSAA-Epa", 1.0, 73).isPresent())
                 throw new AssertionError("Different candidate unexpectedly reused a checkpoint.");
-            try {
-                new TRBSVUValidationCheckpoint(directory, "different-instance", "protocol-hash")
-                        .load("CSAA-Epa", 0.5, 73);
-                throw new AssertionError("Different instance fingerprint was silently accepted.");
-            } catch (IllegalStateException expectedFailure) {
-                // Required rejection.
-            }
-            try {
-                new TRBSVUValidationCheckpoint(directory, "instance-hash", "different-protocol")
-                        .load("CSAA-Epa", 0.5, 73);
-                throw new AssertionError("Different protocol fingerprint was silently accepted.");
-            } catch (IllegalStateException expectedFailure) {
-                // Required rejection.
-            }
+            if (new TRBSVUValidationCheckpoint(directory, "different-instance", "protocol-hash")
+                    .load("CSAA-Epa", 0.5, 73).isPresent())
+                throw new AssertionError("Different instance fingerprint was reused.");
+            TRBSVUValidationCheckpoint updated = new TRBSVUValidationCheckpoint(
+                    directory, "instance-hash", "different-protocol");
+            if (updated.load("CSAA-Epa", 0.5, 73).isPresent())
+                throw new AssertionError("Different protocol fingerprint was reused.");
+            updated.save(expected);
+            if (updated.load("CSAA-Epa", 0.5, 73).isEmpty())
+                throw new AssertionError("Stale checkpoint was not replaced by the new protocol.");
         } finally {
             try (var paths = Files.walk(directory)) {
                 for (Path path : paths.sorted(Comparator.reverseOrder()).toList())

@@ -2,7 +2,7 @@ param(
     [string]$OutputRoot = "analysis/TRB_reviewer_revision/100_svu_experiment12_baseline_cases_20260915",
     [long]$BaseSeed = 20260915,
     [int]$Replications = 20,
-    [int]$MaxParallel = 6,
+    [int]$MaxParallel = 1,
     [int]$SolverThreads = 4,
     [int]$LimitSeconds = 14400,
     [int]$MaxAttempts = 2
@@ -56,8 +56,24 @@ New-Item -ItemType Directory -Force -Path $logRoot | Out-Null
 
 function Test-CurrentCompletion([string]$Path, [int]$Replication) {
     if (-not (Test-Path -LiteralPath $Path)) { return $false }
-    $instance = Join-Path $root ("rep_{0:D3}\instance\instance.tsv" -f $Replication)
+    $replicationRoot = Join-Path $root ("rep_{0:D3}" -f $Replication)
+    $instance = Join-Path $replicationRoot "instance\instance.tsv"
     if (-not (Test-Path -LiteralPath $instance)) { return $false }
+    $requiredArtifacts = @(
+        "run_manifest.txt",
+        "validation\experiment1_selected_context.csv",
+        "solve\experiment1_final_solves.csv",
+        "solve\experiment2_final_solves.csv",
+        "oos\experiment1_summary.csv",
+        "oos\experiment1_draws.csv",
+        "oos\experiment2_summary.csv",
+        "oos\experiment2_draws.csv"
+    )
+    foreach ($relative in $requiredArtifacts) {
+        $artifact = Join-Path $replicationRoot $relative
+        if (-not (Test-Path -LiteralPath $artifact) `
+                -or (Get-Item -LiteralPath $artifact).Length -eq 0) { return $false }
+    }
     $currentInstanceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $instance).Hash.ToLowerInvariant()
     $values = @{}
     foreach ($line in Get-Content -LiteralPath $Path) {

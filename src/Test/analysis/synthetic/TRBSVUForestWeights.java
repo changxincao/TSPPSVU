@@ -70,7 +70,9 @@ public final class TRBSVUForestWeights implements TRBSVUExperiment1Runner.Forest
     }
 
     private double[] fit(List<Sample> training, CovariateVector query, long seed) throws Exception {
-        Path directory = Files.createTempDirectory(Path.of("tmp"), "trb_svu_rf_");
+        Path temporaryRoot = Path.of("tmp");
+        Files.createDirectories(temporaryRoot);
+        Path directory = Files.createTempDirectory(temporaryRoot, "trb_svu_rf_");
         Path input = directory.resolve("training.csv");
         Path output = directory.resolve("weights.csv");
         try {

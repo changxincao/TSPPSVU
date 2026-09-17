@@ -16,7 +16,7 @@ import java.util.Map;
 
 /** Experiment 2: robust alternatives on the same frozen case and validation origins. */
 public final class TRBSVUExperiment2Runner {
-    public static final double[] LAMBDA = {0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10};
+    public static final double[] LAMBDA = {0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 50, 100};
     public static final double[] W1_RADIUS = {0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1};
     public static final double[] PCM_KAPPA = {1, 1.25, 1.5, 2};
 

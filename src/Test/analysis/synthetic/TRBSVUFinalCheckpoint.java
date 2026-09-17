@@ -44,15 +44,16 @@ public final class TRBSVUFinalCheckpoint {
         Path file = solveFile(method);
         if (!Files.exists(file)) return Optional.empty();
         Map<String, String> values = read(file);
-        if (!FORMAT.equals(values.get("format"))
-                || !instanceSha256.equals(required(values, "instanceSha256"))
+        if (!FORMAT.equals(values.get("format")))
+            throw new IllegalStateException("Final checkpoint metadata mismatch: " + file);
+        if (!instanceSha256.equals(required(values, "instanceSha256"))
                 || !protocolFingerprint.equals(required(values, "protocolFingerprint"))
                 || replication != integer(values, "replication")
                 || !experiment.equals(required(values, "experiment"))
                 || !method.equals(required(values, "method"))
                 || Double.doubleToLongBits(parameter) != Double.doubleToLongBits(
                         Double.parseDouble(required(values, "selectedParameter"))))
-            throw new IllegalStateException("Final checkpoint metadata mismatch: " + file);
+            return Optional.empty();
         Solution solution = new Solution();
         solution.objValue = number(values, "objective");
         solution.y = decision(required(values, "decision"));

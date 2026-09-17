@@ -50,7 +50,7 @@ public final class TRBSVUExperiment4Runner {
         String chiName = key("C-Chi2", lambda);
         Solution chi = restoreOrSolve(chiName, lambda, instance, weights, Method.CHI_SQUARED);
         OosEvaluation chiOos = evaluate(instance, chi, chiName);
-        Certificate certificate = chi.y == null ? null
+        Certificate certificate = !chi.certifiedOptimal || chi.y == null ? null
                 : certificate(instance, weights, chi.y, lambda);
 
         String exactName = key("RCSAA", lambda);

@@ -39,9 +39,9 @@ public final class TRBSVUValidationCheckpoint {
             if (!FORMAT.equals(values.get("format")))
                 throw new IllegalStateException("Unknown validation checkpoint: " + file);
             if (!instanceSha256.equals(required(values, "instanceSha256")))
-                throw new IllegalStateException("Checkpoint belongs to a different instance: " + file);
+                return Optional.empty();
             if (!protocolFingerprint.equals(required(values, "protocolFingerprint")))
-                throw new IllegalStateException("Checkpoint uses a different experiment protocol: " + file);
+                return Optional.empty();
             String storedMethod = required(values, "method");
             double storedCandidate = Double.parseDouble(required(values, "candidate"));
             int storedOrigin = Integer.parseInt(required(values, "origin"));
@@ -76,7 +76,6 @@ public final class TRBSVUValidationCheckpoint {
 
     public void save(TRBSVUValidationTrace trace) throws Exception {
         Path target = file(trace.method(), trace.candidateParameter(), trace.origin());
-        if (Files.exists(target)) throw new IllegalStateException("Checkpoint already exists: " + target);
         Path temporary = Files.createTempFile(directory, "pending_", ".checkpoint");
         try {
             try (BufferedWriter out = Files.newBufferedWriter(temporary, StandardCharsets.UTF_8,
@@ -103,9 +102,10 @@ public final class TRBSVUValidationCheckpoint {
                 write(out, "realizedValidationCost", trace.realizedValidationCost());
             }
             try {
-                Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE);
+                Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING);
             } catch (AtomicMoveNotSupportedException ex) {
-                Files.move(temporary, target);
+                Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
             }
         } finally {
             Files.deleteIfExists(temporary);

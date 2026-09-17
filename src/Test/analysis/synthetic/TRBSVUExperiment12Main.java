@@ -123,8 +123,8 @@ public final class TRBSVUExperiment12Main {
                 + "pcmScriptSha256=" + pcmScriptSha256 + "\n"
                 + "javaSourceSha256=" + javaSourceSha256 + "\n"
                 + "positiveWeightFloor=1e-8\nstrictZeroWeightsPruned=true\n";
-        writeAtomically(seedFile, runManifest);
-        writeAtomically(replication.resolve("run_manifest.txt"), runManifest);
+        Path completionMarker = replication.resolve("experiment12_complete.txt");
+        if (mode.equals("both")) Files.deleteIfExists(completionMarker);
         TRBSVUExperiment1Runner exp1 = new TRBSVUExperiment1Runner(settings, forest, origins,
                 new TRBSVUValidationCheckpoint(validationDirectory.resolve("checkpoints_experiment1"),
                         instanceSha256, experiment1Protocol),
@@ -159,6 +159,10 @@ public final class TRBSVUExperiment12Main {
                 result1.validationCost(), result1.validationCurve(), result1.validationDetails(),
                 exp1Parameters, exp1ParameterTypes, exp1Families, exp1BaseBandwidth,
                 exp1EffectiveBandwidth);
+        if (mode.equals("1")) {
+            writeAtomically(seedFile, runManifest);
+            writeAtomically(replication.resolve("run_manifest.txt"), runManifest);
+        }
         System.out.println("Experiment 1 complete: " + replication.toAbsolutePath());
         if (mode.equals("both")) {
             String selectedContextProtocol = sha256((experiment2Protocol
@@ -167,8 +171,6 @@ public final class TRBSVUExperiment12Main {
                     + "|selectedValidationSd=" + result1.selectedContextual().validationSd()
                     + "|bandwidthOrder=" + result1.selectedContextual().bandwidthOrder())
                     .getBytes(StandardCharsets.UTF_8));
-            writeAtomically(replication.resolve("run_manifest.txt"), runManifest
-                    + "experiment2SelectedContextFingerprint=" + selectedContextProtocol + "\n");
             TRBSVUExperiment2Runner exp2 = new TRBSVUExperiment2Runner(settings, exp1, origins,
                     new TRBSVUValidationCheckpoint(validationDirectory.resolve("checkpoints_experiment2"),
                             instanceSha256, selectedContextProtocol),
@@ -193,7 +195,11 @@ public final class TRBSVUExperiment12Main {
                     result2.validationCost(), result2.validationCurve(), result2.validationDetails(),
                     result2.selectedParameter(), exp2ParameterTypes, exp2Families,
                     exp2BaseBandwidth, result2.effectiveContextBandwidth());
-            writeAtomically(replication.resolve("experiment12_complete.txt"),
+            String completedManifest = runManifest
+                    + "experiment2SelectedContextFingerprint=" + selectedContextProtocol + "\n";
+            writeAtomically(seedFile, completedManifest);
+            writeAtomically(replication.resolve("run_manifest.txt"), completedManifest);
+            writeAtomically(completionMarker,
                     "protocolVersion=TRBSVU_EXP12_V3\n"
                             + "baseSeed=" + baseSeed + "\n"
                             + "replication=" + index + "\n"
@@ -214,11 +220,18 @@ public final class TRBSVUExperiment12Main {
 
     private static void verifyFrozenBaseline(TRBSVUSyntheticCase instance,
                                              TRBSVUSyntheticCase.Seeds expectedSeeds) {
+        int expectedAlpha = (int) Math.ceil(0.1 * instance.params.I);
+        int expectedBeta = (int) Math.ceil(0.7 * instance.params.I);
+        boolean invalidContext = instance.testContext.dim() != 4
+                || instance.history.stream().anyMatch(sample -> sample.theta.dim() != 4)
+                || instance.oos.stream().anyMatch(sample -> sample.theta.dim() != 4);
         if (instance.params.I != 20 || instance.params.J != 60
                 || instance.history.size() != 100 || instance.oos.size() != 1000
+                || instance.params.alpha != expectedAlpha || instance.params.beta != expectedBeta
+                || invalidContext
                 || !instance.seeds.equals(expectedSeeds)) {
             throw new IllegalStateException("Existing frozen instance does not match the requested "
-                    + "Normal-Low baseline replication and seeds.");
+                    + "Normal-Low baseline dimensions, selection bounds, context dimension, and seeds.");
         }
     }
 

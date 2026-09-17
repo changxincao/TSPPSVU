@@ -12,13 +12,12 @@ import Helper.basicHelper.Config;
 import Helper.basicHelper.OutputManager;
 
 public class DROModel {
-	// Formal runs keep all scenarios in the DRO master. Any very small weight is
-	// floored to FORMAL_WEIGHT_FLOOR and then all scenario weights are
-	// renormalized, so 1/sqrt(pi_w) stays numerically bounded while no sample is
-	// dropped from the solve.
+	// Strictly zero reference weights are outside the effective support. Positive
+	// weights are floored and renormalized once at this public adapter boundary.
 	private static final double FORMAL_WEIGHT_FLOOR = 1e-8;
 
 	public Solution solve(Data data, Config cfg) throws SolutionError {
+		data = canonicalizeReference(data);
         if (cfg != null && (cfg.rcsaaCompactRepairAnchors || cfg.rcsaaCompactSwitchedDual) && !cfg.rcsaaCompactDual)
             throw new IllegalArgumentException("Static repair anchors require compact");
         if (cfg != null && (cfg.rcsaaRepairCuts || cfg.rcsaaCompactDual)) {
@@ -65,6 +64,27 @@ public class DROModel {
 			}
 		}
 		return solveDroApproxExtensive(data, cfg);
+	}
+
+	private static Data canonicalizeReference(Data data) {
+		if (data == null || data.samples == null || data.samples.isEmpty())
+			throw new IllegalArgumentException("DRO reference samples are required.");
+		List<Sample> retained = new ArrayList<>();
+		double totalMass = 0.0;
+		for (int w = 0; w < data.samples.size(); w++) {
+			Sample sample = data.samples.get(w);
+			double weight = sample.weight;
+			if (!Double.isFinite(weight) || weight < 0.0)
+				throw new IllegalStateException("Invalid DRO sample weight at idx=" + w + ": " + weight);
+			if (weight == 0.0) continue;
+			double adjusted = Math.max(weight, FORMAL_WEIGHT_FLOOR);
+			retained.add(new Sample(sample.id, sample.period, sample.theta, adjusted));
+			totalMass += adjusted;
+		}
+		if (!(totalMass > 0.0))
+			throw new IllegalStateException("DRO reference weights have no positive support.");
+		for (Sample sample : retained) sample.weight /= totalMass;
+		return new Data(data.lanes, List.copyOf(retained), data.thetaNow, data.params);
 	}
 
 	private Solution solveDroApproxExtensive(Data data, Config cfg) throws SolutionError {

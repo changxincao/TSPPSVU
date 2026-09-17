@@ -62,7 +62,7 @@ public final class TRBSVUExperiment4Main {
         Path resultRoot = outputRoot.resolve(String.format("rep_%03d", replication));
         Files.createDirectories(resultRoot);
         String javaSourceSha256 = javaSourceFingerprint(Path.of("src"));
-        boolean usesRandomForest = "RANDOM_FOREST".equals(choice.family());
+        boolean usesRandomForest = usesRandomForest(choice);
         String rfScriptSha256 = usesRandomForest ? sha256(rfScript) : "NOT_USED";
         String pythonEnvironment = usesRandomForest ? pythonEnvironment(python) : "NOT_USED";
         String protocol = sha256("TRBSVU_EXP4_V1|instance=" + sha256(instanceFile)
@@ -103,7 +103,7 @@ public final class TRBSVUExperiment4Main {
     private static void writeSummary(Path target, int replication, List<Result> results)
             throws Exception {
         StringBuilder out = new StringBuilder();
-        out.append("replication,lambda,effective_B,certificate_holds,certificate_ratio,"
+        out.append("replication,lambda,effective_B,certificate_status,certificate_holds,certificate_ratio,"
                 + "certificate_mean,certificate_sd,certificate_min,certificate_denominator,"
                 + "objective_gap_percent,same_decision,jaccard,"
                 + "chi2_status,chi2_certified,chi2_objective,chi2_bound,chi2_gap,chi2_time,"
@@ -113,9 +113,9 @@ public final class TRBSVUExperiment4Main {
         for (Result result : results) {
             Certificate c = result.certificate();
             out.append(String.format(Locale.ROOT,
-                    "%d,%.17g,%.17g,%s,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%s,%.17g,",
+                    "%d,%.17g,%.17g,%s,%s,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%s,%.17g,",
                     replication, result.lambda(), result.effectiveBandwidth(),
-                    c != null && c.holds(), c == null ? Double.NaN : c.ratio(),
+                    certificateStatus(c), certificateHolds(c), c == null ? Double.NaN : c.ratio(),
                     c == null ? Double.NaN : c.weightedMean(),
                     c == null ? Double.NaN : c.weightedSd(),
                     c == null ? Double.NaN : c.minimum(),
@@ -141,7 +141,19 @@ public final class TRBSVUExperiment4Main {
                 .append(oos.q95()).append(',').append(oos.cvar95()).append(',').append(oos.maximum());
     }
 
-    private static ContextualChoice loadChoice(Path file) throws Exception {
+    static String certificateStatus(Certificate certificate) {
+        return certificate == null ? "UNRESOLVED" : certificate.holds() ? "HOLDS" : "FAILS";
+    }
+
+    static String certificateHolds(Certificate certificate) {
+        return certificate == null ? "NA" : Boolean.toString(certificate.holds());
+    }
+
+    static boolean usesRandomForest(ContextualChoice choice) {
+        return "RF".equals(choice.family());
+    }
+
+    static ContextualChoice loadChoice(Path file) throws Exception {
         List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
         if (lines.size() != 2) throw new IllegalStateException("Invalid selected-context file: " + file);
         List<String> header = parseCsv(lines.get(0)), row = parseCsv(lines.get(1));

@@ -1,12 +1,14 @@
 package Test.analysis.synthetic;
 
 import Model.RCSAASolverVariant;
+import Test.analysis.synthetic.TRBSVUExperiment1Runner.ContextualChoice;
 import Test.analysis.synthetic.TRBSVUSolveMethods.Settings;
 import Test.analysis.synthetic.TRBSVUScenarioWeights.Kernel;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -40,6 +42,8 @@ public final class TRBSVUExperiment1IdeMain {
     private static final String DEFAULT_METHODS = "ALL";
     private static final List<String> ALL_METHODS = List.of("D", "SAA-All", "Tuned-SAA",
             "CSAA-Exp", "CSAA-Gau", "CSAA-Epa", "CSAA-Tri", "RF-CSAA");
+    private static final List<String> CONTEXTUAL_METHODS = List.of(
+            "CSAA-Exp", "CSAA-Gau", "CSAA-Epa", "CSAA-Tri", "RF-CSAA");
 
     private TRBSVUExperiment1IdeMain() { }
 
@@ -71,6 +75,13 @@ public final class TRBSVUExperiment1IdeMain {
             }
             if (failed > 0)
                 throw new IllegalStateException(failed + " Experiment 1 task(s) failed; inspect task.log files.");
+        }
+        if (config.methods.containsAll(CONTEXTUAL_METHODS)) {
+            aggregateContextualChoices(config.input, config.output,
+                    parseReplications(config.replications));
+        } else {
+            System.out.println("Replication-level C* not written because the requested methods do not "
+                    + "contain all five contextual families.");
         }
         System.out.println("Experiment 1 scheduling complete: " + config.output.toAbsolutePath());
     }
@@ -131,6 +142,7 @@ public final class TRBSVUExperiment1IdeMain {
             System.out.println("Already complete with matching protocol: " + output);
             return;
         }
+        Files.deleteIfExists(complete);
         Settings settings = new Settings(threads, limit, 1e-4,
                 RCSAASolverVariant.LBBD_PRIMAL_EXACT, false, true);
         TRBSVUForestWeights forest = new TRBSVUForestWeights(python.toString(), rfScript);
@@ -180,9 +192,11 @@ public final class TRBSVUExperiment1IdeMain {
                 "1", result.validationCurve(), parameters, result.validationDetails());
         TRBSVUResultWriter.writeValidationDetails(validation.resolve("details.csv"), replication,
                 "1", instance.params, result.validationDetails());
-        if (result.selectedContextual() != null)
-            TRBSVUResultWriter.writeContextualChoice(validation.resolve("selected_context.csv"),
+        if (result.selectedContextual() != null) {
+            Files.deleteIfExists(validation.resolve("selected_context.csv"));
+            TRBSVUResultWriter.writeContextualChoice(validation.resolve("context_candidate.csv"),
                     replication, result.selectedContextual());
+        }
         TRBSVUResultWriter.writeFinalSolves(solve.resolve("final_solve.csv"), replication, "1",
                 instance.params, result.decisions(), result.validationCost(), parameters,
                 parameterTypes, families, baseBandwidth, effectiveBandwidth, result.finalWeights());
@@ -204,6 +218,46 @@ public final class TRBSVUExperiment1IdeMain {
             for (String method : config.methods) tasks.add(new Task(replication, name, method, instance));
         }
         return tasks;
+    }
+
+    static void aggregateContextualChoices(Path input, Path output, Set<Integer> replications)
+            throws Exception {
+        for (int replication : replications) {
+            String name = String.format(Locale.ROOT, "rep_%03d", replication);
+            Path replicationOutput = output.resolve(name);
+            ContextualChoice chosen = null;
+            for (String method : CONTEXTUAL_METHODS) {
+                Path candidateFile = replicationOutput.resolve(safe(method)).resolve("validation")
+                        .resolve("context_candidate.csv");
+                if (!Files.isRegularFile(candidateFile))
+                    throw new IllegalStateException("Missing contextual candidate for " + name
+                            + "/" + method + ": " + candidateFile);
+                ContextualChoice candidate = TRBSVUExperiment4Main.loadChoice(candidateFile);
+                if (chosen == null || TRBSVUStatistics.better(candidate.validationCost(),
+                        candidate.validationSd(), contextualTieParameter(candidate),
+                        chosen.validationCost(), chosen.validationSd(),
+                        contextualTieParameter(chosen))) {
+                    chosen = candidate;
+                }
+            }
+            Path validation = replicationOutput.resolve("validation");
+            TRBSVUResultWriter.writeContextualChoice(
+                    validation.resolve("experiment1_selected_context.csv"), replication, chosen);
+            Path sourceInstance = input.resolve(name).resolve("instance").resolve("instance.tsv");
+            Path targetInstance = replicationOutput.resolve("instance").resolve("instance.tsv");
+            if (!Files.isRegularFile(sourceInstance))
+                throw new IllegalStateException("Missing frozen input during aggregation: " + sourceInstance);
+            Files.createDirectories(targetInstance.getParent());
+            if (Files.exists(targetInstance) && Files.mismatch(sourceInstance, targetInstance) != -1L)
+                throw new IllegalStateException("Output contains a different frozen instance: " + targetInstance);
+            if (!Files.exists(targetInstance))
+                Files.copy(sourceInstance, targetInstance, StandardCopyOption.COPY_ATTRIBUTES);
+            System.out.println("Experiment 1 contextual C* aggregated for " + name + ": " + chosen);
+        }
+    }
+
+    private static double contextualTieParameter(ContextualChoice choice) {
+        return "RF".equals(choice.family()) ? Double.POSITIVE_INFINITY : choice.bandwidth();
     }
 
     private static Set<Integer> parseReplications(String text) {

@@ -34,7 +34,9 @@ public final class TRBSVUPcmSolver {
         if (weighted.isEmpty() || !(kappa >= 1.0) || !Double.isFinite(kappa))
             throw new IllegalArgumentException("Invalid PCM samples or kappa.");
         Moments moments = moments(weighted, params.J, kappa);
-        Path directory = Files.createTempDirectory(Path.of("tmp"), "trb_svu_pcm_");
+        Path temporaryRoot = Path.of("tmp");
+        Files.createDirectories(temporaryRoot);
+        Path directory = Files.createTempDirectory(temporaryRoot, "trb_svu_pcm_");
         Throwable primaryFailure = null;
         try {
             writeInput(directory, params, moments, settings, adaptToLift);

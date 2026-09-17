@@ -39,6 +39,10 @@ public final class TRBSVUExperiment4SelfCheck {
                     "Experiment 4 completion marker missing.");
             require(Files.readAllLines(replication.resolve("experiment4_comparison.csv")).size() == 2,
                     "Experiment 4 summary row missing.");
+            String summary = Files.readString(replication.resolve("experiment4_comparison.csv"));
+            require(summary.startsWith("replication,lambda,effective_B,certificate_status,certificate_holds,")
+                            && (summary.contains(",HOLDS,true,") || summary.contains(",FAILS,false,")),
+                    "Experiment 4 certificate status columns are missing or inconsistent.");
             require(Files.list(replication.resolve("solve_checkpoints")).count() == 2,
                     "Experiment 4 did not checkpoint both methods.");
             try (var checkpoints = Files.list(replication.resolve("solve_checkpoints"))) {

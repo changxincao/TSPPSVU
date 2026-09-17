@@ -10,8 +10,8 @@ import ilog.concert.IloNumVar;
 import ilog.cplex.IloCplex;
 
 final class RCSAADecompositionSupport {
-    // 与原 DRO 实现保持一致：任何过小的场景权重都先抬到 1e-8，再统一归一化。
-    // 这样可以避免某些场景在数值上几乎“消失”，也避免标准差项里出现过小系数。
+    // Public DROModel preprocessing removes exact zeros. Positive weights below
+    // 1e-8 are floored here defensively before normalization.
     static final double FORMAL_WEIGHT_FLOOR = 1e-8;
 
     /**
@@ -66,8 +66,8 @@ final class RCSAADecompositionSupport {
     static double[] validateAndNormalizeWeights(List<Sample> samples) {
         // 这里统一做两件事：
         // 1) 检查权重是否合法；
-        // 2) 用 1e-8 做 floor 后再归一化。
-        // 这样 RCSAA 与之前 DRO 的正式求解口径保持一致。
+        // 2) Reject exact zeros that should have been removed at the adapter;
+        // 3) floor positive weights at 1e-8 and renormalize.
         double[] pi = new double[samples.size()];
         double sum = 0.0;
         for (int w = 0; w < samples.size(); w++) {
@@ -75,6 +75,8 @@ final class RCSAADecompositionSupport {
             if (!Double.isFinite(pw) || pw < 0.0) {
                 throw new IllegalStateException("Invalid RCSAA sample weight at idx=" + w + ": " + pw);
             }
+            if (pw == 0.0)
+                throw new IllegalStateException("Zero RCSAA weight must be pruned before solving. idx=" + w);
             pi[w] = Math.max(pw, FORMAL_WEIGHT_FLOOR);
             sum += pi[w];
         }
