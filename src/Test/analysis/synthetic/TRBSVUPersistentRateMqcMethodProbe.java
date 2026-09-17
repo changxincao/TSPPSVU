@@ -38,12 +38,13 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
     private TRBSVUPersistentRateMqcMethodProbe() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1 || args.length > 13) {
+        if (args.length < 1 || args.length > 14) {
             throw new IllegalArgumentException(
                     "Usage: <output-directory> [replications] [queries] [mqc-scale]"
                             + " [volatility] [context-scale] [bandwidth] [spot-scale]"
                             + " [carriers] [oracle-samples] [context-structure]"
-                            + " [common-loading-lower] [common-loading-upper]");
+                            + " [common-loading-lower] [common-loading-upper]"
+                            + " [fixed-design-index; 0 means paired designs]");
         }
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
         int replications = args.length >= 2 ? Integer.parseInt(args[1]) : 3;
@@ -69,6 +70,10 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                 : ContextStructure.DENSE_INDEPENDENT_LEVELS;
         double commonLoadingLower = args.length >= 12 ? Double.parseDouble(args[11]) : 0.2;
         double commonLoadingUpper = args.length >= 13 ? Double.parseDouble(args[12]) : 0.6;
+        int fixedDesignIndex = args.length >= 14 ? Integer.parseInt(args[13]) : 0;
+        if (fixedDesignIndex < 0) {
+            throw new IllegalArgumentException("Fixed design index cannot be negative.");
+        }
         Files.createDirectories(output);
 
         Settings settings = new Settings(1, 600, 1e-8,
@@ -80,10 +85,16 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                 + "\tmqc_penalty");
 
         SplittableRandom seeds = new SplittableRandom(20260917L);
+        TRBSVUSyntheticCase.Seeds fixedDesign = fixedDesignIndex == 0
+                ? null : designSeeds(fixedDesignIndex);
         for (int replication = 1; replication <= replications; replication++) {
-            TRBSVUSyntheticCase.Seeds paired = new TRBSVUSyntheticCase.Seeds(
+            TRBSVUSyntheticCase.Seeds sampled = new TRBSVUSyntheticCase.Seeds(
                     seeds.nextLong(), seeds.nextLong(), seeds.nextLong(),
                     seeds.nextLong(), seeds.nextLong());
+            TRBSVUSyntheticCase.Seeds paired = fixedDesign == null ? sampled
+                    : new TRBSVUSyntheticCase.Seeds(
+                            fixedDesign.demandParameters(), fixedDesign.procurement(),
+                            sampled.contexts(), sampled.historicalNoise(), sampled.oosNoise());
             Parameters parameters = TRBSVUSyntheticDemandGenerator.sampleParameters(
                     LANES, HISTORY, paired.demandParameters(), contextScale,
                     contextStructure,
@@ -106,11 +117,25 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                 runMarket(rows, "CURRENT", replication, parameters, demand, current, bandwidth,
                         0, settings);
             }
-            runMarket(rows, String.format(Locale.ROOT, "PERSISTENT_WIDE_MQC_%.2f", mqcScale),
+            String marketName = String.format(Locale.ROOT, "PERSISTENT_WIDE_MQC_%.2f", mqcScale);
+            if (fixedDesignIndex > 0) marketName += "_FIXED_DESIGN_" + fixedDesignIndex;
+            runMarket(rows, marketName,
                     replication,
                     parameters, demand, candidate, bandwidth, oracleSamples, settings);
             Files.write(output.resolve("method_probe.tsv"), rows, StandardCharsets.UTF_8);
         }
+    }
+
+    private static TRBSVUSyntheticCase.Seeds designSeeds(int oneBasedIndex) {
+        if (oneBasedIndex <= 0) throw new IllegalArgumentException("Design index must be positive.");
+        SplittableRandom seeds = new SplittableRandom(20260917L);
+        TRBSVUSyntheticCase.Seeds result = null;
+        for (int index = 1; index <= oneBasedIndex; index++) {
+            result = new TRBSVUSyntheticCase.Seeds(
+                    seeds.nextLong(), seeds.nextLong(), seeds.nextLong(),
+                    seeds.nextLong(), seeds.nextLong());
+        }
+        return result;
     }
 
     private static void runMarket(List<String> rows, String marketName, int replication,
