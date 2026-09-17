@@ -30,7 +30,8 @@ public final class TRBSVUSyntheticDemandGenerator {
     }
 
     public enum ContextStructure {
-        DENSE_PROPORTIONAL, DENSE_WIDE_POSITIVE, DENSE_WIDE_SAME_MEAN,
+        DENSE_PROPORTIONAL, DENSE_WIDE_POSITIVE, DENSE_INDEPENDENT_LEVELS,
+        DENSE_WIDE_SAME_MEAN,
         DENSE_WIDE_SIGNED_SAME_MEAN,
         DENSE_RANDOM_SHARES, TWO_ACTIVE, ONE_ACTIVE, SIGNED_CENTERED, GROUPED_CENTERED
     }
@@ -166,6 +167,29 @@ public final class TRBSVUSyntheticDemandGenerator {
         }
     }
 
+    public static final class ConditionalQuery {
+        public final CovariateVector context;
+        public final List<Sample> oos;
+
+        private ConditionalQuery(CovariateVector context, List<Sample> oos) {
+            this.context = context;
+            this.oos = List.copyOf(oos);
+        }
+    }
+
+    public static final class MultiQueryReplication {
+        public final Parameters parameters;
+        public final List<Sample> history;
+        public final List<ConditionalQuery> queries;
+
+        private MultiQueryReplication(Parameters parameters, List<Sample> history,
+                                      List<ConditionalQuery> queries) {
+            this.parameters = parameters;
+            this.history = List.copyOf(history);
+            this.queries = List.copyOf(queries);
+        }
+    }
+
     public static Parameters sampleParameters(int laneCount, int historicalPeriods, long seed) {
         return sampleParameters(laneCount, historicalPeriods, seed, 1.0);
     }
@@ -251,6 +275,17 @@ public final class TRBSVUSyntheticDemandGenerator {
             ratios[1] = 0.1 + (0.8 / 0.2) * (ratios[1] - 0.2);
             ratios[2] = 0.1 + (0.8 / 0.3) * (ratios[2] - 0.3);
             ratios[3] = 0.1 + (0.8 / 0.3) * (ratios[3] - 0.3);
+            return;
+        }
+        if (structure == ContextStructure.DENSE_INDEPENDENT_LEVELS) {
+            for (int k = 0; k < ratios.length; k++) {
+                int level = random.nextInt(3);
+                ratios[k] = switch (level) {
+                    case 0 -> uniform(random, 0.1, 0.3);
+                    case 1 -> uniform(random, 0.4, 0.6);
+                    default -> uniform(random, 0.7, 0.9);
+                };
+            }
             return;
         }
         if (structure == ContextStructure.DENSE_WIDE_SAME_MEAN) {
@@ -372,6 +407,50 @@ public final class TRBSVUSyntheticDemandGenerator {
             oos.add(sample(draw, h, testContext.copy(), demand, 1.0 / oosCount));
         }
         return new Replication(parameters, history, testContext, oos);
+    }
+
+    /** Generate one shared training sample and multiple independent query contexts. */
+    public static MultiQueryReplication generateMultiQuery(
+            Parameters parameters, Distribution distribution, Volatility regime,
+            int queryCount, int oosCount, long contextSeed,
+            long historyNoiseSeed, long oosNoiseSeed) {
+        if (parameters == null || distribution == null || regime == null
+                || queryCount <= 0 || oosCount <= 0) {
+            throw new IllegalArgumentException(
+                    "Parameters, DGP cell, query count and OOS count are required.");
+        }
+        int h = parameters.historicalPeriods();
+        Random contextRandom = new Random(contextSeed);
+        Random historyRandom = new Random(historyNoiseSeed);
+        Random oosRandom = new Random(oosNoiseSeed);
+        Random historyCommonRandom = new Random(historyNoiseSeed ^ COMMON_NOISE_SALT);
+        Random oosCommonRandom = new Random(oosNoiseSeed ^ COMMON_NOISE_SALT);
+        double[] cv = parameters.volatilityParameters(regime);
+        List<Sample> history = new ArrayList<>(h);
+        for (int t = 0; t < h; t++) {
+            CovariateVector context = context(t, h, contextRandom);
+            double[] demand = drawDemand(parameters.nominalDemand(context), cv,
+                    parameters.commonLoading, distribution, historyRandom,
+                    historyCommonRandom, true);
+            history.add(sample(t, t, context, demand, 1.0 / h));
+        }
+
+        List<ConditionalQuery> queries = new ArrayList<>(queryCount);
+        for (int query = 0; query < queryCount; query++) {
+            // All queries are evaluated at the same decision horizon; only the
+            // three stochastic context coordinates vary, while trend remains 1.
+            CovariateVector queryContext = context(h, h, contextRandom);
+            double[] nominal = parameters.nominalDemand(queryContext);
+            List<Sample> oos = new ArrayList<>(oosCount);
+            for (int draw = 0; draw < oosCount; draw++) {
+                double[] demand = drawDemand(nominal, cv, parameters.commonLoading,
+                        distribution, oosRandom, oosCommonRandom, true);
+                oos.add(sample(query * oosCount + draw, h, queryContext.copy(), demand,
+                        1.0 / oosCount));
+            }
+            queries.add(new ConditionalQuery(queryContext, oos));
+        }
+        return new MultiQueryReplication(parameters, history, queries);
     }
 
     private static CovariateVector context(int zeroBasedPeriod, int h, Random random) {

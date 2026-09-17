@@ -5,6 +5,7 @@ import Basic.Sample;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.BaseStructure;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.ContextStructure;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.Distribution;
+import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.MultiQueryReplication;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.Parameters;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.Replication;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.Volatility;
@@ -29,14 +30,19 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
                 "Explicit default structure changed the historical DGP.");
         checkWideSameMeanPairing(h);
         checkThreeLevelWidePositive(h);
+        checkThreeLevelIndependentEffects(h);
         checkParameters(p);
         checkAlternativeStructures(h);
         Replication normal = generate(p, Distribution.NORMAL, Volatility.LOW, oosCount);
         Replication repeat = generate(p, Distribution.NORMAL, Volatility.LOW, oosCount);
         Replication lognormal = generate(p, Distribution.LOGNORMAL, Volatility.HIGH, oosCount);
+        MultiQueryReplication multi = TRBSVUSyntheticDemandGenerator.generateMultiQuery(
+                p, Distribution.NORMAL, Volatility.LOW, 3, oosCount, 23L, 29L, 31L);
 
         require(normal.history.size() == h && normal.oos.size() == oosCount,
                 "History/OOS sample count differs from the experiment protocol.");
+        require(multi.history.size() == h && multi.queries.size() == 3,
+                "Multi-query sample count differs from the requested protocol.");
         require(normal.history.get(0).theta.values()[1] == 0.0
                         && normal.history.get(h - 1).theta.values()[1] == 0.99
                         && normal.testContext.values()[1] == 1.0,
@@ -56,7 +62,22 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
                     "DGP cells lost their paired historical contexts at period " + t);
             checkDemand(a, 60);
             checkDemand(c, 60);
+            require(Arrays.equals(a.theta.values(), multi.history.get(t).theta.values())
+                            && Arrays.equals(a.demand(), multi.history.get(t).demand()),
+                    "Multi-query generation changed the shared training sample.");
         }
+        require(Arrays.equals(normal.testContext.values(), multi.queries.get(0).context.values()),
+                "First multi-query context does not match the single-query protocol.");
+        for (int s = 0; s < oosCount; s++) {
+            require(Arrays.equals(normal.oos.get(s).demand(),
+                            multi.queries.get(0).oos.get(s).demand()),
+                    "First multi-query OOS block does not match the single-query protocol.");
+        }
+        require(!Arrays.equals(multi.queries.get(0).context.values(),
+                        multi.queries.get(1).context.values())
+                        && multi.queries.get(0).context.values()[1] == 1.0
+                        && multi.queries.get(1).context.values()[1] == 1.0,
+                "Multi-query contexts must vary while sharing the final trend coordinate.");
         for (int s = 0; s < oosCount; s++) {
             Sample a = normal.oos.get(s);
             Sample b = repeat.oos.get(s);
@@ -166,6 +187,25 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
         }
         require(low == 17 && medium == 17 && high == 16,
                 "Three-level base allocation is not balanced.");
+    }
+
+    private static void checkThreeLevelIndependentEffects(int h) {
+        Parameters candidate = TRBSVUSyntheticDemandGenerator.sampleParameters(
+                50, h, 53L, 1.0, ContextStructure.DENSE_INDEPENDENT_LEVELS,
+                BaseStructure.THREE_LEVEL_WIDE);
+        int[] counts = new int[3];
+        double[][] coefficients = {candidate.market(), candidate.trend(),
+                candidate.promotion(), candidate.attention()};
+        for (int j = 0; j < candidate.laneCount(); j++) {
+            for (double[] coefficient : coefficients) {
+                double ratio = coefficient[j] / candidate.base()[j];
+                if (inRange(ratio, 0.1, 0.3)) counts[0]++;
+                else if (inRange(ratio, 0.4, 0.6)) counts[1]++;
+                else if (inRange(ratio, 0.7, 0.9)) counts[2]++;
+                else throw new AssertionError("Independent effect outside all declared tiers.");
+            }
+        }
+        for (int count : counts) require(count > 0, "An independent effect tier was never used.");
     }
 
     private static Replication generate(Parameters p, Distribution family,
