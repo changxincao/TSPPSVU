@@ -33,7 +33,10 @@ public final class TRBSVUSyntheticDemandGenerator {
         DENSE_PROPORTIONAL, DENSE_WIDE_POSITIVE, DENSE_INDEPENDENT_LEVELS,
         DENSE_WIDE_SAME_MEAN,
         DENSE_WIDE_SIGNED_SAME_MEAN,
-        DENSE_RANDOM_SHARES, DENSE_POSITIVE_CENTERED, DOMINANT_POSITIVE_CENTERED,
+        DENSE_RANDOM_SHARES, DENSE_POSITIVE_CENTERED,
+        MODERATE_RANDOM_POSITIVE_CENTERED, WIDE_RANDOM_POSITIVE_CENTERED,
+        SIMPLEX_RANDOM_POSITIVE_CENTERED, LOGNORMAL_RANDOM_POSITIVE_CENTERED,
+        DOMINANT_POSITIVE_CENTERED,
         TWO_ACTIVE, ONE_ACTIVE, SIGNED_CENTERED, GROUPED_CENTERED
     }
 
@@ -309,6 +312,30 @@ public final class TRBSVUSyntheticDemandGenerator {
             for (int k = 0; k < ratios.length; k++) ratios[k] /= total;
             return;
         }
+        if (structure == ContextStructure.MODERATE_RANDOM_POSITIVE_CENTERED
+                || structure == ContextStructure.WIDE_RANDOM_POSITIVE_CENTERED) {
+            double lower = structure == ContextStructure.MODERATE_RANDOM_POSITIVE_CENTERED
+                    ? 0.25 : 0.0;
+            double randomTotal = 0.0;
+            for (int k = 0; k < ratios.length; k++) {
+                ratios[k] = uniform(random, lower, 1.0);
+                randomTotal += ratios[k];
+            }
+            for (int k = 0; k < ratios.length; k++) ratios[k] /= randomTotal;
+            return;
+        }
+        if (structure == ContextStructure.SIMPLEX_RANDOM_POSITIVE_CENTERED
+                || structure == ContextStructure.LOGNORMAL_RANDOM_POSITIVE_CENTERED) {
+            double randomTotal = 0.0;
+            for (int k = 0; k < ratios.length; k++) {
+                ratios[k] = structure == ContextStructure.SIMPLEX_RANDOM_POSITIVE_CENTERED
+                        ? -Math.log(1.0 - random.nextDouble())
+                        : Math.exp(random.nextGaussian());
+                randomTotal += ratios[k];
+            }
+            for (int k = 0; k < ratios.length; k++) ratios[k] /= randomTotal;
+            return;
+        }
         if (structure == ContextStructure.DOMINANT_POSITIVE_CENTERED) {
             java.util.Arrays.fill(ratios, 0.1);
             ratios[random.nextInt(ratios.length)] = 0.7;
@@ -354,6 +381,10 @@ public final class TRBSVUSyntheticDemandGenerator {
         return structure == ContextStructure.SIGNED_CENTERED
                 || structure == ContextStructure.GROUPED_CENTERED
                 || structure == ContextStructure.DENSE_POSITIVE_CENTERED
+                || structure == ContextStructure.MODERATE_RANDOM_POSITIVE_CENTERED
+                || structure == ContextStructure.WIDE_RANDOM_POSITIVE_CENTERED
+                || structure == ContextStructure.SIMPLEX_RANDOM_POSITIVE_CENTERED
+                || structure == ContextStructure.LOGNORMAL_RANDOM_POSITIVE_CENTERED
                 || structure == ContextStructure.DOMINANT_POSITIVE_CENTERED;
     }
 
