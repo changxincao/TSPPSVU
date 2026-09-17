@@ -37,13 +37,14 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
     private TRBSVUPersistentRateMqcMethodProbe() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1 || args.length > 3) {
+        if (args.length < 1 || args.length > 4) {
             throw new IllegalArgumentException(
-                    "Usage: <output-directory> [replications] [queries]");
+                    "Usage: <output-directory> [replications] [queries] [mqc-scale]");
         }
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
         int replications = args.length >= 2 ? Integer.parseInt(args[1]) : 3;
         int queryCount = args.length >= 3 ? Integer.parseInt(args[2]) : 20;
+        double mqcScale = args.length >= 4 ? Double.parseDouble(args[3]) : 1.50;
         Files.createDirectories(output);
 
         Settings settings = new Settings(1, 600, 1e-8,
@@ -72,10 +73,11 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                     TRBSVUSingleSampleCardinalityDiagnostic.persistentCarrierRates(current,
                             paired.procurement() ^ 0x5DEECE66DL, 0.7, 1.3);
             ProcurementParams candidate =
-                    TRBSVUSingleSampleCardinalityDiagnostic.scaleMqc(persistent, 1.50);
+                    TRBSVUSingleSampleCardinalityDiagnostic.scaleMqc(persistent, mqcScale);
 
             runMarket(rows, "CURRENT", replication, parameters, demand, current, settings);
-            runMarket(rows, "PERSISTENT_WIDE_MQC_1.50", replication,
+            runMarket(rows, String.format(Locale.ROOT, "PERSISTENT_WIDE_MQC_%.2f", mqcScale),
+                    replication,
                     parameters, demand, candidate, settings);
             Files.write(output.resolve("method_probe.tsv"), rows, StandardCharsets.UTF_8);
         }
