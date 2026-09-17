@@ -24,24 +24,40 @@ public final class TRBSVUProcurementGenerator {
         }
         Random random = new Random(seed);
         boolean[][] eligible = new boolean[carrierCount][lanes];
+        int lanesPerCarrier = Math.max(1, (int) Math.round(0.50 * lanes));
+        int[] laneCoverage = new int[lanes];
         for (int i = 0; i < carrierCount; i++) {
-            int count = Math.max(1, (int) Math.round(lanes * uniform(random, 0.4, 0.7)));
             List<Integer> shuffled = new ArrayList<>(lanes);
             for (int j = 0; j < lanes; j++) shuffled.add(j);
             Collections.shuffle(shuffled, random);
-            for (int k = 0; k < count; k++) eligible[i][shuffled.get(k)] = true;
+            for (int k = 0; k < lanesPerCarrier; k++) {
+                int j = shuffled.get(k);
+                eligible[i][j] = true;
+                laneCoverage[j]++;
+            }
         }
+        // Preserve exactly 50% coverage per carrier while ensuring that every lane
+        // has at least one eligible carrier.
         for (int j = 0; j < lanes; j++) {
-            List<Integer> missing = new ArrayList<>();
-            int covered = 0;
-            for (int i = 0; i < carrierCount; i++) {
-                if (eligible[i][j]) covered++;
-                else missing.add(i);
+            if (laneCoverage[j] > 0) continue;
+            List<Integer> carriers = new ArrayList<>(carrierCount);
+            for (int i = 0; i < carrierCount; i++) carriers.add(i);
+            Collections.shuffle(carriers, random);
+            boolean repaired = false;
+            for (int i : carriers) {
+                List<Integer> donors = new ArrayList<>();
+                for (int k = 0; k < lanes; k++)
+                    if (eligible[i][k] && laneCoverage[k] > 1) donors.add(k);
+                if (donors.isEmpty()) continue;
+                int donor = donors.get(random.nextInt(donors.size()));
+                eligible[i][donor] = false;
+                eligible[i][j] = true;
+                laneCoverage[donor]--;
+                laneCoverage[j]++;
+                repaired = true;
+                break;
             }
-            Collections.shuffle(missing, random);
-            for (int k = 0; covered < 6; k++, covered++) {
-                eligible[missing.get(k)][j] = true;
-            }
+            if (!repaired) throw new IllegalStateException("Cannot construct 50% lane coverage.");
         }
 
         double[][] rates = new double[carrierCount][lanes];

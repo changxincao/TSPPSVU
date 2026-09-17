@@ -2,6 +2,7 @@ package Test.analysis.synthetic;
 
 import Basic.ProcurementParams;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.Distribution;
+import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.Parameters;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.Volatility;
 
 import java.util.Arrays;
@@ -34,7 +35,9 @@ public final class TRBSVUSyntheticCaseSelfCheck {
             require(Arrays.equals(a.oos.get(s).demand(), repeat.oos.get(s).demand()),
                     "OOS reproducibility failed.");
         }
-        checkMarket(a.params, otherCell.params);
+        Parameters demandParameters = TRBSVUSyntheticDemandGenerator.sampleParameters(
+                60, 100, seeds.demandParameters());
+        checkMarket(a.params, otherCell.params, demandParameters.typicalDemand());
         TRBSVUSyntheticCase.ValidationWindow first = a.validationWindow(70, 70);
         TRBSVUSyntheticCase.ValidationWindow last = a.validationWindow(99, 70);
         require(first.train().size() == 70 && first.train().get(0) == a.history.get(0)
@@ -45,7 +48,9 @@ public final class TRBSVUSyntheticCaseSelfCheck {
                 + "30 possible 70-row validation origins, 1000 paired OOS draws.");
     }
 
-    private static void checkMarket(ProcurementParams p, ProcurementParams paired) {
+    private static void checkMarket(ProcurementParams p, ProcurementParams paired,
+                                    double[] typicalDemand) {
+        int expectedPerCarrier = (int) Math.round(0.50 * p.J);
         for (int j = 0; j < p.J; j++) {
             int count = 0;
             double sumRate = 0.0;
@@ -57,16 +62,24 @@ public final class TRBSVUSyntheticCaseSelfCheck {
                 sumRate += p.r[i][j];
                 require(p.q[i][j] == paired.q[i][j] && p.r[i][j] == paired.r[i][j],
                         "Paired rate/capacity mismatch.");
+                double capacityRatio = p.q[i][j] / typicalDemand[j];
+                require(capacityRatio >= 0.3 && capacityRatio <= 0.5,
+                        "Eligible-pair capacity left U(0.3,0.5) demand scale.");
             }
-            require(count >= 6, "Lane has fewer than six eligible carriers.");
+            require(count >= 1, "Lane has no eligible carrier.");
             double markup = p.e[j] / (sumRate / count);
             require(markup >= 1.5 && markup <= 2.5, "Spot markup outside range.");
         }
         for (int i = 0; i < p.I; i++) {
             double minimumRate = Double.POSITIVE_INFINITY;
+            int covered = 0;
             for (int j = 0; j < p.J; j++) {
-                if (p.eligible[i][j]) minimumRate = Math.min(minimumRate, p.r[i][j]);
+                if (p.eligible[i][j]) {
+                    covered++;
+                    minimumRate = Math.min(minimumRate, p.r[i][j]);
+                }
             }
+            require(covered == expectedPerCarrier, "Carrier coverage is not 50%.");
             require(p.h[i] == minimumRate && p.p[i] < p.M[i],
                     "MQC penalty or capacity relationship is wrong.");
             require(p.p[i] == paired.p[i] && p.h[i] == paired.h[i],

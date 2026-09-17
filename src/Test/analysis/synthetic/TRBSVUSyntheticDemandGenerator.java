@@ -108,16 +108,16 @@ public final class TRBSVUSyntheticDemandGenerator {
         public double[] volatilityQuantile() { return volatilityQuantile.clone(); }
         public double[] commonLoading() { return commonLoading.clone(); }
 
-        /** E[mu_j(theta)] over the historical horizon; procurement scale only. */
+        /** E[mu_j(theta)] under the synthetic context distribution; procurement scale only. */
         public double[] typicalDemand() {
             double[] result = new double[laneCount()];
-            double averageTrend = (historicalPeriods - 1.0) / (2.0 * historicalPeriods);
+            double averageContext = 0.5;
             for (int j = 0; j < result.length; j++) {
                 if (isCentered(contextStructure)) {
-                    result[j] = base[j] + (averageTrend - 0.5) * trend[j];
+                    result[j] = base[j];
                 } else {
                     result[j] = base[j] + 0.5 * (market[j] + promotion[j] + attention[j])
-                            + averageTrend * trend[j];
+                            + averageContext * trend[j];
                 }
             }
             return result;
@@ -391,14 +391,14 @@ public final class TRBSVUSyntheticDemandGenerator {
         double[] cv = parameters.volatilityParameters(regime);
         List<Sample> history = new ArrayList<>(h);
         for (int t = 0; t < h; t++) {
-            CovariateVector context = context(t, h, contextRandom);
+            CovariateVector context = context(contextRandom);
             double[] demand = drawDemand(parameters.nominalDemand(context), cv,
                     parameters.commonLoading, distribution, historyRandom,
                     historyCommonRandom, useCommonFactor);
             history.add(sample(t, t, context, demand, 1.0 / h));
         }
 
-        CovariateVector testContext = context(h, h, contextRandom);
+        CovariateVector testContext = context(contextRandom);
         double[] testNominal = parameters.nominalDemand(testContext);
         List<Sample> oos = new ArrayList<>(oosCount);
         for (int draw = 0; draw < oosCount; draw++) {
@@ -428,7 +428,7 @@ public final class TRBSVUSyntheticDemandGenerator {
         double[] cv = parameters.volatilityParameters(regime);
         List<Sample> history = new ArrayList<>(h);
         for (int t = 0; t < h; t++) {
-            CovariateVector context = context(t, h, contextRandom);
+            CovariateVector context = context(contextRandom);
             double[] demand = drawDemand(parameters.nominalDemand(context), cv,
                     parameters.commonLoading, distribution, historyRandom,
                     historyCommonRandom, true);
@@ -437,9 +437,7 @@ public final class TRBSVUSyntheticDemandGenerator {
 
         List<ConditionalQuery> queries = new ArrayList<>(queryCount);
         for (int query = 0; query < queryCount; query++) {
-            // All queries are evaluated at the same decision horizon; only the
-            // three stochastic context coordinates vary, while trend remains 1.
-            CovariateVector queryContext = context(h, h, contextRandom);
+            CovariateVector queryContext = context(contextRandom);
             double[] nominal = parameters.nominalDemand(queryContext);
             List<Sample> oos = new ArrayList<>(oosCount);
             for (int draw = 0; draw < oosCount; draw++) {
@@ -453,9 +451,9 @@ public final class TRBSVUSyntheticDemandGenerator {
         return new MultiQueryReplication(parameters, history, queries);
     }
 
-    private static CovariateVector context(int zeroBasedPeriod, int h, Random random) {
+    private static CovariateVector context(Random random) {
         return new CovariateVector(new double[] {
-                random.nextDouble(), (double) zeroBasedPeriod / h,
+                random.nextDouble(), random.nextDouble(),
                 random.nextDouble(), random.nextDouble()
         });
     }

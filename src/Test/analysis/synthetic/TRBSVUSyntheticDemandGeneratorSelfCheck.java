@@ -43,10 +43,9 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
                 "History/OOS sample count differs from the experiment protocol.");
         require(multi.history.size() == h && multi.queries.size() == 3,
                 "Multi-query sample count differs from the requested protocol.");
-        require(normal.history.get(0).theta.values()[1] == 0.0
-                        && normal.history.get(h - 1).theta.values()[1] == 0.99
-                        && normal.testContext.values()[1] == 1.0,
-                "Time context does not follow T_t=(t-1)/H.");
+        for (Sample sample : normal.history)
+            checkUnitCube(sample.theta.values(), "Historical context");
+        checkUnitCube(normal.testContext.values(), "Test context");
         require(Arrays.equals(normal.testContext.values(), lognormal.testContext.values()),
                 "DGP cells must share the final context.");
         require(Arrays.equals(normal.parameters.typicalDemand(), lognormal.parameters.typicalDemand()),
@@ -74,10 +73,10 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
                     "First multi-query OOS block does not match the single-query protocol.");
         }
         require(!Arrays.equals(multi.queries.get(0).context.values(),
-                        multi.queries.get(1).context.values())
-                        && multi.queries.get(0).context.values()[1] == 1.0
-                        && multi.queries.get(1).context.values()[1] == 1.0,
-                "Multi-query contexts must vary while sharing the final trend coordinate.");
+                        multi.queries.get(1).context.values()),
+                "Multi-query contexts must be independently generated.");
+        for (int query = 0; query < multi.queries.size(); query++)
+            checkUnitCube(multi.queries.get(query).context.values(), "Multi-query context");
         for (int s = 0; s < oosCount; s++) {
             Sample a = normal.oos.get(s);
             Sample b = repeat.oos.get(s);
@@ -104,6 +103,12 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
         }
         System.out.println("PASS synthetic DGP: 60 lanes, 100 historical periods, "
                 + "1000 fixed-context OOS draws; six cells, paired contexts, reproducible demands.");
+    }
+
+    private static void checkUnitCube(double[] context, String label) {
+        require(context.length == 4, label + " dimension changed.");
+        for (double value : context)
+            require(value >= 0.0 && value < 1.0, label + " left [0,1). ");
     }
 
     private static void checkAlternativeStructures(int h) {
@@ -229,10 +234,9 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
                             && inRange((trend[j] - base[j]) / base[j], 0.2, 0.4),
                     "Context-effect range mismatch.");
             double expected = base[j] + 0.5 * (market[j] + promotion[j]
-                    + attention[j] - 3.0 * base[j])
-                    + (horizonAverageTrend(p) * (trend[j] - base[j]));
+                    + trend[j] + attention[j] - 4.0 * base[j]);
             require(Math.abs(typical[j] - expected) < 1e-10,
-                    "Typical demand does not match the historical context average.");
+                    "Typical demand does not match the context-distribution mean.");
         }
         for (Volatility regime : Volatility.values()) {
             double lower = regime == Volatility.LOW ? 0.1
@@ -245,10 +249,6 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
         for (double loading : p.commonLoading()) {
             require(inRange(loading, 0.2, 0.6), "Common-factor loading range mismatch.");
         }
-    }
-
-    private static double horizonAverageTrend(Parameters p) {
-        return (p.historicalPeriods() - 1.0) / (2.0 * p.historicalPeriods());
     }
 
     private static boolean inRange(double value, double lower, double upper) {
