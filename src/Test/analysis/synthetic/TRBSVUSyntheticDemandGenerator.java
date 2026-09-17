@@ -33,7 +33,8 @@ public final class TRBSVUSyntheticDemandGenerator {
         DENSE_PROPORTIONAL, DENSE_WIDE_POSITIVE, DENSE_INDEPENDENT_LEVELS,
         DENSE_WIDE_SAME_MEAN,
         DENSE_WIDE_SIGNED_SAME_MEAN,
-        DENSE_RANDOM_SHARES, TWO_ACTIVE, ONE_ACTIVE, SIGNED_CENTERED, GROUPED_CENTERED
+        DENSE_RANDOM_SHARES, DENSE_POSITIVE_CENTERED,
+        TWO_ACTIVE, ONE_ACTIVE, SIGNED_CENTERED, GROUPED_CENTERED
     }
 
     public enum BaseStructure {
@@ -304,6 +305,10 @@ public final class TRBSVUSyntheticDemandGenerator {
         }
         double total = 0.0;
         for (double ratio : ratios) total += ratio;
+        if (structure == ContextStructure.DENSE_POSITIVE_CENTERED) {
+            for (int k = 0; k < ratios.length; k++) ratios[k] /= total;
+            return;
+        }
         java.util.Arrays.fill(ratios, 0.0);
         if (structure == ContextStructure.GROUPED_CENTERED) {
             ratios[lane % ratios.length] = 1.0;
@@ -342,7 +347,8 @@ public final class TRBSVUSyntheticDemandGenerator {
 
     private static boolean isCentered(ContextStructure structure) {
         return structure == ContextStructure.SIGNED_CENTERED
-                || structure == ContextStructure.GROUPED_CENTERED;
+                || structure == ContextStructure.GROUPED_CENTERED
+                || structure == ContextStructure.DENSE_POSITIVE_CENTERED;
     }
 
     private static int[] baseLevels(int lanes, long seed) {

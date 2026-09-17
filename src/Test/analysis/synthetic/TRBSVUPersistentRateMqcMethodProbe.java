@@ -38,11 +38,12 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
     private TRBSVUPersistentRateMqcMethodProbe() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1 || args.length > 10) {
+        if (args.length < 1 || args.length > 13) {
             throw new IllegalArgumentException(
                     "Usage: <output-directory> [replications] [queries] [mqc-scale]"
                             + " [volatility] [context-scale] [bandwidth] [spot-scale]"
-                            + " [carriers] [oracle-samples]");
+                            + " [carriers] [oracle-samples] [context-structure]"
+                            + " [common-loading-lower] [common-loading-upper]");
         }
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
         int replications = args.length >= 2 ? Integer.parseInt(args[1]) : 3;
@@ -63,6 +64,11 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
         if (carriers < 6) throw new IllegalArgumentException("At least six carriers are required.");
         int oracleSamples = args.length >= 10 ? Integer.parseInt(args[9]) : 0;
         if (oracleSamples < 0) throw new IllegalArgumentException("Oracle samples cannot be negative.");
+        ContextStructure contextStructure = args.length >= 11
+                ? ContextStructure.valueOf(args[10].trim().toUpperCase(Locale.ROOT))
+                : ContextStructure.DENSE_INDEPENDENT_LEVELS;
+        double commonLoadingLower = args.length >= 12 ? Double.parseDouble(args[11]) : 0.2;
+        double commonLoadingUpper = args.length >= 13 ? Double.parseDouble(args[12]) : 0.6;
         Files.createDirectories(output);
 
         Settings settings = new Settings(1, 600, 1e-8,
@@ -80,8 +86,9 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                     seeds.nextLong(), seeds.nextLong());
             Parameters parameters = TRBSVUSyntheticDemandGenerator.sampleParameters(
                     LANES, HISTORY, paired.demandParameters(), contextScale,
-                    ContextStructure.DENSE_INDEPENDENT_LEVELS,
-                    BaseStructure.THREE_LEVEL_WIDE);
+                    contextStructure,
+                    BaseStructure.THREE_LEVEL_WIDE,
+                    commonLoadingLower, commonLoadingUpper);
             MultiQueryReplication demand = TRBSVUSyntheticDemandGenerator.generateMultiQuery(
                     parameters, Distribution.LOGNORMAL, volatility, queryCount,
                     OOS + oracleSamples,
