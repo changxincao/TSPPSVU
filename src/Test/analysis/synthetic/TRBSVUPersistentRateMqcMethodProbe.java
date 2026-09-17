@@ -32,15 +32,15 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
     private static final int LANES = 20;
     private static final int HISTORY = 60;
     private static final int OOS = 500;
-    private static final double BANDWIDTH = 0.5;
+    private static final double DEFAULT_BANDWIDTH = 0.5;
 
     private TRBSVUPersistentRateMqcMethodProbe() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1 || args.length > 6) {
+        if (args.length < 1 || args.length > 8) {
             throw new IllegalArgumentException(
                     "Usage: <output-directory> [replications] [queries] [mqc-scale]"
-                            + " [volatility] [context-scale]");
+                            + " [volatility] [context-scale] [bandwidth] [spot-scale]");
         }
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
         int replications = args.length >= 2 ? Integer.parseInt(args[1]) : 3;
@@ -49,6 +49,14 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
         Volatility volatility = args.length >= 5
                 ? Volatility.valueOf(args[4].toUpperCase(Locale.ROOT)) : Volatility.MEDIUM;
         double contextScale = args.length >= 6 ? Double.parseDouble(args[5]) : 1.0;
+        double bandwidth = args.length >= 7 ? Double.parseDouble(args[6]) : DEFAULT_BANDWIDTH;
+        if (!(bandwidth > 0.0) || !Double.isFinite(bandwidth)) {
+            throw new IllegalArgumentException("Bandwidth must be finite and positive.");
+        }
+        double spotScale = args.length >= 8 ? Double.parseDouble(args[7]) : 1.0;
+        if (!(spotScale > 0.0) || !Double.isFinite(spotScale)) {
+            throw new IllegalArgumentException("Spot scale must be finite and positive.");
+        }
         Files.createDirectories(output);
 
         Settings settings = new Settings(1, 600, 1e-8,
@@ -78,18 +86,21 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                             paired.procurement() ^ 0x5DEECE66DL, 0.7, 1.3);
             ProcurementParams candidate =
                     TRBSVUSingleSampleCardinalityDiagnostic.scaleMqc(persistent, mqcScale);
+            candidate = scaleSpot(candidate, spotScale);
 
-            runMarket(rows, "CURRENT", replication, parameters, demand, current, settings);
+            runMarket(rows, "CURRENT", replication, parameters, demand, current, bandwidth,
+                    settings);
             runMarket(rows, String.format(Locale.ROOT, "PERSISTENT_WIDE_MQC_%.2f", mqcScale),
                     replication,
-                    parameters, demand, candidate, settings);
+                    parameters, demand, candidate, bandwidth, settings);
             Files.write(output.resolve("method_probe.tsv"), rows, StandardCharsets.UTF_8);
         }
     }
 
     private static void runMarket(List<String> rows, String marketName, int replication,
                                   Parameters parameters, MultiQueryReplication demand,
-                                  ProcurementParams market, Settings settings) throws Exception {
+                                  ProcurementParams market, double bandwidth,
+                                  Settings settings) throws Exception {
         List<String> lanes = laneNames();
         ConditionalQuery first = demand.queries.get(0);
         Solution d = solve(market, lanes,
@@ -104,7 +115,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
             write(rows, marketName, replication, query, "SAA", saa, HISTORY,
                     parameters, conditional, market);
             List<Sample> contextual = TRBSVUScenarioWeights.kernel(demand.history,
-                    conditional.context, TRBSVUScenarioWeights.Kernel.EXPONENTIAL, BANDWIDTH);
+                    conditional.context, TRBSVUScenarioWeights.Kernel.EXPONENTIAL, bandwidth);
             Solution csaa = solve(market, lanes, contextual, conditional, settings);
             write(rows, marketName, replication, query, "CSAA", csaa,
                     TRBSVUExperiment1Runner.ess(contextual),
@@ -160,6 +171,27 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
     private static List<String> laneNames() {
         List<String> result = new ArrayList<>(LANES);
         for (int j = 0; j < LANES; j++) result.add("L" + (j + 1));
+        return result;
+    }
+
+    private static ProcurementParams scaleSpot(ProcurementParams source, double scale) {
+        if (scale == 1.0) return source;
+        double[] spot = source.e.clone();
+        for (int j = 0; j < spot.length; j++) spot[j] *= scale;
+        return new ProcurementParams(source.carriers, source.J, spot, source.p.clone(),
+                source.h.clone(), clone(source.q), clone(source.r), clone(source.eligible),
+                source.alpha, source.beta);
+    }
+
+    private static double[][] clone(double[][] source) {
+        double[][] result = new double[source.length][];
+        for (int i = 0; i < source.length; i++) result[i] = source[i].clone();
+        return result;
+    }
+
+    private static boolean[][] clone(boolean[][] source) {
+        boolean[][] result = new boolean[source.length][];
+        for (int i = 0; i < source.length; i++) result[i] = source[i].clone();
         return result;
     }
 }
