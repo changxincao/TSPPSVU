@@ -37,14 +37,18 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
     private TRBSVUPersistentRateMqcMethodProbe() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1 || args.length > 4) {
+        if (args.length < 1 || args.length > 6) {
             throw new IllegalArgumentException(
-                    "Usage: <output-directory> [replications] [queries] [mqc-scale]");
+                    "Usage: <output-directory> [replications] [queries] [mqc-scale]"
+                            + " [volatility] [context-scale]");
         }
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
         int replications = args.length >= 2 ? Integer.parseInt(args[1]) : 3;
         int queryCount = args.length >= 3 ? Integer.parseInt(args[2]) : 20;
         double mqcScale = args.length >= 4 ? Double.parseDouble(args[3]) : 1.50;
+        Volatility volatility = args.length >= 5
+                ? Volatility.valueOf(args[4].toUpperCase(Locale.ROOT)) : Volatility.MEDIUM;
+        double contextScale = args.length >= 6 ? Double.parseDouble(args[5]) : 1.0;
         Files.createDirectories(output);
 
         Settings settings = new Settings(1, 600, 1e-8,
@@ -61,11 +65,11 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                     seeds.nextLong(), seeds.nextLong(), seeds.nextLong(),
                     seeds.nextLong(), seeds.nextLong());
             Parameters parameters = TRBSVUSyntheticDemandGenerator.sampleParameters(
-                    LANES, HISTORY, paired.demandParameters(), 1.0,
+                    LANES, HISTORY, paired.demandParameters(), contextScale,
                     ContextStructure.DENSE_INDEPENDENT_LEVELS,
                     BaseStructure.THREE_LEVEL_WIDE);
             MultiQueryReplication demand = TRBSVUSyntheticDemandGenerator.generateMultiQuery(
-                    parameters, Distribution.LOGNORMAL, Volatility.MEDIUM, queryCount, OOS,
+                    parameters, Distribution.LOGNORMAL, volatility, queryCount, OOS,
                     paired.contexts(), paired.historicalNoise(), paired.oosNoise());
             ProcurementParams current = TRBSVUProcurementGenerator.generate(
                     CARRIERS, parameters.typicalDemand(), paired.procurement());
