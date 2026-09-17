@@ -21,6 +21,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Random;
 import java.util.SplittableRandom;
 
 /**
@@ -37,41 +38,83 @@ public final class TRBSVUSingleSampleCardinalityDiagnostic {
     private TRBSVUSingleSampleCardinalityDiagnostic() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length != 1) throw new IllegalArgumentException("Usage: <output-directory>");
+        if (args.length < 1 || args.length > 2) {
+            throw new IllegalArgumentException("Usage: <output-directory> [replications]");
+        }
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
+        int replications = args.length == 2 ? Integer.parseInt(args[1]) : 3;
         Files.createDirectories(output);
 
         TRBSVUSolveMethods.Settings settings = new TRBSVUSolveMethods.Settings(
-                1, 600, 1e-4, RCSAASolverVariant.LBBD_PRIMAL_EXACT, false, true);
+                1, 600, 1e-8, RCSAASolverVariant.LBBD_PRIMAL_EXACT, false, true);
         SplittableRandom seeds = new SplittableRandom(20260917L);
-        TRBSVUSyntheticCase.Seeds paired = new TRBSVUSyntheticCase.Seeds(
-                seeds.nextLong(), seeds.nextLong(), seeds.nextLong(),
-                seeds.nextLong(), seeds.nextLong());
-        Parameters parameters = TRBSVUSyntheticDemandGenerator.sampleParameters(
-                LANES, HISTORY, paired.demandParameters(), 1.0,
-                ContextStructure.DENSE_INDEPENDENT_LEVELS, BaseStructure.THREE_LEVEL_WIDE);
-        MultiQueryReplication generated = TRBSVUSyntheticDemandGenerator.generateMultiQuery(
-                parameters, Distribution.LOGNORMAL, Volatility.MEDIUM, 1, OOS,
-                paired.contexts(), paired.historicalNoise(), paired.oosNoise());
-        ProcurementParams market = TRBSVUProcurementGenerator.generate(
-                CARRIERS, parameters.typicalDemand(), paired.procurement());
         List<String> lanes = laneNames();
 
         List<String> rows = new ArrayList<>();
-        rows.add("sample\tdemand_type\ttotal_demand\tfree_count\tfixed_count\ttotal_cost"
+        rows.add("replication\tmarket_structure\tsample\tdemand_type\ttotal_demand"
+                + "\tfree_count\tfixed_count\ttotal_cost"
                 + "\ttransport_cost\tspot_cost\tmqc_penalty\tspot_quantity\tmqc_shortfall"
                 + "\tselected_capacity\tselected_mqc\tcovered_lanes\tcapacity_short_lanes"
                 + "\tlane_capacity_shortfall\tselected");
-        for (int t = 0; t < HISTORY; t++) {
-            Sample observed = generated.history.get(t);
-            diagnose(rows, t, "REALIZED", observed.theta, observed.demand(), market, lanes, settings);
-            diagnose(rows, t, "CONDITIONAL_MEAN", observed.theta,
-                    parameters.nominalDemand(observed.theta), market, lanes, settings);
-            Files.write(output.resolve("cardinality_cost_curve.tsv"), rows, StandardCharsets.UTF_8);
+        for (int replication = 1; replication <= replications; replication++) {
+            TRBSVUSyntheticCase.Seeds paired = new TRBSVUSyntheticCase.Seeds(
+                    seeds.nextLong(), seeds.nextLong(), seeds.nextLong(),
+                    seeds.nextLong(), seeds.nextLong());
+            Parameters parameters = TRBSVUSyntheticDemandGenerator.sampleParameters(
+                    LANES, HISTORY, paired.demandParameters(), 1.0,
+                    ContextStructure.DENSE_INDEPENDENT_LEVELS, BaseStructure.THREE_LEVEL_WIDE);
+            MultiQueryReplication generated = TRBSVUSyntheticDemandGenerator.generateMultiQuery(
+                    parameters, Distribution.LOGNORMAL, Volatility.MEDIUM, 1, OOS,
+                    paired.contexts(), paired.historicalNoise(), paired.oosNoise());
+            ProcurementParams current = TRBSVUProcurementGenerator.generate(
+                    CARRIERS, parameters.typicalDemand(), paired.procurement());
+            ProcurementParams currentMqc150 = scaleMqc(current, 1.50);
+            ProcurementParams persistent20 = persistentCarrierRates(current,
+                    paired.procurement() ^ 0x5DEECE66DL, 0.8, 1.2);
+            ProcurementParams persistent30 = persistentCarrierRates(current,
+                    paired.procurement() ^ 0x5DEECE66DL, 0.7, 1.3);
+            ProcurementParams persistent30Mqc125 = scaleMqc(persistent30, 1.25);
+            ProcurementParams persistent30Mqc150 = scaleMqc(persistent30, 1.50);
+            for (int t = 0; t < HISTORY; t++) {
+                Sample observed = generated.history.get(t);
+                diagnose(rows, replication, "CURRENT_LANE_TIERS", t, "REALIZED",
+                        observed.theta, observed.demand(), current, lanes, settings);
+                diagnose(rows, replication, "CURRENT_LANE_TIERS_MQC_1.50", t, "REALIZED",
+                        observed.theta, observed.demand(), currentMqc150, lanes, settings);
+                diagnose(rows, replication, "PERSISTENT_CARRIER_FACTOR", t, "REALIZED",
+                        observed.theta, observed.demand(), persistent20, lanes, settings);
+                diagnose(rows, replication, "PERSISTENT_CARRIER_FACTOR_WIDE", t, "REALIZED",
+                        observed.theta, observed.demand(), persistent30, lanes, settings);
+                diagnose(rows, replication, "PERSISTENT_WIDE_MQC_1.25", t, "REALIZED",
+                        observed.theta, observed.demand(), persistent30Mqc125, lanes, settings);
+                diagnose(rows, replication, "PERSISTENT_WIDE_MQC_1.50", t, "REALIZED",
+                        observed.theta, observed.demand(), persistent30Mqc150, lanes, settings);
+                diagnose(rows, replication, "CURRENT_LANE_TIERS", t, "CONDITIONAL_MEAN",
+                        observed.theta, parameters.nominalDemand(observed.theta),
+                        current, lanes, settings);
+                diagnose(rows, replication, "CURRENT_LANE_TIERS_MQC_1.50", t,
+                        "CONDITIONAL_MEAN", observed.theta,
+                        parameters.nominalDemand(observed.theta), currentMqc150, lanes, settings);
+                diagnose(rows, replication, "PERSISTENT_CARRIER_FACTOR", t,
+                        "CONDITIONAL_MEAN", observed.theta,
+                        parameters.nominalDemand(observed.theta), persistent20, lanes, settings);
+                diagnose(rows, replication, "PERSISTENT_CARRIER_FACTOR_WIDE", t,
+                        "CONDITIONAL_MEAN", observed.theta,
+                        parameters.nominalDemand(observed.theta), persistent30, lanes, settings);
+                diagnose(rows, replication, "PERSISTENT_WIDE_MQC_1.25", t,
+                        "CONDITIONAL_MEAN", observed.theta,
+                        parameters.nominalDemand(observed.theta), persistent30Mqc125, lanes, settings);
+                diagnose(rows, replication, "PERSISTENT_WIDE_MQC_1.50", t,
+                        "CONDITIONAL_MEAN", observed.theta,
+                        parameters.nominalDemand(observed.theta), persistent30Mqc150, lanes, settings);
+                Files.write(output.resolve("cardinality_cost_curve.tsv"), rows,
+                        StandardCharsets.UTF_8);
+            }
         }
     }
 
-    private static void diagnose(List<String> rows, int sampleId, String type,
+    private static void diagnose(List<String> rows, int replication, String structure,
+                                 int sampleId, String type,
                                  CovariateVector context, double[] demand,
                                  ProcurementParams market, List<String> lanes,
                                  TRBSVUSolveMethods.Settings settings) throws Exception {
@@ -108,14 +151,69 @@ public final class TRBSVUSingleSampleCardinalityDiagnostic {
             TRBSVUSolveMethods.OosDraw draw = TRBSVUSolveMethods.evaluateDetailed(
                     fixed, solution.y, List.of(sample)).draws().get(0);
             rows.add(String.format(Locale.ROOT,
-                    "%d\t%s\t%.10f\t%d\t%d\t%.10f\t%.10f\t%.10f\t%.10f"
+                    "%d\t%s\t%d\t%s\t%.10f\t%d\t%d\t%.10f\t%.10f\t%.10f\t%.10f"
                             + "\t%.10f\t%.10f\t%.10f\t%.10f\t%d\t%d\t%.10f\t%s",
-                    sampleId, type, sum(demand), freeCount, m, recourse.objective,
+                    replication, structure, sampleId, type, sum(demand), freeCount, m,
+                    recourse.objective,
                     recourse.transportCost, recourse.spotCost, recourse.penaltyCost,
                     draw.spotQuantity(), recourse.mqcShortfallQuantity, selectedCapacity,
                     selectedMqc, coveredLanes, capacityShortLanes, laneCapacityShortfall,
                     selected(solution.y)));
         }
+    }
+
+    /** Replaces only the independently shuffled lane rate tiers. */
+    static ProcurementParams persistentCarrierRates(ProcurementParams source, long seed,
+                                                     double factorLower,
+                                                     double factorUpper) {
+        Random random = new Random(seed);
+        double[] carrierFactor = new double[source.I];
+        for (int i = 0; i < source.I; i++) {
+            carrierFactor[i] = uniform(random, factorLower, factorUpper);
+        }
+        double[][] rates = new double[source.I][source.J];
+        for (int j = 0; j < source.J; j++) {
+            double laneMean = 0.0;
+            int eligibleCount = 0;
+            for (int i = 0; i < source.I; i++) {
+                if (!source.eligible[i][j]) continue;
+                laneMean += source.r[i][j];
+                eligibleCount++;
+            }
+            laneMean /= eligibleCount;
+            for (int i = 0; i < source.I; i++) {
+                rates[i][j] = source.eligible[i][j]
+                        ? laneMean * carrierFactor[i] * uniform(random, 0.9, 1.1)
+                        : Double.MAX_VALUE;
+            }
+        }
+        double[] penalty = new double[source.I];
+        for (int i = 0; i < source.I; i++) {
+            penalty[i] = Double.POSITIVE_INFINITY;
+            for (int j = 0; j < source.J; j++) {
+                if (source.eligible[i][j]) penalty[i] = Math.min(penalty[i], rates[i][j]);
+            }
+        }
+        return new ProcurementParams(List.copyOf(source.carriers), source.J, source.e.clone(),
+                source.p.clone(), penalty, copy(source.q), rates, copy(source.eligible),
+                source.alpha, source.beta);
+    }
+
+    private static double uniform(Random random, double lower, double upper) {
+        return lower + (upper - lower) * random.nextDouble();
+    }
+
+    static ProcurementParams scaleMqc(ProcurementParams source, double scale) {
+        double[] mqc = source.p.clone();
+        for (int i = 0; i < source.I; i++) {
+            mqc[i] *= scale;
+            if (mqc[i] > source.M[i] + 1e-9) {
+                throw new IllegalArgumentException("Scaled MQC exceeds carrier capacity at " + i);
+            }
+        }
+        return new ProcurementParams(List.copyOf(source.carriers), source.J, source.e.clone(),
+                mqc, source.h.clone(), copy(source.q), copy(source.r), copy(source.eligible),
+                source.alpha, source.beta);
     }
 
     private static Solution solve(ProcurementParams market, List<String> lanes, Sample sample,

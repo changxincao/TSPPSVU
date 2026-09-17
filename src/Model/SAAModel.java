@@ -26,6 +26,7 @@ public class SAAModel {
         // CPLEX params
         cplex.setParam(IloCplex.Param.Threads, cfg.threads);
         cplex.setParam(IloCplex.Param.TimeLimit, cfg.timeLimitSeconds);
+        cplex.setParam(IloCplex.Param.MIP.Tolerances.MIPGap, cfg.tol);
 
         // log handling
         PrintStream ps = null;
