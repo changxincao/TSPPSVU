@@ -1,6 +1,7 @@
 package Test.analysis.synthetic;
 
 import Basic.ProcurementParams;
+import Basic.CovariateVector;
 import Basic.Sample;
 import Model.RCSAASolverVariant;
 import Model.Solution;
@@ -28,7 +29,7 @@ import java.util.SplittableRandom;
  * different D/SAA/CSAA decisions. This is a diagnostic, not a formal experiment.
  */
 public final class TRBSVUPersistentRateMqcMethodProbe {
-    private static final int CARRIERS = 12;
+    private static final int DEFAULT_CARRIERS = 12;
     private static final int LANES = 20;
     private static final int HISTORY = 60;
     private static final int OOS = 500;
@@ -37,10 +38,11 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
     private TRBSVUPersistentRateMqcMethodProbe() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1 || args.length > 8) {
+        if (args.length < 1 || args.length > 10) {
             throw new IllegalArgumentException(
                     "Usage: <output-directory> [replications] [queries] [mqc-scale]"
-                            + " [volatility] [context-scale] [bandwidth] [spot-scale]");
+                            + " [volatility] [context-scale] [bandwidth] [spot-scale]"
+                            + " [carriers] [oracle-samples]");
         }
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
         int replications = args.length >= 2 ? Integer.parseInt(args[1]) : 3;
@@ -57,6 +59,10 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
         if (!(spotScale > 0.0) || !Double.isFinite(spotScale)) {
             throw new IllegalArgumentException("Spot scale must be finite and positive.");
         }
+        int carriers = args.length >= 9 ? Integer.parseInt(args[8]) : DEFAULT_CARRIERS;
+        if (carriers < 6) throw new IllegalArgumentException("At least six carriers are required.");
+        int oracleSamples = args.length >= 10 ? Integer.parseInt(args[9]) : 0;
+        if (oracleSamples < 0) throw new IllegalArgumentException("Oracle samples cannot be negative.");
         Files.createDirectories(output);
 
         Settings settings = new Settings(1, 600, 1e-8,
@@ -77,10 +83,11 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                     ContextStructure.DENSE_INDEPENDENT_LEVELS,
                     BaseStructure.THREE_LEVEL_WIDE);
             MultiQueryReplication demand = TRBSVUSyntheticDemandGenerator.generateMultiQuery(
-                    parameters, Distribution.LOGNORMAL, volatility, queryCount, OOS,
+                    parameters, Distribution.LOGNORMAL, volatility, queryCount,
+                    OOS + oracleSamples,
                     paired.contexts(), paired.historicalNoise(), paired.oosNoise());
             ProcurementParams current = TRBSVUProcurementGenerator.generate(
-                    CARRIERS, parameters.typicalDemand(), paired.procurement());
+                    carriers, parameters.typicalDemand(), paired.procurement());
             ProcurementParams persistent =
                     TRBSVUSingleSampleCardinalityDiagnostic.persistentCarrierRates(current,
                             paired.procurement() ^ 0x5DEECE66DL, 0.7, 1.3);
@@ -88,11 +95,13 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                     TRBSVUSingleSampleCardinalityDiagnostic.scaleMqc(persistent, mqcScale);
             candidate = scaleSpot(candidate, spotScale);
 
-            runMarket(rows, "CURRENT", replication, parameters, demand, current, bandwidth,
-                    settings);
+            if (oracleSamples == 0) {
+                runMarket(rows, "CURRENT", replication, parameters, demand, current, bandwidth,
+                        0, settings);
+            }
             runMarket(rows, String.format(Locale.ROOT, "PERSISTENT_WIDE_MQC_%.2f", mqcScale),
                     replication,
-                    parameters, demand, candidate, bandwidth, settings);
+                    parameters, demand, candidate, bandwidth, oracleSamples, settings);
             Files.write(output.resolve("method_probe.tsv"), rows, StandardCharsets.UTF_8);
         }
     }
@@ -100,6 +109,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
     private static void runMarket(List<String> rows, String marketName, int replication,
                                   Parameters parameters, MultiQueryReplication demand,
                                   ProcurementParams market, double bandwidth,
+                                  int oracleSamples,
                                   Settings settings) throws Exception {
         List<String> lanes = laneNames();
         ConditionalQuery first = demand.queries.get(0);
@@ -110,16 +120,25 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
 
         for (int query = 0; query < demand.queries.size(); query++) {
             ConditionalQuery conditional = demand.queries.get(query);
+            List<Sample> evaluation = conditional.oos.subList(oracleSamples,
+                    conditional.oos.size());
             write(rows, marketName, replication, query, "D", d, 1.0,
-                    parameters, conditional, market);
+                    parameters, conditional.context, evaluation, market);
             write(rows, marketName, replication, query, "SAA", saa, HISTORY,
-                    parameters, conditional, market);
+                    parameters, conditional.context, evaluation, market);
             List<Sample> contextual = TRBSVUScenarioWeights.kernel(demand.history,
                     conditional.context, TRBSVUScenarioWeights.Kernel.EXPONENTIAL, bandwidth);
             Solution csaa = solve(market, lanes, contextual, conditional, settings);
             write(rows, marketName, replication, query, "CSAA", csaa,
                     TRBSVUExperiment1Runner.ess(contextual),
-                    parameters, conditional, market);
+                    parameters, conditional.context, evaluation, market);
+            if (oracleSamples > 0) {
+                List<Sample> oracleTraining = TRBSVUScenarioWeights.equal(
+                        conditional.oos.subList(0, oracleSamples));
+                Solution oracle = solve(market, lanes, oracleTraining, conditional, settings);
+                write(rows, marketName, replication, query, "ORACLE", oracle,
+                        oracleSamples, parameters, conditional.context, evaluation, market);
+            }
         }
     }
 
@@ -137,11 +156,12 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
 
     private static void write(List<String> rows, String marketName, int replication,
                               int query, String method, Solution solution, double ess,
-                              Parameters parameters, ConditionalQuery conditional,
+                              Parameters parameters, CovariateVector context,
+                              List<Sample> evaluation,
                               ProcurementParams market) throws Exception {
-        Oos oos = TRBSVUSolveMethods.evaluate(market, solution.y, conditional.oos);
+        Oos oos = TRBSVUSolveMethods.evaluate(market, solution.y, evaluation);
         double nominalTotal = 0.0;
-        for (double value : parameters.nominalDemand(conditional.context)) nominalTotal += value;
+        for (double value : parameters.nominalDemand(context)) nominalTotal += value;
         rows.add(String.format(Locale.ROOT,
                 "%s\t%d\t%d\t%s\t%s\t%s\t%.10f\t%.10g\t%.6f\t%.10f\t%d\t%s"
                         + "\t%.10f\t%.10f\t%.10f\t%.10f\t%.10f\t%.10f\t%.10f\t%.10f",
