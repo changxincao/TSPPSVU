@@ -1,0 +1,4 @@
+home_group_target,realized_home_coverage,lambda,certified_pairs,same_set,same_cardinality_swap,carrier_addition,dro_vs_csaa_mean_improvement_pct,dro_vs_csaa_sd_improvement_pct,dro_vs_csaa_q95_improvement_pct,dro_vs_csaa_cvar95_improvement_pct,dro_vs_csaa_max_improvement_pct,mean_mqc_penalty_delta,spot_share_delta_percentage_points
+0.80,0.75,0.05,9,9,0,0,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000
+0.80,0.75,0.10,9,7,1,1,-0.585194,1.008513,0.235344,0.017623,0.280387,339.119846,-0.091497
+1.00,1.00,0.10,7,2,1,4,-0.995184,6.065981,1.735222,1.836056,3.052276,1197.720410,-0.894971

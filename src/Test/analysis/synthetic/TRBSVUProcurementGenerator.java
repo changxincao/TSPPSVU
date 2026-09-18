@@ -23,6 +23,36 @@ public final class TRBSVUProcurementGenerator {
             }
         }
         Random random = new Random(seed);
+        boolean[][] eligible = randomEligibility(carrierCount, typicalDemand.length, random);
+        return buildMarket(typicalDemand, random, eligible);
+    }
+
+    public static ProcurementParams generateWithHomeGroupCoverage(
+            int carrierCount, double[] typicalDemand, long seed,
+            int[] laneGroup, int groupCount, double homeCoverage) {
+        if (carrierCount < 6 || typicalDemand == null || typicalDemand.length == 0
+                || laneGroup == null || laneGroup.length != typicalDemand.length) {
+            throw new IllegalArgumentException(
+                    "Carriers, positive lane demands and one group per lane are required.");
+        }
+        if (groupCount <= 1 || !(homeCoverage > 0.5 && homeCoverage <= 1.0)) {
+            throw new IllegalArgumentException(
+                    "At least two groups and home coverage above 0.5 are required.");
+        }
+        for (int j = 0; j < typicalDemand.length; j++) {
+            if (!(typicalDemand[j] > 0.0) || !Double.isFinite(typicalDemand[j])
+                    || laneGroup[j] < 0 || laneGroup[j] >= groupCount) {
+                throw new IllegalArgumentException("Invalid demand or lane group.");
+            }
+        }
+        Random random = new Random(seed);
+        boolean[][] eligible = homeGroupEligibility(
+                carrierCount, typicalDemand.length, laneGroup, groupCount,
+                homeCoverage, random);
+        return buildMarket(typicalDemand, random, eligible);
+    }
+
+    private static boolean[][] randomEligibility(int carrierCount, int lanes, Random random) {
         boolean[][] eligible = new boolean[carrierCount][lanes];
         int lanesPerCarrier = Math.max(1, (int) Math.round(0.50 * lanes));
         int[] laneCoverage = new int[lanes];
@@ -36,6 +66,55 @@ public final class TRBSVUProcurementGenerator {
                 laneCoverage[j]++;
             }
         }
+        repairUncoveredLanes(eligible, laneCoverage, random);
+        return eligible;
+    }
+
+    private static boolean[][] homeGroupEligibility(
+            int carrierCount, int lanes, int[] laneGroup, int groupCount,
+            double homeCoverage, Random random) {
+        int lanesPerCarrier = Math.max(1, (int) Math.round(0.50 * lanes));
+        List<Integer> homeGroups = new ArrayList<>(carrierCount);
+        for (int i = 0; i < carrierCount; i++) homeGroups.add(i % groupCount);
+        Collections.shuffle(homeGroups, random);
+        boolean[][] eligible = new boolean[carrierCount][lanes];
+        int[] laneCoverage = new int[lanes];
+        for (int i = 0; i < carrierCount; i++) {
+            int home = homeGroups.get(i);
+            List<Integer> homeLanes = new ArrayList<>();
+            List<Integer> otherLanes = new ArrayList<>();
+            for (int j = 0; j < lanes; j++) {
+                (laneGroup[j] == home ? homeLanes : otherLanes).add(j);
+            }
+            Collections.shuffle(homeLanes, random);
+            Collections.shuffle(otherLanes, random);
+            int homeCount = Math.min(homeLanes.size(),
+                    (int) Math.round(homeCoverage * homeLanes.size()));
+            homeCount = Math.max(0, Math.min(homeCount, lanesPerCarrier));
+            int otherCount = lanesPerCarrier - homeCount;
+            if (otherCount > otherLanes.size()) {
+                otherCount = otherLanes.size();
+                homeCount = lanesPerCarrier - otherCount;
+            }
+            for (int k = 0; k < homeCount; k++) {
+                int j = homeLanes.get(k);
+                eligible[i][j] = true;
+                laneCoverage[j]++;
+            }
+            for (int k = 0; k < otherCount; k++) {
+                int j = otherLanes.get(k);
+                eligible[i][j] = true;
+                laneCoverage[j]++;
+            }
+        }
+        repairUncoveredLanes(eligible, laneCoverage, random);
+        return eligible;
+    }
+
+    private static void repairUncoveredLanes(
+            boolean[][] eligible, int[] laneCoverage, Random random) {
+        int carrierCount = eligible.length;
+        int lanes = laneCoverage.length;
         // Preserve exactly 50% coverage per carrier while ensuring that every lane
         // has at least one eligible carrier.
         for (int j = 0; j < lanes; j++) {
@@ -59,7 +138,12 @@ public final class TRBSVUProcurementGenerator {
             }
             if (!repaired) throw new IllegalStateException("Cannot construct 50% lane coverage.");
         }
+    }
 
+    private static ProcurementParams buildMarket(
+            double[] typicalDemand, Random random, boolean[][] eligible) {
+        int carrierCount = eligible.length;
+        int lanes = typicalDemand.length;
         double[][] rates = new double[carrierCount][lanes];
         double[][] capacities = new double[carrierCount][lanes];
         double[] spot = new double[lanes];

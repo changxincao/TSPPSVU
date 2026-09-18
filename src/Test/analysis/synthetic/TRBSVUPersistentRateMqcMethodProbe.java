@@ -39,7 +39,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
     private TRBSVUPersistentRateMqcMethodProbe() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1 || args.length > 24) {
+        if (args.length < 1 || args.length > 25) {
             throw new IllegalArgumentException(
                     "Usage: <output-directory> [replications] [queries] [mqc-scale]"
                             + " [volatility] [context-scale] [bandwidth] [spot-scale]"
@@ -51,7 +51,8 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                             + " [surge-probability; <=0 disables] [surge-multiplier]"
                             + " [top-high-demand-queries; 0 means all]"
                             + " [heterogeneous-surge: true|false]"
-                            + " [regional-groups; <=1 disables] [global-variance-share]");
+                            + " [regional-groups; <=1 disables] [global-variance-share]"
+                            + " [home-group-coverage; <=0 disables]");
         }
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
         int replications = args.length >= 2 ? Integer.parseInt(args[1]) : 3;
@@ -98,9 +99,14 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
         boolean heterogeneousSurge = args.length >= 22 && Boolean.parseBoolean(args[21]);
         int regionalGroups = args.length >= 23 ? Integer.parseInt(args[22]) : 0;
         double globalVarianceShare = args.length >= 24 ? Double.parseDouble(args[23]) : 1.0;
+        double homeGroupCoverage = args.length >= 25 ? Double.parseDouble(args[24]) : 0.0;
         if (surgeProbability > 0.0 && regionalGroups > 1) {
             throw new IllegalArgumentException(
                     "Rare-surge and regional-factor diagnostics cannot be enabled together.");
+        }
+        if (homeGroupCoverage > 0.0 && regionalGroups <= 1) {
+            throw new IllegalArgumentException(
+                    "Home-group coverage requires regional demand groups.");
         }
         if (topHighDemandQueries < 0 || topHighDemandQueries > queryCount) {
             throw new IllegalArgumentException(
@@ -156,8 +162,17 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                         paired.contexts(), paired.historicalNoise(), paired.oosNoise(),
                         contextDistribution, surgeProbability, surgeMultiplier);
             }
-            ProcurementParams current = TRBSVUProcurementGenerator.generate(
-                    carriers, parameters.typicalDemand(), paired.procurement());
+            ProcurementParams current;
+            if (homeGroupCoverage > 0.0) {
+                int[] laneGroup = TRBSVUSyntheticDemandGenerator.balancedRegionalGroups(
+                        LANES, regionalGroups, paired.contexts());
+                current = TRBSVUProcurementGenerator.generateWithHomeGroupCoverage(
+                        carriers, parameters.typicalDemand(), paired.procurement(),
+                        laneGroup, regionalGroups, homeGroupCoverage);
+            } else {
+                current = TRBSVUProcurementGenerator.generate(
+                        carriers, parameters.typicalDemand(), paired.procurement());
+            }
             ProcurementParams persistent =
                     TRBSVUSingleSampleCardinalityDiagnostic.persistentCarrierRates(current,
                             paired.procurement() ^ 0x5DEECE66DL, 0.7, 1.3);
@@ -176,6 +191,9 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
             if (regionalGroups > 1) {
                 marketName += String.format(Locale.ROOT, "_REGIONAL_K%d_TAU%.2f",
                         regionalGroups, globalVarianceShare);
+            }
+            if (homeGroupCoverage > 0.0) {
+                marketName += String.format(Locale.ROOT, "_HOME%.2f", homeGroupCoverage);
             }
             runMarket(rows, marketName,
                     replication,

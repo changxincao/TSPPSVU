@@ -830,6 +830,14 @@ public final class TRBSVUSyntheticDemandGenerator {
         return result;
     }
 
+    static int[] balancedRegionalGroups(int laneCount, int groupCount, long contextSeed) {
+        if (groupCount <= 1 || groupCount > laneCount) {
+            throw new IllegalArgumentException(
+                    "Regional group count must lie between 2 and the lane count.");
+        }
+        return balancedGroups(laneCount, groupCount, contextSeed ^ REGIONAL_GROUP_SALT);
+    }
+
     private static Sample sample(int id, int period, CovariateVector context,
                                  double[] demand, double weight) {
         LocalDate start = FIRST_WEEK.plusWeeks(period);

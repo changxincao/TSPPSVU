@@ -38,6 +38,7 @@ public final class TRBSVUSyntheticCaseSelfCheck {
         Parameters demandParameters = TRBSVUSyntheticDemandGenerator.sampleParameters(
                 60, 100, seeds.demandParameters());
         checkMarket(a.params, otherCell.params, demandParameters.typicalDemand());
+        checkHomeGroupCoverage(demandParameters.typicalDemand());
         TRBSVUSyntheticCase.ValidationWindow first = a.validationWindow(70, 70);
         TRBSVUSyntheticCase.ValidationWindow last = a.validationWindow(99, 70);
         require(first.train().size() == 70 && first.train().get(0) == a.history.get(0)
@@ -84,6 +85,56 @@ public final class TRBSVUSyntheticCaseSelfCheck {
                     "MQC penalty or capacity relationship is wrong.");
             require(p.p[i] == paired.p[i] && p.h[i] == paired.h[i],
                     "Paired MQC market mismatch.");
+        }
+    }
+
+    private static void checkHomeGroupCoverage(double[] typicalDemand) {
+        int groupCount = 5;
+        int[] laneGroup = TRBSVUSyntheticDemandGenerator.balancedRegionalGroups(
+                typicalDemand.length, groupCount, 17L);
+        ProcurementParams first = TRBSVUProcurementGenerator.generateWithHomeGroupCoverage(
+                20, typicalDemand, 13L, laneGroup, groupCount, 0.8);
+        ProcurementParams repeat = TRBSVUProcurementGenerator.generateWithHomeGroupCoverage(
+                20, typicalDemand, 13L, laneGroup, groupCount, 0.8);
+        int expectedPerCarrier = (int) Math.round(0.50 * typicalDemand.length);
+        require(Arrays.deepEquals(first.eligible, repeat.eligible),
+                "Home-group coverage is not reproducible.");
+        double strongestGroupCoverage = 0.0;
+        double remainingGroupCoverage = 0.0;
+        for (int i = 0; i < first.I; i++) {
+            int covered = 0;
+            int[] coveredByGroup = new int[groupCount];
+            int[] lanesByGroup = new int[groupCount];
+            for (int j = 0; j < first.J; j++) {
+                lanesByGroup[laneGroup[j]]++;
+                if (first.eligible[i][j]) {
+                    covered++;
+                    coveredByGroup[laneGroup[j]]++;
+                }
+            }
+            require(covered == expectedPerCarrier,
+                    "Home-group market did not preserve exact 50% carrier coverage.");
+            double best = -1.0;
+            int bestGroup = -1;
+            for (int g = 0; g < groupCount; g++) {
+                double rate = (double) coveredByGroup[g] / lanesByGroup[g];
+                if (rate > best) {
+                    best = rate;
+                    bestGroup = g;
+                }
+            }
+            strongestGroupCoverage += best;
+            remainingGroupCoverage += (covered - coveredByGroup[bestGroup])
+                    / (double) (first.J - lanesByGroup[bestGroup]);
+        }
+        double meanStrongest = strongestGroupCoverage / first.I;
+        double meanRemaining = remainingGroupCoverage / first.I;
+        require(meanStrongest >= 0.75 && meanRemaining < 0.50,
+                "Home-group market did not create a home coverage preference.");
+        for (int j = 0; j < first.J; j++) {
+            boolean covered = false;
+            for (int i = 0; i < first.I; i++) covered |= first.eligible[i][j];
+            require(covered, "Home-group market left one lane uncovered.");
         }
     }
 
