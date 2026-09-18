@@ -37,6 +37,7 @@ public final class TRBSVUSyntheticDemandGenerator {
         MODERATE_RANDOM_POSITIVE_CENTERED, WIDE_RANDOM_POSITIVE_CENTERED,
         SIMPLEX_RANDOM_POSITIVE_CENTERED, LOGNORMAL_RANDOM_POSITIVE_CENTERED,
         SQUARED_GAUSSIAN_POSITIVE_CENTERED,
+        FOURTH_POWER_GAUSSIAN_POSITIVE_CENTERED,
         DOMINANT_POSITIVE_CENTERED,
         TWO_ACTIVE, ONE_ACTIVE, SIGNED_CENTERED, GROUPED_CENTERED
     }
@@ -327,7 +328,8 @@ public final class TRBSVUSyntheticDemandGenerator {
         }
         if (structure == ContextStructure.SIMPLEX_RANDOM_POSITIVE_CENTERED
                 || structure == ContextStructure.LOGNORMAL_RANDOM_POSITIVE_CENTERED
-                || structure == ContextStructure.SQUARED_GAUSSIAN_POSITIVE_CENTERED) {
+                || structure == ContextStructure.SQUARED_GAUSSIAN_POSITIVE_CENTERED
+                || structure == ContextStructure.FOURTH_POWER_GAUSSIAN_POSITIVE_CENTERED) {
             double randomTotal = 0.0;
             for (int k = 0; k < ratios.length; k++) {
                 if (structure == ContextStructure.SIMPLEX_RANDOM_POSITIVE_CENTERED) {
@@ -337,6 +339,8 @@ public final class TRBSVUSyntheticDemandGenerator {
                 } else {
                     double draw = random.nextGaussian();
                     ratios[k] = draw * draw;
+                    if (structure == ContextStructure.FOURTH_POWER_GAUSSIAN_POSITIVE_CENTERED)
+                        ratios[k] *= ratios[k];
                 }
                 randomTotal += ratios[k];
             }
@@ -393,6 +397,7 @@ public final class TRBSVUSyntheticDemandGenerator {
                 || structure == ContextStructure.SIMPLEX_RANDOM_POSITIVE_CENTERED
                 || structure == ContextStructure.LOGNORMAL_RANDOM_POSITIVE_CENTERED
                 || structure == ContextStructure.SQUARED_GAUSSIAN_POSITIVE_CENTERED
+                || structure == ContextStructure.FOURTH_POWER_GAUSSIAN_POSITIVE_CENTERED
                 || structure == ContextStructure.DOMINANT_POSITIVE_CENTERED;
     }
 
