@@ -19,6 +19,8 @@ public final class TRBSVUSyntheticDemandGenerator {
     private static final LocalDate FIRST_WEEK = LocalDate.of(2000, 1, 3);
     private static final long COMMON_LOADING_SALT = 0x6A09E667F3BCC909L;
     private static final long COMMON_NOISE_SALT = 0xBB67AE8584CAA73BL;
+    private static final long REGIONAL_NOISE_SALT = 0x510E527FADE682D1L;
+    private static final long REGIONAL_GROUP_SALT = 0x9B05688C2B3E6C1FL;
     private static final long CONTEXT_STRUCTURE_SALT = 0x3C6EF372FE94F82BL;
     private static final long BASE_STRUCTURE_SALT = 0xA54FF53A5F1D36F1L;
 
@@ -521,6 +523,69 @@ public final class TRBSVUSyntheticDemandGenerator {
     }
 
     /**
+     * Diagnostic hierarchy that preserves every lane's Gaussian marginal shock
+     * while splitting its common component into global and regional factors.
+     * A global-variance share of one exactly reproduces {@link #generateMultiQuery}.
+     */
+    public static MultiQueryReplication generateMultiQueryWithRegionalFactors(
+            Parameters parameters, Distribution distribution, Volatility regime,
+            int queryCount, int oosCount, long contextSeed,
+            long historyNoiseSeed, long oosNoiseSeed,
+            ContextDistribution contextDistribution,
+            int groupCount, double globalVarianceShare) {
+        if (parameters == null || distribution == null || regime == null
+                || contextDistribution == null || queryCount <= 0 || oosCount <= 0) {
+            throw new IllegalArgumentException(
+                    "Parameters, DGP cell, query count and OOS count are required.");
+        }
+        if (groupCount <= 1 || groupCount > parameters.laneCount()) {
+            throw new IllegalArgumentException(
+                    "Regional group count must lie between 2 and the lane count.");
+        }
+        if (!(globalVarianceShare >= 0.0 && globalVarianceShare <= 1.0)
+                || !Double.isFinite(globalVarianceShare)) {
+            throw new IllegalArgumentException("Global variance share must lie in [0,1].");
+        }
+        int h = parameters.historicalPeriods();
+        int[] laneGroup = balancedGroups(parameters.laneCount(), groupCount,
+                contextSeed ^ REGIONAL_GROUP_SALT);
+        Random contextRandom = new Random(contextSeed);
+        Random historyRandom = new Random(historyNoiseSeed);
+        Random oosRandom = new Random(oosNoiseSeed);
+        Random historyCommonRandom = new Random(historyNoiseSeed ^ COMMON_NOISE_SALT);
+        Random oosCommonRandom = new Random(oosNoiseSeed ^ COMMON_NOISE_SALT);
+        Random historyRegionalRandom = new Random(historyNoiseSeed ^ REGIONAL_NOISE_SALT);
+        Random oosRegionalRandom = new Random(oosNoiseSeed ^ REGIONAL_NOISE_SALT);
+        double[] cv = parameters.volatilityParameters(regime);
+        List<Sample> history = new ArrayList<>(h);
+        for (int t = 0; t < h; t++) {
+            CovariateVector context = context(contextRandom, contextDistribution);
+            double[] demand = drawDemandWithRegionalFactors(
+                    parameters.nominalDemand(context), cv, parameters.commonLoading,
+                    distribution, historyRandom, historyCommonRandom,
+                    historyRegionalRandom, laneGroup, groupCount, globalVarianceShare);
+            history.add(sample(t, t, context, demand, 1.0 / h));
+        }
+
+        List<ConditionalQuery> queries = new ArrayList<>(queryCount);
+        for (int query = 0; query < queryCount; query++) {
+            CovariateVector queryContext = context(contextRandom, contextDistribution);
+            double[] nominal = parameters.nominalDemand(queryContext);
+            List<Sample> oos = new ArrayList<>(oosCount);
+            for (int draw = 0; draw < oosCount; draw++) {
+                double[] demand = drawDemandWithRegionalFactors(
+                        nominal, cv, parameters.commonLoading, distribution,
+                        oosRandom, oosCommonRandom, oosRegionalRandom,
+                        laneGroup, groupCount, globalVarianceShare);
+                oos.add(sample(query * oosCount + draw, h, queryContext.copy(), demand,
+                        1.0 / oosCount));
+            }
+            queries.add(new ConditionalQuery(queryContext, oos));
+        }
+        return new MultiQueryReplication(parameters, history, queries);
+    }
+
+    /**
      * Diagnostic DGP with a mean-one market-wide surge factor.  The low-state
      * multiplier is chosen so that E[G]=1, and the idiosyncratic lognormal CV
      * is recalibrated so that every lane keeps the requested marginal CV.
@@ -719,6 +784,50 @@ public final class TRBSVUSyntheticDemandGenerator {
             }
         }
         return demand;
+    }
+
+    private static double[] drawDemandWithRegionalFactors(
+            double[] nominal, double[] cv, double[] commonLoading,
+            Distribution distribution, Random idiosyncraticRandom,
+            Random commonRandom, Random regionalRandom,
+            int[] laneGroup, int groupCount, double globalVarianceShare) {
+        double globalShock = commonRandom.nextGaussian();
+        double[] regionalShock = new double[groupCount];
+        for (int group = 0; group < groupCount; group++) {
+            regionalShock[group] = regionalRandom.nextGaussian();
+        }
+        double globalWeight = Math.sqrt(globalVarianceShare);
+        double regionalWeight = Math.sqrt(1.0 - globalVarianceShare);
+        double[] demand = new double[nominal.length];
+        for (int j = 0; j < demand.length; j++) {
+            double loading = commonLoading[j];
+            double systematicShock = globalWeight * globalShock
+                    + regionalWeight * regionalShock[laneGroup[j]];
+            double idiosyncraticLoading = Math.sqrt(1.0 - loading * loading);
+            if (distribution == Distribution.NORMAL) {
+                do {
+                    double standardizedShock = loading * systematicShock
+                            + idiosyncraticLoading * idiosyncraticRandom.nextGaussian();
+                    demand[j] = nominal[j] * (1.0 + cv[j] * standardizedShock);
+                } while (demand[j] < 0.0);
+            } else {
+                double logVariance = Math.log1p(cv[j] * cv[j]);
+                double standardizedShock = loading * systematicShock
+                        + idiosyncraticLoading * idiosyncraticRandom.nextGaussian();
+                demand[j] = nominal[j] * Math.exp(-0.5 * logVariance
+                        + Math.sqrt(logVariance) * standardizedShock);
+            }
+        }
+        return demand;
+    }
+
+    private static int[] balancedGroups(int laneCount, int groupCount, long seed) {
+        List<Integer> labels = new ArrayList<>(laneCount);
+        for (int j = 0; j < laneCount; j++) labels.add(j % groupCount);
+        Collections.shuffle(labels, new Random(seed));
+        int[] result = new int[laneCount];
+        for (int j = 0; j < laneCount; j++) result[j] = labels.get(j);
+        return result;
     }
 
     private static Sample sample(int id, int period, CovariateVector context,

@@ -1,0 +1,5 @@
+dependence,lambda,certified_pairs,same_selection,same_cardinality_different_selection,carrier_additions,csaa_vs_saa_mean_improvement_pct,oracle_vs_csaa_mean_improvement_pct,dro_vs_csaa_mean_improvement_pct,dro_vs_csaa_sd_improvement_pct,dro_vs_csaa_q95_improvement_pct,dro_vs_csaa_cvar95_improvement_pct,dro_vs_csaa_max_improvement_pct,mean_mqc_penalty_delta,spot_share_delta_percentage_points
+GLOBAL,0.05,9,6,1,2,4.349488,3.672415,-1.390449,3.075778,-0.336462,0.383548,1.314214,697.077611,-0.255988
+REGIONAL_K5_TAU0.50,0.05,9,9,0,0,3.330845,4.634410,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,0.000000
+REGIONAL_K5_TAU0.50,0.10,8,7,0,1,3.330845,4.634410,-0.023968,1.337736,0.557655,0.555450,0.311899,293.372825,-0.213855
+REGIONAL_K5_TAU0.50,0.25,8,3,0,5,3.330845,4.634410,-1.944623,6.277190,1.032427,1.376088,1.901504,1534.522148,-0.760754

@@ -35,6 +35,7 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
         checkParameters(p);
         checkAlternativeStructures(h);
         checkContextDistributions(p, oosCount);
+        checkRegionalFactorPairing(p, oosCount);
         Replication normal = generate(p, Distribution.NORMAL, Volatility.LOW, oosCount);
         Replication repeat = generate(p, Distribution.NORMAL, Volatility.LOW, oosCount);
         Replication lognormal = generate(p, Distribution.LOGNORMAL, Volatility.HIGH, oosCount);
@@ -142,6 +143,43 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
                                 "Binary context left {0,1}.");
             }
         }
+    }
+
+    private static void checkRegionalFactorPairing(Parameters parameters, int oosCount) {
+        MultiQueryReplication baseline = TRBSVUSyntheticDemandGenerator.generateMultiQuery(
+                parameters, Distribution.LOGNORMAL, Volatility.MEDIUM, 3, oosCount,
+                23L, 29L, 31L, ContextDistribution.UNIFORM);
+        MultiQueryReplication tauOne =
+                TRBSVUSyntheticDemandGenerator.generateMultiQueryWithRegionalFactors(
+                        parameters, Distribution.LOGNORMAL, Volatility.MEDIUM, 3, oosCount,
+                        23L, 29L, 31L, ContextDistribution.UNIFORM, 5, 1.0);
+        MultiQueryReplication regional =
+                TRBSVUSyntheticDemandGenerator.generateMultiQueryWithRegionalFactors(
+                        parameters, Distribution.LOGNORMAL, Volatility.MEDIUM, 3, oosCount,
+                        23L, 29L, 31L, ContextDistribution.UNIFORM, 5, 0.5);
+        for (int t = 0; t < baseline.history.size(); t++) {
+            require(Arrays.equals(baseline.history.get(t).demand(),
+                            tauOne.history.get(t).demand()),
+                    "tau=1 regional hierarchy did not reproduce baseline history.");
+            require(Arrays.equals(baseline.history.get(t).theta.values(),
+                            regional.history.get(t).theta.values()),
+                    "Regional hierarchy changed historical contexts.");
+        }
+        boolean changed = false;
+        for (int query = 0; query < baseline.queries.size(); query++) {
+            require(Arrays.equals(baseline.queries.get(query).context.values(),
+                            regional.queries.get(query).context.values()),
+                    "Regional hierarchy changed query contexts.");
+            for (int draw = 0; draw < oosCount; draw++) {
+                double[] original = baseline.queries.get(query).oos.get(draw).demand();
+                require(Arrays.equals(original,
+                                tauOne.queries.get(query).oos.get(draw).demand()),
+                        "tau=1 regional hierarchy did not reproduce baseline OOS.");
+                changed |= !Arrays.equals(original,
+                        regional.queries.get(query).oos.get(draw).demand());
+            }
+        }
+        require(changed, "tau=0.5 regional hierarchy did not change joint draws.");
     }
 
     private static void checkUnitCubeClosed(double[] context, String label) {

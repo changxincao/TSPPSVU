@@ -39,7 +39,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
     private TRBSVUPersistentRateMqcMethodProbe() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1 || args.length > 22) {
+        if (args.length < 1 || args.length > 24) {
             throw new IllegalArgumentException(
                     "Usage: <output-directory> [replications] [queries] [mqc-scale]"
                             + " [volatility] [context-scale] [bandwidth] [spot-scale]"
@@ -50,7 +50,8 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                             + " [robust-methods: BOTH|RCSAA|CHI2] [history-size]"
                             + " [surge-probability; <=0 disables] [surge-multiplier]"
                             + " [top-high-demand-queries; 0 means all]"
-                            + " [heterogeneous-surge: true|false]");
+                            + " [heterogeneous-surge: true|false]"
+                            + " [regional-groups; <=1 disables] [global-variance-share]");
         }
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
         int replications = args.length >= 2 ? Integer.parseInt(args[1]) : 3;
@@ -95,6 +96,12 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
         double surgeMultiplier = args.length >= 20 ? Double.parseDouble(args[19]) : 2.0;
         int topHighDemandQueries = args.length >= 21 ? Integer.parseInt(args[20]) : 0;
         boolean heterogeneousSurge = args.length >= 22 && Boolean.parseBoolean(args[21]);
+        int regionalGroups = args.length >= 23 ? Integer.parseInt(args[22]) : 0;
+        double globalVarianceShare = args.length >= 24 ? Double.parseDouble(args[23]) : 1.0;
+        if (surgeProbability > 0.0 && regionalGroups > 1) {
+            throw new IllegalArgumentException(
+                    "Rare-surge and regional-factor diagnostics cannot be enabled together.");
+        }
         if (topHighDemandQueries < 0 || topHighDemandQueries > queryCount) {
             throw new IllegalArgumentException(
                     "top-high-demand-queries must be between 0 and query-count.");
@@ -126,7 +133,13 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                     BaseStructure.THREE_LEVEL_WIDE,
                     commonLoadingLower, commonLoadingUpper);
             MultiQueryReplication demand;
-            if (surgeProbability <= 0.0) {
+            if (regionalGroups > 1) {
+                demand = TRBSVUSyntheticDemandGenerator.generateMultiQueryWithRegionalFactors(
+                        parameters, Distribution.LOGNORMAL, volatility, queryCount,
+                        OOS + oracleSamples,
+                        paired.contexts(), paired.historicalNoise(), paired.oosNoise(),
+                        contextDistribution, regionalGroups, globalVarianceShare);
+            } else if (surgeProbability <= 0.0) {
                 demand = TRBSVUSyntheticDemandGenerator.generateMultiQuery(
                         parameters, Distribution.LOGNORMAL, volatility, queryCount,
                         OOS + oracleSamples,
@@ -160,6 +173,10 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
             String marketName = String.format(Locale.ROOT, "PERSISTENT_WIDE_MQC_%.2f", mqcScale);
             if (fixedDesignIndex > 0) marketName += "_FIXED_DESIGN_" + fixedDesignIndex;
             if (heterogeneousSurge) marketName += "_HETEROGENEOUS_SURGE";
+            if (regionalGroups > 1) {
+                marketName += String.format(Locale.ROOT, "_REGIONAL_K%d_TAU%.2f",
+                        regionalGroups, globalVarianceShare);
+            }
             runMarket(rows, marketName,
                     replication,
                     parameters, demand, candidate, bandwidth, oracleSamples, robustness,
