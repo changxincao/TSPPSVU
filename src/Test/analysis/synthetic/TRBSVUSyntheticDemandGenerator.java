@@ -29,6 +29,10 @@ public final class TRBSVUSyntheticDemandGenerator {
         NORMAL, LOGNORMAL
     }
 
+    public enum ContextDistribution {
+        UNIFORM, ARCSINE, TWO_REGIME, BINARY
+    }
+
     public enum ContextStructure {
         DENSE_PROPORTIONAL, DENSE_WIDE_POSITIVE, DENSE_INDEPENDENT_LEVELS,
         DENSE_WIDE_SAME_MEAN,
@@ -47,7 +51,7 @@ public final class TRBSVUSyntheticDemandGenerator {
     }
 
     public enum Volatility {
-        LOW(0.1, 0.3), MEDIUM(0.4, 0.6), HIGH(0.7, 0.9);
+        VERY_LOW(0.02, 0.10), LOW(0.1, 0.3), MEDIUM(0.4, 0.6), HIGH(0.7, 0.9);
 
         private final double lower;
         private final double upper;
@@ -470,8 +474,17 @@ public final class TRBSVUSyntheticDemandGenerator {
             Parameters parameters, Distribution distribution, Volatility regime,
             int queryCount, int oosCount, long contextSeed,
             long historyNoiseSeed, long oosNoiseSeed) {
+        return generateMultiQuery(parameters, distribution, regime, queryCount, oosCount,
+                contextSeed, historyNoiseSeed, oosNoiseSeed, ContextDistribution.UNIFORM);
+    }
+
+    public static MultiQueryReplication generateMultiQuery(
+            Parameters parameters, Distribution distribution, Volatility regime,
+            int queryCount, int oosCount, long contextSeed,
+            long historyNoiseSeed, long oosNoiseSeed,
+            ContextDistribution contextDistribution) {
         if (parameters == null || distribution == null || regime == null
-                || queryCount <= 0 || oosCount <= 0) {
+                || contextDistribution == null || queryCount <= 0 || oosCount <= 0) {
             throw new IllegalArgumentException(
                     "Parameters, DGP cell, query count and OOS count are required.");
         }
@@ -484,7 +497,7 @@ public final class TRBSVUSyntheticDemandGenerator {
         double[] cv = parameters.volatilityParameters(regime);
         List<Sample> history = new ArrayList<>(h);
         for (int t = 0; t < h; t++) {
-            CovariateVector context = context(contextRandom);
+            CovariateVector context = context(contextRandom, contextDistribution);
             double[] demand = drawDemand(parameters.nominalDemand(context), cv,
                     parameters.commonLoading, distribution, historyRandom,
                     historyCommonRandom, true);
@@ -493,7 +506,7 @@ public final class TRBSVUSyntheticDemandGenerator {
 
         List<ConditionalQuery> queries = new ArrayList<>(queryCount);
         for (int query = 0; query < queryCount; query++) {
-            CovariateVector queryContext = context(contextRandom);
+            CovariateVector queryContext = context(contextRandom, contextDistribution);
             double[] nominal = parameters.nominalDemand(queryContext);
             List<Sample> oos = new ArrayList<>(oosCount);
             for (int draw = 0; draw < oosCount; draw++) {
@@ -508,10 +521,22 @@ public final class TRBSVUSyntheticDemandGenerator {
     }
 
     private static CovariateVector context(Random random) {
-        return new CovariateVector(new double[] {
-                random.nextDouble(), random.nextDouble(),
-                random.nextDouble(), random.nextDouble()
-        });
+        return context(random, ContextDistribution.UNIFORM);
+    }
+
+    private static CovariateVector context(Random random, ContextDistribution distribution) {
+        double[] values = new double[4];
+        for (int k = 0; k < values.length; k++) {
+            double uniform = random.nextDouble();
+            values[k] = switch (distribution) {
+                case UNIFORM -> uniform;
+                case ARCSINE -> Math.pow(Math.sin(0.5 * Math.PI * uniform), 2.0);
+                case TWO_REGIME -> uniform < 0.5
+                        ? 0.30 * uniform : 0.85 + 0.30 * (uniform - 0.5);
+                case BINARY -> uniform < 0.5 ? 0.0 : 1.0;
+            };
+        }
+        return new CovariateVector(values);
     }
 
     private static double[] drawDemand(double[] nominal, double[] cv, double[] commonLoading,

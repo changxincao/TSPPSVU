@@ -4,6 +4,7 @@ import Basic.CovariateVector;
 import Basic.Sample;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.BaseStructure;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.ContextStructure;
+import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.ContextDistribution;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.Distribution;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.MultiQueryReplication;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.Parameters;
@@ -33,6 +34,7 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
         checkThreeLevelIndependentEffects(h);
         checkParameters(p);
         checkAlternativeStructures(h);
+        checkContextDistributions(p, oosCount);
         Replication normal = generate(p, Distribution.NORMAL, Volatility.LOW, oosCount);
         Replication repeat = generate(p, Distribution.NORMAL, Volatility.LOW, oosCount);
         Replication lognormal = generate(p, Distribution.LOGNORMAL, Volatility.HIGH, oosCount);
@@ -125,6 +127,27 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
                             "Alternative context structure produced nonpositive nominal demand.");
             }
         }
+    }
+
+    private static void checkContextDistributions(Parameters parameters, int oosCount) {
+        for (ContextDistribution distribution : ContextDistribution.values()) {
+            MultiQueryReplication replication = TRBSVUSyntheticDemandGenerator.generateMultiQuery(
+                    parameters, Distribution.LOGNORMAL, Volatility.LOW, 3, oosCount,
+                    23L, 29L, 31L, distribution);
+            for (Sample sample : replication.history) {
+                checkUnitCubeClosed(sample.theta.values(), "Historical context");
+                if (distribution == ContextDistribution.BINARY)
+                    for (double value : sample.theta.values())
+                        require(value == 0.0 || value == 1.0,
+                                "Binary context left {0,1}.");
+            }
+        }
+    }
+
+    private static void checkUnitCubeClosed(double[] context, String label) {
+        require(context.length == 4, label + " dimension changed.");
+        for (double value : context)
+            require(value >= 0.0 && value <= 1.0, label + " left [0,1]. ");
     }
 
     private static void checkWideSameMeanPairing(int h) {
@@ -239,9 +262,10 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
                     "Typical demand does not match the context-distribution mean.");
         }
         for (Volatility regime : Volatility.values()) {
-            double lower = regime == Volatility.LOW ? 0.1
+            double lower = regime == Volatility.VERY_LOW ? 0.02
+                    : regime == Volatility.LOW ? 0.1
                     : regime == Volatility.MEDIUM ? 0.4 : 0.7;
-            double upper = lower + 0.2;
+            double upper = regime == Volatility.VERY_LOW ? 0.10 : lower + 0.2;
             for (double c : p.volatilityParameters(regime)) {
                 require(inRange(c, lower, upper), "Volatility range mismatch.");
             }

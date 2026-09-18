@@ -7,6 +7,7 @@ import Model.RCSAASolverVariant;
 import Model.Solution;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.BaseStructure;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.ConditionalQuery;
+import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.ContextDistribution;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.ContextStructure;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.Distribution;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.MultiQueryReplication;
@@ -38,13 +39,14 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
     private TRBSVUPersistentRateMqcMethodProbe() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1 || args.length > 14) {
+        if (args.length < 1 || args.length > 15) {
             throw new IllegalArgumentException(
                     "Usage: <output-directory> [replications] [queries] [mqc-scale]"
                             + " [volatility] [context-scale] [bandwidth] [spot-scale]"
                             + " [carriers] [oracle-samples] [context-structure]"
                             + " [common-loading-lower] [common-loading-upper]"
-                            + " [fixed-design-index; 0 means paired designs]");
+                            + " [fixed-design-index; 0 means paired designs]"
+                            + " [context-distribution]");
         }
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
         int replications = args.length >= 2 ? Integer.parseInt(args[1]) : 3;
@@ -74,6 +76,9 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
         if (fixedDesignIndex < 0) {
             throw new IllegalArgumentException("Fixed design index cannot be negative.");
         }
+        ContextDistribution contextDistribution = args.length >= 15
+                ? ContextDistribution.valueOf(args[14].trim().toUpperCase(Locale.ROOT))
+                : ContextDistribution.UNIFORM;
         Files.createDirectories(output);
 
         Settings settings = new Settings(1, 600, 1e-8,
@@ -103,7 +108,8 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
             MultiQueryReplication demand = TRBSVUSyntheticDemandGenerator.generateMultiQuery(
                     parameters, Distribution.LOGNORMAL, volatility, queryCount,
                     OOS + oracleSamples,
-                    paired.contexts(), paired.historicalNoise(), paired.oosNoise());
+                    paired.contexts(), paired.historicalNoise(), paired.oosNoise(),
+                    contextDistribution);
             ProcurementParams current = TRBSVUProcurementGenerator.generate(
                     carriers, parameters.typicalDemand(), paired.procurement());
             ProcurementParams persistent =
