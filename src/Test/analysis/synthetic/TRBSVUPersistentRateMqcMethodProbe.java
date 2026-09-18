@@ -39,14 +39,14 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
     private TRBSVUPersistentRateMqcMethodProbe() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1 || args.length > 15) {
+        if (args.length < 1 || args.length > 16) {
             throw new IllegalArgumentException(
                     "Usage: <output-directory> [replications] [queries] [mqc-scale]"
                             + " [volatility] [context-scale] [bandwidth] [spot-scale]"
                             + " [carriers] [oracle-samples] [context-structure]"
                             + " [common-loading-lower] [common-loading-upper]"
                             + " [fixed-design-index; 0 means paired designs]"
-                            + " [context-distribution]");
+                            + " [context-distribution] [robustness; <=0 disables robust methods]");
         }
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
         int replications = args.length >= 2 ? Integer.parseInt(args[1]) : 3;
@@ -79,6 +79,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
         ContextDistribution contextDistribution = args.length >= 15
                 ? ContextDistribution.valueOf(args[14].trim().toUpperCase(Locale.ROOT))
                 : ContextDistribution.UNIFORM;
+        double robustness = args.length >= 16 ? Double.parseDouble(args[15]) : 0.0;
         Files.createDirectories(output);
 
         Settings settings = new Settings(1, 600, 1e-8,
@@ -121,13 +122,13 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
 
             if (oracleSamples == 0) {
                 runMarket(rows, "CURRENT", replication, parameters, demand, current, bandwidth,
-                        0, settings);
+                        0, robustness, settings);
             }
             String marketName = String.format(Locale.ROOT, "PERSISTENT_WIDE_MQC_%.2f", mqcScale);
             if (fixedDesignIndex > 0) marketName += "_FIXED_DESIGN_" + fixedDesignIndex;
             runMarket(rows, marketName,
                     replication,
-                    parameters, demand, candidate, bandwidth, oracleSamples, settings);
+                    parameters, demand, candidate, bandwidth, oracleSamples, robustness, settings);
             Files.write(output.resolve("method_probe.tsv"), rows, StandardCharsets.UTF_8);
         }
     }
@@ -148,13 +149,16 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                                   Parameters parameters, MultiQueryReplication demand,
                                   ProcurementParams market, double bandwidth,
                                   int oracleSamples,
+                                  double robustness,
                                   Settings settings) throws Exception {
         List<String> lanes = laneNames();
         ConditionalQuery first = demand.queries.get(0);
         Solution d = solve(market, lanes,
-                TRBSVUScenarioWeights.arithmeticMean(demand.history), first, settings);
+                TRBSVUScenarioWeights.arithmeticMean(demand.history), first,
+                Method.NOMINAL, 0.0, settings);
         Solution saa = solve(market, lanes,
-                TRBSVUScenarioWeights.equal(demand.history), first, settings);
+                TRBSVUScenarioWeights.equal(demand.history), first,
+                Method.NOMINAL, 0.0, settings);
 
         for (int query = 0; query < demand.queries.size(); query++) {
             ConditionalQuery conditional = demand.queries.get(query);
@@ -166,14 +170,28 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                     parameters, conditional.context, evaluation, market);
             List<Sample> contextual = TRBSVUScenarioWeights.kernel(demand.history,
                     conditional.context, TRBSVUScenarioWeights.Kernel.EXPONENTIAL, bandwidth);
-            Solution csaa = solve(market, lanes, contextual, conditional, settings);
+            Solution csaa = solve(market, lanes, contextual, conditional,
+                    Method.NOMINAL, 0.0, settings);
             write(rows, marketName, replication, query, "CSAA", csaa,
                     TRBSVUExperiment1Runner.ess(contextual),
                     parameters, conditional.context, evaluation, market);
+            if (robustness > 0.0) {
+                Solution rcsaa = solve(market, lanes, contextual, conditional,
+                        Method.RCSAA, robustness, settings);
+                write(rows, marketName, replication, query, "RCSAA", rcsaa,
+                        TRBSVUExperiment1Runner.ess(contextual),
+                        parameters, conditional.context, evaluation, market);
+                Solution chiSquared = solve(market, lanes, contextual, conditional,
+                        Method.CHI_SQUARED, robustness, settings);
+                write(rows, marketName, replication, query, "C-CHI2", chiSquared,
+                        TRBSVUExperiment1Runner.ess(contextual),
+                        parameters, conditional.context, evaluation, market);
+            }
             if (oracleSamples > 0) {
                 List<Sample> oracleTraining = TRBSVUScenarioWeights.equal(
                         conditional.oos.subList(0, oracleSamples));
-                Solution oracle = solve(market, lanes, oracleTraining, conditional, settings);
+                Solution oracle = solve(market, lanes, oracleTraining, conditional,
+                        Method.NOMINAL, 0.0, settings);
                 write(rows, marketName, replication, query, "ORACLE", oracle,
                         oracleSamples, parameters, conditional.context, evaluation, market);
             }
@@ -182,9 +200,10 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
 
     private static Solution solve(ProcurementParams market, List<String> lanes,
                                   List<Sample> samples, ConditionalQuery query,
+                                  Method method, double robustness,
                                   Settings settings) throws Exception {
         Solution solution = TRBSVUSolveMethods.solve(market, lanes, samples,
-                query.context, Method.NOMINAL, 0.0, settings);
+                query.context, method, robustness, settings);
         if (!solution.certifiedOptimal) {
             throw new IllegalStateException("Uncertified method probe solve: "
                     + solution.solverStatus);
