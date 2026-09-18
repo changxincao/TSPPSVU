@@ -39,14 +39,15 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
     private TRBSVUPersistentRateMqcMethodProbe() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1 || args.length > 16) {
+        if (args.length < 1 || args.length > 17) {
             throw new IllegalArgumentException(
                     "Usage: <output-directory> [replications] [queries] [mqc-scale]"
                             + " [volatility] [context-scale] [bandwidth] [spot-scale]"
                             + " [carriers] [oracle-samples] [context-structure]"
                             + " [common-loading-lower] [common-loading-upper]"
                             + " [fixed-design-index; 0 means paired designs]"
-                            + " [context-distribution] [robustness; <=0 disables robust methods]");
+                            + " [context-distribution] [robustness; <=0 disables robust methods]"
+                            + " [robust-methods: BOTH|RCSAA|CHI2]");
         }
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
         int replications = args.length >= 2 ? Integer.parseInt(args[1]) : 3;
@@ -80,6 +81,11 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                 ? ContextDistribution.valueOf(args[14].trim().toUpperCase(Locale.ROOT))
                 : ContextDistribution.UNIFORM;
         double robustness = args.length >= 16 ? Double.parseDouble(args[15]) : 0.0;
+        String robustMethods = args.length >= 17
+                ? args[16].trim().toUpperCase(Locale.ROOT) : "BOTH";
+        if (!List.of("BOTH", "RCSAA", "CHI2").contains(robustMethods)) {
+            throw new IllegalArgumentException("robust-methods must be BOTH, RCSAA, or CHI2.");
+        }
         Files.createDirectories(output);
 
         Settings settings = new Settings(1, 600, 1e-8,
@@ -122,13 +128,15 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
 
             if (oracleSamples == 0) {
                 runMarket(rows, "CURRENT", replication, parameters, demand, current, bandwidth,
-                        0, robustness, settings);
+                        0, robustness, robustMethods, settings,
+                        output.resolve("method_probe.tsv"));
             }
             String marketName = String.format(Locale.ROOT, "PERSISTENT_WIDE_MQC_%.2f", mqcScale);
             if (fixedDesignIndex > 0) marketName += "_FIXED_DESIGN_" + fixedDesignIndex;
             runMarket(rows, marketName,
                     replication,
-                    parameters, demand, candidate, bandwidth, oracleSamples, robustness, settings);
+                    parameters, demand, candidate, bandwidth, oracleSamples, robustness,
+                    robustMethods, settings, output.resolve("method_probe.tsv"));
             Files.write(output.resolve("method_probe.tsv"), rows, StandardCharsets.UTF_8);
         }
     }
@@ -150,7 +158,9 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                                   ProcurementParams market, double bandwidth,
                                   int oracleSamples,
                                   double robustness,
-                                  Settings settings) throws Exception {
+                                  String robustMethods,
+                                  Settings settings,
+                                  Path checkpointFile) throws Exception {
         List<String> lanes = laneNames();
         ConditionalQuery first = demand.queries.get(0);
         Solution d = solve(market, lanes,
@@ -175,17 +185,36 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
             write(rows, marketName, replication, query, "CSAA", csaa,
                     TRBSVUExperiment1Runner.ess(contextual),
                     parameters, conditional.context, evaluation, market);
+            Files.write(checkpointFile, rows, StandardCharsets.UTF_8);
             if (robustness > 0.0) {
-                Solution rcsaa = solve(market, lanes, contextual, conditional,
-                        Method.RCSAA, robustness, settings);
-                write(rows, marketName, replication, query, "RCSAA", rcsaa,
-                        TRBSVUExperiment1Runner.ess(contextual),
-                        parameters, conditional.context, evaluation, market);
-                Solution chiSquared = solve(market, lanes, contextual, conditional,
-                        Method.CHI_SQUARED, robustness, settings);
-                write(rows, marketName, replication, query, "C-CHI2", chiSquared,
-                        TRBSVUExperiment1Runner.ess(contextual),
-                        parameters, conditional.context, evaluation, market);
+                if (!"CHI2".equals(robustMethods)) {
+                    try {
+                        Solution rcsaa = solve(market, lanes, contextual, conditional,
+                                Method.RCSAA, robustness, settings);
+                        write(rows, marketName, replication, query, "RCSAA", rcsaa,
+                                TRBSVUExperiment1Runner.ess(contextual),
+                                parameters, conditional.context, evaluation, market);
+                        Files.write(checkpointFile, rows, StandardCharsets.UTF_8);
+                    } catch (IllegalStateException failure) {
+                        System.err.printf(Locale.ROOT,
+                                "SKIP_UNCERTIFIED method=RCSAA replication=%d query=%d reason=%s%n",
+                                replication, query, failure.getMessage());
+                    }
+                }
+                if (!"RCSAA".equals(robustMethods)) {
+                    try {
+                        Solution chiSquared = solve(market, lanes, contextual, conditional,
+                                Method.CHI_SQUARED, robustness, settings);
+                        write(rows, marketName, replication, query, "C-CHI2", chiSquared,
+                                TRBSVUExperiment1Runner.ess(contextual),
+                                parameters, conditional.context, evaluation, market);
+                        Files.write(checkpointFile, rows, StandardCharsets.UTF_8);
+                    } catch (IllegalStateException failure) {
+                        System.err.printf(Locale.ROOT,
+                                "SKIP_UNCERTIFIED method=C-CHI2 replication=%d query=%d reason=%s%n",
+                                replication, query, failure.getMessage());
+                    }
+                }
             }
             if (oracleSamples > 0) {
                 List<Sample> oracleTraining = TRBSVUScenarioWeights.equal(
@@ -195,6 +224,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                 write(rows, marketName, replication, query, "ORACLE", oracle,
                         oracleSamples, parameters, conditional.context, evaluation, market);
             }
+            Files.write(checkpointFile, rows, StandardCharsets.UTF_8);
         }
     }
 
