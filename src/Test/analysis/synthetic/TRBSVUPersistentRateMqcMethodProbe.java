@@ -39,7 +39,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
     private TRBSVUPersistentRateMqcMethodProbe() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1 || args.length > 17) {
+        if (args.length < 1 || args.length > 18) {
             throw new IllegalArgumentException(
                     "Usage: <output-directory> [replications] [queries] [mqc-scale]"
                             + " [volatility] [context-scale] [bandwidth] [spot-scale]"
@@ -47,7 +47,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                             + " [common-loading-lower] [common-loading-upper]"
                             + " [fixed-design-index; 0 means paired designs]"
                             + " [context-distribution] [robustness; <=0 disables robust methods]"
-                            + " [robust-methods: BOTH|RCSAA|CHI2]");
+                            + " [robust-methods: BOTH|RCSAA|CHI2] [history-size]");
         }
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
         int replications = args.length >= 2 ? Integer.parseInt(args[1]) : 3;
@@ -86,6 +86,8 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
         if (!List.of("BOTH", "RCSAA", "CHI2").contains(robustMethods)) {
             throw new IllegalArgumentException("robust-methods must be BOTH, RCSAA, or CHI2.");
         }
+        int historySize = args.length >= 18 ? Integer.parseInt(args[17]) : HISTORY;
+        if (historySize <= 0) throw new IllegalArgumentException("History size must be positive.");
         Files.createDirectories(output);
 
         Settings settings = new Settings(1, 600, 1e-8,
@@ -108,7 +110,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                             fixedDesign.demandParameters(), fixedDesign.procurement(),
                             sampled.contexts(), sampled.historicalNoise(), sampled.oosNoise());
             Parameters parameters = TRBSVUSyntheticDemandGenerator.sampleParameters(
-                    LANES, HISTORY, paired.demandParameters(), contextScale,
+                    LANES, historySize, paired.demandParameters(), contextScale,
                     contextStructure,
                     BaseStructure.THREE_LEVEL_WIDE,
                     commonLoadingLower, commonLoadingUpper);
@@ -176,7 +178,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                     conditional.oos.size());
             write(rows, marketName, replication, query, "D", d, 1.0,
                     parameters, conditional.context, evaluation, market);
-            write(rows, marketName, replication, query, "SAA", saa, HISTORY,
+            write(rows, marketName, replication, query, "SAA", saa, demand.history.size(),
                     parameters, conditional.context, evaluation, market);
             List<Sample> contextual = TRBSVUScenarioWeights.kernel(demand.history,
                     conditional.context, TRBSVUScenarioWeights.Kernel.EXPONENTIAL, bandwidth);
