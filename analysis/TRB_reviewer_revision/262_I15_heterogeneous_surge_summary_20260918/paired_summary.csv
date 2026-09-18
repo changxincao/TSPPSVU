@@ -1,0 +1,9 @@
+design,query,csaa_selected,dro_selected,same_selection,csaa_vs_saa_mean_improvement_pct,oracle_vs_csaa_mean_improvement_pct,dro_vs_csaa_mean_improvement_pct,dro_vs_csaa_sd_improvement_pct,dro_vs_csaa_q95_improvement_pct,dro_vs_csaa_cvar95_improvement_pct,dro_vs_csaa_max_improvement_pct
+1,0,9,10,false,4.740,1.199,-1.198,9.433,6.724,4.678,6.791
+1,1,9,9,true,5.543,6.937,0.000,0.000,0.000,0.000,0.000
+2,2,10,10,true,0.162,-0.704,0.000,0.000,0.000,0.000,0.000
+3,0,9,10,false,6.131,1.108,-2.486,2.124,-0.041,0.109,-1.544
+3,1,9,10,false,9.553,6.698,-3.497,9.523,2.230,3.137,0.014
+3,2,11,11,true,-0.043,0.043,0.000,0.000,0.000,0.000,0.000
+AVERAGE_CERTIFIED_DRO_PAIRS,,9.500,10.000,,4.347,2.547,-1.197,3.514,1.485,1.321,0.877
+AVERAGE_ALL_9_CSAA_ORACLE_PAIRS,,,,,3.538,3.179,,,,,

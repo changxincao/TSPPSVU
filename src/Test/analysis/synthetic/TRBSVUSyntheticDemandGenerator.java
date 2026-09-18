@@ -531,6 +531,35 @@ public final class TRBSVUSyntheticDemandGenerator {
             long historyNoiseSeed, long oosNoiseSeed,
             ContextDistribution contextDistribution,
             double surgeProbability, double surgeMultiplier) {
+        return generateMultiQueryWithRareSurge(parameters, regime, queryCount, oosCount,
+                contextSeed, historyNoiseSeed, oosNoiseSeed, contextDistribution,
+                surgeProbability, surgeMultiplier, false);
+    }
+
+    /**
+     * Paired diagnostic variant in which all lanes share the same surge state
+     * but have different, fixed exposures to that state.  Exposures are the
+     * sampled common loadings normalized to mean one, so the average high-state
+     * multiplier remains comparable with the homogeneous-surge benchmark.
+     */
+    public static MultiQueryReplication generateMultiQueryWithHeterogeneousRareSurge(
+            Parameters parameters, Volatility regime,
+            int queryCount, int oosCount, long contextSeed,
+            long historyNoiseSeed, long oosNoiseSeed,
+            ContextDistribution contextDistribution,
+            double surgeProbability, double surgeMultiplier) {
+        return generateMultiQueryWithRareSurge(parameters, regime, queryCount, oosCount,
+                contextSeed, historyNoiseSeed, oosNoiseSeed, contextDistribution,
+                surgeProbability, surgeMultiplier, true);
+    }
+
+    private static MultiQueryReplication generateMultiQueryWithRareSurge(
+            Parameters parameters, Volatility regime,
+            int queryCount, int oosCount, long contextSeed,
+            long historyNoiseSeed, long oosNoiseSeed,
+            ContextDistribution contextDistribution,
+            double surgeProbability, double surgeMultiplier,
+            boolean heterogeneousExposure) {
         if (parameters == null || regime == null || contextDistribution == null
                 || queryCount <= 0 || oosCount <= 0) {
             throw new IllegalArgumentException(
@@ -549,11 +578,14 @@ public final class TRBSVUSyntheticDemandGenerator {
         Random historySurgeRandom = new Random(historyNoiseSeed ^ COMMON_NOISE_SALT);
         Random oosSurgeRandom = new Random(oosNoiseSeed ^ COMMON_NOISE_SALT);
         double[] cv = parameters.volatilityParameters(regime);
+        double[] surgeExposure = surgeExposure(parameters.commonLoading, cv,
+                surgeProbability, surgeMultiplier, heterogeneousExposure);
         List<Sample> history = new ArrayList<>(h);
         for (int t = 0; t < h; t++) {
             CovariateVector context = context(contextRandom, contextDistribution);
             double[] demand = drawRareSurgeDemand(parameters.nominalDemand(context), cv,
-                    historyRandom, historySurgeRandom, surgeProbability, surgeMultiplier);
+                    surgeExposure, historyRandom, historySurgeRandom,
+                    surgeProbability, surgeMultiplier);
             history.add(sample(t, t, context, demand, 1.0 / h));
         }
 
@@ -563,8 +595,8 @@ public final class TRBSVUSyntheticDemandGenerator {
             double[] nominal = parameters.nominalDemand(queryContext);
             List<Sample> oos = new ArrayList<>(oosCount);
             for (int draw = 0; draw < oosCount; draw++) {
-                double[] demand = drawRareSurgeDemand(nominal, cv, oosRandom,
-                        oosSurgeRandom, surgeProbability, surgeMultiplier);
+                double[] demand = drawRareSurgeDemand(nominal, cv, surgeExposure,
+                        oosRandom, oosSurgeRandom, surgeProbability, surgeMultiplier);
                 oos.add(sample(query * oosCount + draw, h, queryContext.copy(), demand,
                         1.0 / oosCount));
             }
@@ -574,18 +606,26 @@ public final class TRBSVUSyntheticDemandGenerator {
     }
 
     private static double[] drawRareSurgeDemand(double[] nominal, double[] targetCv,
+                                                 double[] surgeExposure,
                                                  Random idiosyncraticRandom,
                                                  Random surgeRandom,
                                                  double surgeProbability,
                                                  double surgeMultiplier) {
-        double ordinaryMultiplier = (1.0 - surgeProbability * surgeMultiplier)
-                / (1.0 - surgeProbability);
-        double commonMultiplier = surgeRandom.nextDouble() < surgeProbability
-                ? surgeMultiplier : ordinaryMultiplier;
-        double commonCvSquared = surgeProbability * Math.pow(surgeMultiplier - 1.0, 2.0)
-                + (1.0 - surgeProbability) * Math.pow(ordinaryMultiplier - 1.0, 2.0);
+        boolean surge = surgeRandom.nextDouble() < surgeProbability;
         double[] demand = new double[nominal.length];
         for (int j = 0; j < demand.length; j++) {
+            double highMultiplier = 1.0
+                    + surgeExposure[j] * (surgeMultiplier - 1.0);
+            if (surgeProbability * highMultiplier >= 1.0) {
+                throw new IllegalArgumentException(
+                        "Lane-specific surge multiplier is incompatible with its probability.");
+            }
+            double ordinaryMultiplier = (1.0 - surgeProbability * highMultiplier)
+                    / (1.0 - surgeProbability);
+            double commonMultiplier = surge ? highMultiplier : ordinaryMultiplier;
+            double commonCvSquared = surgeProbability * Math.pow(highMultiplier - 1.0, 2.0)
+                    + (1.0 - surgeProbability)
+                    * Math.pow(ordinaryMultiplier - 1.0, 2.0);
             double idiosyncraticCvSquared = (1.0 + targetCv[j] * targetCv[j])
                     / (1.0 + commonCvSquared) - 1.0;
             if (idiosyncraticCvSquared < -1e-12) {
@@ -598,6 +638,43 @@ public final class TRBSVUSyntheticDemandGenerator {
             demand[j] = nominal[j] * commonMultiplier * idiosyncraticMultiplier;
         }
         return demand;
+    }
+
+    private static double[] surgeExposure(double[] commonLoading, double[] targetCv,
+                                          double surgeProbability, double surgeMultiplier,
+                                          boolean heterogeneousExposure) {
+        double[] result = new double[commonLoading.length];
+        if (!heterogeneousExposure) {
+            java.util.Arrays.fill(result, 1.0);
+            return result;
+        }
+        double mean = 0.0;
+        for (double loading : commonLoading) mean += loading;
+        mean /= commonLoading.length;
+        if (!(mean > 0.0)) {
+            throw new IllegalArgumentException(
+                    "Heterogeneous surge requires positive common loadings.");
+        }
+        double baseCommonCv = (surgeMultiplier - 1.0)
+                * Math.sqrt(surgeProbability / (1.0 - surgeProbability));
+        double scale = 1.0;
+        for (int j = 0; j < result.length; j++) {
+            double rawExposure = commonLoading[j] / mean;
+            if (rawExposure <= 1.0) continue;
+            double maximumExposure = targetCv[j] / baseCommonCv;
+            if (maximumExposure < 1.0) {
+                throw new IllegalArgumentException(
+                        "The requested marginal CV cannot support the baseline surge.");
+            }
+            scale = Math.min(scale,
+                    0.999 * (maximumExposure - 1.0) / (rawExposure - 1.0));
+        }
+        scale = Math.max(0.0, Math.min(1.0, scale));
+        for (int j = 0; j < result.length; j++) {
+            double rawExposure = commonLoading[j] / mean;
+            result[j] = 1.0 + scale * (rawExposure - 1.0);
+        }
+        return result;
     }
 
     private static CovariateVector context(Random random) {

@@ -39,7 +39,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
     private TRBSVUPersistentRateMqcMethodProbe() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1 || args.length > 21) {
+        if (args.length < 1 || args.length > 22) {
             throw new IllegalArgumentException(
                     "Usage: <output-directory> [replications] [queries] [mqc-scale]"
                             + " [volatility] [context-scale] [bandwidth] [spot-scale]"
@@ -49,7 +49,8 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                             + " [context-distribution] [robustness; <=0 disables robust methods]"
                             + " [robust-methods: BOTH|RCSAA|CHI2] [history-size]"
                             + " [surge-probability; <=0 disables] [surge-multiplier]"
-                            + " [top-high-demand-queries; 0 means all]");
+                            + " [top-high-demand-queries; 0 means all]"
+                            + " [heterogeneous-surge: true|false]");
         }
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
         int replications = args.length >= 2 ? Integer.parseInt(args[1]) : 3;
@@ -93,6 +94,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
         double surgeProbability = args.length >= 19 ? Double.parseDouble(args[18]) : 0.0;
         double surgeMultiplier = args.length >= 20 ? Double.parseDouble(args[19]) : 2.0;
         int topHighDemandQueries = args.length >= 21 ? Integer.parseInt(args[20]) : 0;
+        boolean heterogeneousSurge = args.length >= 22 && Boolean.parseBoolean(args[21]);
         if (topHighDemandQueries < 0 || topHighDemandQueries > queryCount) {
             throw new IllegalArgumentException(
                     "top-high-demand-queries must be between 0 and query-count.");
@@ -123,16 +125,24 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                     contextStructure,
                     BaseStructure.THREE_LEVEL_WIDE,
                     commonLoadingLower, commonLoadingUpper);
-            MultiQueryReplication demand = surgeProbability > 0.0
-                    ? TRBSVUSyntheticDemandGenerator.generateMultiQueryWithRareSurge(
-                            parameters, volatility, queryCount, OOS + oracleSamples,
-                            paired.contexts(), paired.historicalNoise(), paired.oosNoise(),
-                            contextDistribution, surgeProbability, surgeMultiplier)
-                    : TRBSVUSyntheticDemandGenerator.generateMultiQuery(
-                            parameters, Distribution.LOGNORMAL, volatility, queryCount,
-                            OOS + oracleSamples,
-                            paired.contexts(), paired.historicalNoise(), paired.oosNoise(),
-                            contextDistribution);
+            MultiQueryReplication demand;
+            if (surgeProbability <= 0.0) {
+                demand = TRBSVUSyntheticDemandGenerator.generateMultiQuery(
+                        parameters, Distribution.LOGNORMAL, volatility, queryCount,
+                        OOS + oracleSamples,
+                        paired.contexts(), paired.historicalNoise(), paired.oosNoise(),
+                        contextDistribution);
+            } else if (heterogeneousSurge) {
+                demand = TRBSVUSyntheticDemandGenerator.generateMultiQueryWithHeterogeneousRareSurge(
+                        parameters, volatility, queryCount, OOS + oracleSamples,
+                        paired.contexts(), paired.historicalNoise(), paired.oosNoise(),
+                        contextDistribution, surgeProbability, surgeMultiplier);
+            } else {
+                demand = TRBSVUSyntheticDemandGenerator.generateMultiQueryWithRareSurge(
+                        parameters, volatility, queryCount, OOS + oracleSamples,
+                        paired.contexts(), paired.historicalNoise(), paired.oosNoise(),
+                        contextDistribution, surgeProbability, surgeMultiplier);
+            }
             ProcurementParams current = TRBSVUProcurementGenerator.generate(
                     carriers, parameters.typicalDemand(), paired.procurement());
             ProcurementParams persistent =
@@ -149,6 +159,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
             }
             String marketName = String.format(Locale.ROOT, "PERSISTENT_WIDE_MQC_%.2f", mqcScale);
             if (fixedDesignIndex > 0) marketName += "_FIXED_DESIGN_" + fixedDesignIndex;
+            if (heterogeneousSurge) marketName += "_HETEROGENEOUS_SURGE";
             runMarket(rows, marketName,
                     replication,
                     parameters, demand, candidate, bandwidth, oracleSamples, robustness,
