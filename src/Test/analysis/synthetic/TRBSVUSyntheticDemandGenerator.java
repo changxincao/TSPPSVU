@@ -520,6 +520,86 @@ public final class TRBSVUSyntheticDemandGenerator {
         return new MultiQueryReplication(parameters, history, queries);
     }
 
+    /**
+     * Diagnostic DGP with a mean-one market-wide surge factor.  The low-state
+     * multiplier is chosen so that E[G]=1, and the idiosyncratic lognormal CV
+     * is recalibrated so that every lane keeps the requested marginal CV.
+     */
+    public static MultiQueryReplication generateMultiQueryWithRareSurge(
+            Parameters parameters, Volatility regime,
+            int queryCount, int oosCount, long contextSeed,
+            long historyNoiseSeed, long oosNoiseSeed,
+            ContextDistribution contextDistribution,
+            double surgeProbability, double surgeMultiplier) {
+        if (parameters == null || regime == null || contextDistribution == null
+                || queryCount <= 0 || oosCount <= 0) {
+            throw new IllegalArgumentException(
+                    "Parameters, DGP cell, query count and OOS count are required.");
+        }
+        if (!(surgeProbability > 0.0 && surgeProbability < 1.0)
+                || !(surgeMultiplier > 1.0)
+                || surgeProbability * surgeMultiplier >= 1.0) {
+            throw new IllegalArgumentException(
+                    "Rare surge requires 0<p<1, H>1 and p*H<1.");
+        }
+        int h = parameters.historicalPeriods();
+        Random contextRandom = new Random(contextSeed);
+        Random historyRandom = new Random(historyNoiseSeed);
+        Random oosRandom = new Random(oosNoiseSeed);
+        Random historySurgeRandom = new Random(historyNoiseSeed ^ COMMON_NOISE_SALT);
+        Random oosSurgeRandom = new Random(oosNoiseSeed ^ COMMON_NOISE_SALT);
+        double[] cv = parameters.volatilityParameters(regime);
+        List<Sample> history = new ArrayList<>(h);
+        for (int t = 0; t < h; t++) {
+            CovariateVector context = context(contextRandom, contextDistribution);
+            double[] demand = drawRareSurgeDemand(parameters.nominalDemand(context), cv,
+                    historyRandom, historySurgeRandom, surgeProbability, surgeMultiplier);
+            history.add(sample(t, t, context, demand, 1.0 / h));
+        }
+
+        List<ConditionalQuery> queries = new ArrayList<>(queryCount);
+        for (int query = 0; query < queryCount; query++) {
+            CovariateVector queryContext = context(contextRandom, contextDistribution);
+            double[] nominal = parameters.nominalDemand(queryContext);
+            List<Sample> oos = new ArrayList<>(oosCount);
+            for (int draw = 0; draw < oosCount; draw++) {
+                double[] demand = drawRareSurgeDemand(nominal, cv, oosRandom,
+                        oosSurgeRandom, surgeProbability, surgeMultiplier);
+                oos.add(sample(query * oosCount + draw, h, queryContext.copy(), demand,
+                        1.0 / oosCount));
+            }
+            queries.add(new ConditionalQuery(queryContext, oos));
+        }
+        return new MultiQueryReplication(parameters, history, queries);
+    }
+
+    private static double[] drawRareSurgeDemand(double[] nominal, double[] targetCv,
+                                                 Random idiosyncraticRandom,
+                                                 Random surgeRandom,
+                                                 double surgeProbability,
+                                                 double surgeMultiplier) {
+        double ordinaryMultiplier = (1.0 - surgeProbability * surgeMultiplier)
+                / (1.0 - surgeProbability);
+        double commonMultiplier = surgeRandom.nextDouble() < surgeProbability
+                ? surgeMultiplier : ordinaryMultiplier;
+        double commonCvSquared = surgeProbability * Math.pow(surgeMultiplier - 1.0, 2.0)
+                + (1.0 - surgeProbability) * Math.pow(ordinaryMultiplier - 1.0, 2.0);
+        double[] demand = new double[nominal.length];
+        for (int j = 0; j < demand.length; j++) {
+            double idiosyncraticCvSquared = (1.0 + targetCv[j] * targetCv[j])
+                    / (1.0 + commonCvSquared) - 1.0;
+            if (idiosyncraticCvSquared < -1e-12) {
+                throw new IllegalArgumentException(
+                        "The requested marginal CV is smaller than the common surge CV.");
+            }
+            double logVariance = Math.log1p(Math.max(0.0, idiosyncraticCvSquared));
+            double idiosyncraticMultiplier = Math.exp(-0.5 * logVariance
+                    + Math.sqrt(logVariance) * idiosyncraticRandom.nextGaussian());
+            demand[j] = nominal[j] * commonMultiplier * idiosyncraticMultiplier;
+        }
+        return demand;
+    }
+
     private static CovariateVector context(Random random) {
         return context(random, ContextDistribution.UNIFORM);
     }

@@ -39,7 +39,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
     private TRBSVUPersistentRateMqcMethodProbe() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1 || args.length > 18) {
+        if (args.length < 1 || args.length > 21) {
             throw new IllegalArgumentException(
                     "Usage: <output-directory> [replications] [queries] [mqc-scale]"
                             + " [volatility] [context-scale] [bandwidth] [spot-scale]"
@@ -47,7 +47,9 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                             + " [common-loading-lower] [common-loading-upper]"
                             + " [fixed-design-index; 0 means paired designs]"
                             + " [context-distribution] [robustness; <=0 disables robust methods]"
-                            + " [robust-methods: BOTH|RCSAA|CHI2] [history-size]");
+                            + " [robust-methods: BOTH|RCSAA|CHI2] [history-size]"
+                            + " [surge-probability; <=0 disables] [surge-multiplier]"
+                            + " [top-high-demand-queries; 0 means all]");
         }
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
         int replications = args.length >= 2 ? Integer.parseInt(args[1]) : 3;
@@ -88,6 +90,13 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
         }
         int historySize = args.length >= 18 ? Integer.parseInt(args[17]) : HISTORY;
         if (historySize <= 0) throw new IllegalArgumentException("History size must be positive.");
+        double surgeProbability = args.length >= 19 ? Double.parseDouble(args[18]) : 0.0;
+        double surgeMultiplier = args.length >= 20 ? Double.parseDouble(args[19]) : 2.0;
+        int topHighDemandQueries = args.length >= 21 ? Integer.parseInt(args[20]) : 0;
+        if (topHighDemandQueries < 0 || topHighDemandQueries > queryCount) {
+            throw new IllegalArgumentException(
+                    "top-high-demand-queries must be between 0 and query-count.");
+        }
         Files.createDirectories(output);
 
         Settings settings = new Settings(1, 600, 1e-8,
@@ -114,11 +123,16 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                     contextStructure,
                     BaseStructure.THREE_LEVEL_WIDE,
                     commonLoadingLower, commonLoadingUpper);
-            MultiQueryReplication demand = TRBSVUSyntheticDemandGenerator.generateMultiQuery(
-                    parameters, Distribution.LOGNORMAL, volatility, queryCount,
-                    OOS + oracleSamples,
-                    paired.contexts(), paired.historicalNoise(), paired.oosNoise(),
-                    contextDistribution);
+            MultiQueryReplication demand = surgeProbability > 0.0
+                    ? TRBSVUSyntheticDemandGenerator.generateMultiQueryWithRareSurge(
+                            parameters, volatility, queryCount, OOS + oracleSamples,
+                            paired.contexts(), paired.historicalNoise(), paired.oosNoise(),
+                            contextDistribution, surgeProbability, surgeMultiplier)
+                    : TRBSVUSyntheticDemandGenerator.generateMultiQuery(
+                            parameters, Distribution.LOGNORMAL, volatility, queryCount,
+                            OOS + oracleSamples,
+                            paired.contexts(), paired.historicalNoise(), paired.oosNoise(),
+                            contextDistribution);
             ProcurementParams current = TRBSVUProcurementGenerator.generate(
                     carriers, parameters.typicalDemand(), paired.procurement());
             ProcurementParams persistent =
@@ -130,7 +144,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
 
             if (oracleSamples == 0) {
                 runMarket(rows, "CURRENT", replication, parameters, demand, current, bandwidth,
-                        0, robustness, robustMethods, settings,
+                        0, robustness, robustMethods, topHighDemandQueries, settings,
                         output.resolve("method_probe.tsv"));
             }
             String marketName = String.format(Locale.ROOT, "PERSISTENT_WIDE_MQC_%.2f", mqcScale);
@@ -138,7 +152,8 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
             runMarket(rows, marketName,
                     replication,
                     parameters, demand, candidate, bandwidth, oracleSamples, robustness,
-                    robustMethods, settings, output.resolve("method_probe.tsv"));
+                    robustMethods, topHighDemandQueries, settings,
+                    output.resolve("method_probe.tsv"));
             Files.write(output.resolve("method_probe.tsv"), rows, StandardCharsets.UTF_8);
         }
     }
@@ -161,6 +176,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                                   int oracleSamples,
                                   double robustness,
                                   String robustMethods,
+                                  int topHighDemandQueries,
                                   Settings settings,
                                   Path checkpointFile) throws Exception {
         List<String> lanes = laneNames();
@@ -172,7 +188,9 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                 TRBSVUScenarioWeights.equal(demand.history), first,
                 Method.NOMINAL, 0.0, settings);
 
-        for (int query = 0; query < demand.queries.size(); query++) {
+        List<Integer> queryIndices = selectedQueryIndices(parameters, demand,
+                topHighDemandQueries);
+        for (int query : queryIndices) {
             ConditionalQuery conditional = demand.queries.get(query);
             List<Sample> evaluation = conditional.oos.subList(oracleSamples,
                     conditional.oos.size());
@@ -228,6 +246,24 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
             }
             Files.write(checkpointFile, rows, StandardCharsets.UTF_8);
         }
+    }
+
+    private static List<Integer> selectedQueryIndices(Parameters parameters,
+                                                       MultiQueryReplication demand,
+                                                       int topHighDemandQueries) {
+        List<Integer> indices = new ArrayList<>();
+        for (int query = 0; query < demand.queries.size(); query++) indices.add(query);
+        if (topHighDemandQueries == 0) return indices;
+        indices.sort((left, right) -> Double.compare(
+                nominalTotal(parameters, demand.queries.get(right).context),
+                nominalTotal(parameters, demand.queries.get(left).context)));
+        return List.copyOf(indices.subList(0, topHighDemandQueries));
+    }
+
+    private static double nominalTotal(Parameters parameters, CovariateVector context) {
+        double total = 0.0;
+        for (double value : parameters.nominalDemand(context)) total += value;
+        return total;
     }
 
     private static Solution solve(ProcurementParams market, List<String> lanes,
