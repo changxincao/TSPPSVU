@@ -1,0 +1,54 @@
+Picked up JAVA_TOOL_OPTIONS: -Dtrb.timing.bandwidth=0.5 -Dtrb.timing.betaOverride=11 -Dtrb.timing.capacityScale=0.75 -Dtrb.timing.mqcCapacityRatio=0.75
+SOLVE_BEGIN method=NOMINAL robustness=0.0000000000000000 scenarios=75 positiveWeights=75 ess=75.0000000000 threads=2 limitSec=600
+Version identifier: 22.1.1.0 | 2022-11-27 | 9160aff4d
+CPXPARAM_Threads                                 2
+CPXPARAM_TimeLimit                               600
+Tried aggregator 1 time.
+MIP Presolve eliminated 4 rows and 4 columns.
+MIP Presolve modified 161 coefficients.
+Reduced MIP has 38398 rows, 37286 columns, and 169127 nonzeros.
+Reduced MIP has 15 binaries, 0 generals, 0 SOSs, and 0 indicators.
+Presolve time = 0.08 sec. (82.34 ticks)
+Found incumbent of value 178687.081924 after 0.12 sec. (122.25 ticks)
+Probing time = 0.00 sec. (4.35 ticks)
+Tried aggregator 1 time.
+Detecting symmetries...
+Reduced MIP has 38398 rows, 37286 columns, and 169127 nonzeros.
+Reduced MIP has 15 binaries, 0 generals, 0 SOSs, and 0 indicators.
+Presolve time = 0.08 sec. (96.14 ticks)
+Probing time = 0.00 sec. (5.58 ticks)
+MIP emphasis: balance optimality and feasibility.
+MIP search method: dynamic search.
+Parallel mode: deterministic, using up to 2 threads.
+Root relaxation solution time = 29.44 sec. (35459.08 ticks)
+
+        Nodes                                         Cuts/
+   Node  Left     Objective  IInf  Best Integer    Best Bound    ItCnt     Gap
+
+*     0+    0                       178687.0819      278.4741            99.84%
+*     0+    0                        87838.3388      278.4741            99.68%
+      0     0    81041.5775     7    87838.3388    81041.5775    33286    7.74%
+*     0+    0                        81636.7188    81041.5775             0.73%
+      0     0    81513.5913     7    81636.7188    Cuts: 5969    37472    0.15%
+      0     0    81522.1761     4    81636.7188    Cuts: 2011    37669    0.14%
+      0     0    81532.5139     4    81636.7188      Cuts: 41    37809    0.13%
+Detecting symmetries...
+      0     2    81532.5139     4    81636.7188    81532.5139    37809    0.13%
+Elapsed time = 36.50 sec. (44772.90 ticks, tree = 0.02 MB, solutions = 3)
+      1     1        cutoff          81636.7188    81532.5813    38579    0.13%
+      2     3    81620.4926     2    81636.7188    81532.5813    39825    0.13%
+      4     1        cutoff          81636.7188    81620.5994    41518    0.02%
+
+Flow cuts applied:  2104
+Mixed integer rounding cuts applied:  3603
+Gomory fractional cuts applied:  3
+
+Root node processing (before b&c):
+  Real time             =   36.49 sec. (44740.23 ticks)
+Parallel b&c, 2 threads:
+  Real time             =    2.50 sec. (4583.57 ticks)
+  Sync time (average)   =    1.04 sec.
+  Wait time (average)   =    0.00 sec.
+                          ------------
+Total (root+branch&cut) =   38.99 sec. (49323.80 ticks)
+SOLVE_END method=NOMINAL robustness=0.0000000000000000 status=Optimal certified=true objective=81636.718843769220 bestBound=81636.718843769250 gap=0.0000000000000000 solveSec=38.999888 selected=11

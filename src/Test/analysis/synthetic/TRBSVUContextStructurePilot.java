@@ -19,38 +19,49 @@ import java.util.SplittableRandom;
 
 /** Paired small cases that isolate how context loadings change lane mix. */
 public final class TRBSVUContextStructurePilot {
-    private static final int CARRIERS = 12;
-    private static final int LANES = 20;
-    private static final int HISTORY = 60;
-    private static final int OOS = 500;
-    private static final int REPLICATIONS = 3;
+    private static final int DEFAULT_CARRIERS = 12;
+    private static final int DEFAULT_LANES = 20;
+    private static final int DEFAULT_HISTORY = 60;
+    private static final int DEFAULT_OOS = 500;
+    private static final int DEFAULT_REPLICATIONS = 3;
 
     private TRBSVUContextStructurePilot() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length != 1) throw new IllegalArgumentException("Usage: <output-directory>");
+        if (args.length != 1 && args.length != 6) {
+            throw new IllegalArgumentException("Usage: <output-directory> "
+                    + "[carriers lanes history oos replications]");
+        }
         Path root = Path.of(args[0]).toAbsolutePath().normalize();
+        int carriers = args.length == 6 ? Integer.parseInt(args[1]) : DEFAULT_CARRIERS;
+        int lanes = args.length == 6 ? Integer.parseInt(args[2]) : DEFAULT_LANES;
+        int history = args.length == 6 ? Integer.parseInt(args[3]) : DEFAULT_HISTORY;
+        int oos = args.length == 6 ? Integer.parseInt(args[4]) : DEFAULT_OOS;
+        int replications = args.length == 6 ? Integer.parseInt(args[5]) : DEFAULT_REPLICATIONS;
+        if (carriers <= 0 || lanes <= 0 || history <= 0 || oos <= 0 || replications <= 0) {
+            throw new IllegalArgumentException("All pilot dimensions must be positive.");
+        }
         Files.createDirectories(root);
         List<String> report = new ArrayList<>();
         report.add("replication\tcontext_structure\ttotal_cv\tmean_context_share_tv"
                 + "\tmax_context_share_tv\tmean_loading_cosine\tbase_share"
                 + "\tsaa_relative_mae\tcsaa_relative_mae\tsaa_share_tv\tcsaa_share_tv\tinstance");
         SplittableRandom seeds = new SplittableRandom(20260916L);
-        for (int replication = 1; replication <= REPLICATIONS; replication++) {
+        for (int replication = 1; replication <= replications; replication++) {
             TRBSVUSyntheticCase.Seeds paired = new TRBSVUSyntheticCase.Seeds(
                     seeds.nextLong(), seeds.nextLong(), seeds.nextLong(), seeds.nextLong(), seeds.nextLong());
             Parameters reference = TRBSVUSyntheticDemandGenerator.sampleParameters(
-                    LANES, HISTORY, paired.demandParameters(), 1.0,
+                    lanes, history, paired.demandParameters(), 1.0,
                     ContextStructure.DENSE_PROPORTIONAL);
             ProcurementParams market = TRBSVUProcurementGenerator.generate(
-                    CARRIERS, reference.typicalDemand(), paired.procurement());
+                    carriers, reference.typicalDemand(), paired.procurement());
             for (ContextStructure structure : ContextStructure.values()) {
                 Parameters parameters = TRBSVUSyntheticDemandGenerator.sampleParameters(
-                        LANES, HISTORY, paired.demandParameters(), 1.0, structure);
+                        lanes, history, paired.demandParameters(), 1.0, structure);
                 Replication demand = TRBSVUSyntheticDemandGenerator.generate(parameters,
-                        Distribution.LOGNORMAL, Volatility.HIGH, OOS, paired.contexts(),
+                        Distribution.LOGNORMAL, Volatility.HIGH, oos, paired.contexts(),
                         paired.historicalNoise(), paired.oosNoise());
-                TRBSVUSyntheticCase instance = new TRBSVUSyntheticCase(market, laneNames(),
+                TRBSVUSyntheticCase instance = new TRBSVUSyntheticCase(market, laneNames(lanes),
                         demand.history, demand.testContext, demand.oos, paired);
                 String stem = String.format(Locale.ROOT, "rep%02d_%s", replication,
                         structure.name().toLowerCase(Locale.ROOT));
@@ -138,9 +149,9 @@ public final class TRBSVUContextStructurePilot {
         return error / total;
     }
 
-    private static List<String> laneNames() {
-        List<String> result = new ArrayList<>(LANES);
-        for (int j = 0; j < LANES; j++) result.add("L" + (j + 1));
+    private static List<String> laneNames(int lanes) {
+        List<String> result = new ArrayList<>(lanes);
+        for (int j = 0; j < lanes; j++) result.add("L" + (j + 1));
         return result;
     }
 

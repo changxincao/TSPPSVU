@@ -1,0 +1,21 @@
+SOLVE_BEGIN method=NOMINAL robustness=0.0000000000000000 scenarios=100 positiveWeights=100 ess=44.0420029552 threads=2 limitSec=600
+Version identifier: 22.1.1.0 | 2022-11-27 | 9160aff4d
+CPXPARAM_Threads                                 2
+CPXPARAM_TimeLimit                               600
+Tried aggregator 1 time.
+MIP Presolve eliminated 84 rows and 84 columns.
+MIP Presolve modified 74 coefficients.
+Reduced MIP has 77718 rows, 75736 columns, and 350287 nonzeros.
+Reduced MIP has 20 binaries, 0 generals, 0 SOSs, and 0 indicators.
+Presolve time = 0.19 sec. (180.02 ticks)
+Found incumbent of value 237503.964169 after 0.31 sec. (260.64 ticks)
+Probing time = 0.02 sec. (8.89 ticks)
+Tried aggregator 1 time.
+Detecting symmetries...
+Reduced MIP has 77718 rows, 75736 columns, and 350287 nonzeros.
+Reduced MIP has 20 binaries, 0 generals, 0 SOSs, and 0 indicators.
+Presolve time = 0.19 sec. (181.62 ticks)
+Probing time = 0.02 sec. (11.89 ticks)
+MIP emphasis: balance optimality and feasibility.
+MIP search method: dynamic search.
+Parallel mode: deterministic, using up to 2 threads.

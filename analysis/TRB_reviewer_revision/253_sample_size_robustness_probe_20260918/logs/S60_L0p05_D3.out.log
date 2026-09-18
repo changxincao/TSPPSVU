@@ -1,0 +1,552 @@
+SOLVE_BEGIN method=NOMINAL robustness=0.0000000000000000 scenarios=1 positiveWeights=1 ess=1.0000000000 threads=1 limitSec=600
+Version identifier: 22.1.1.0 | 2022-11-27 | 9160aff4d
+CPXPARAM_Threads                                 1
+CPXPARAM_TimeLimit                               600
+CPXPARAM_MIP_Tolerances_MIPGap                   1e-08
+Tried aggregator 1 time.
+Reduced MIP has 166 rows, 164 columns, and 680 nonzeros.
+Reduced MIP has 12 binaries, 0 generals, 0 SOSs, and 0 indicators.
+Presolve time = 0.00 sec. (0.28 ticks)
+Found incumbent of value 119638.359590 after 0.00 sec. (0.45 ticks)
+Probing time = 0.00 sec. (0.02 ticks)
+Tried aggregator 1 time.
+Detecting symmetries...
+Reduced MIP has 166 rows, 164 columns, and 680 nonzeros.
+Reduced MIP has 12 binaries, 0 generals, 0 SOSs, and 0 indicators.
+Presolve time = 0.02 sec. (0.34 ticks)
+Probing time = 0.00 sec. (0.02 ticks)
+MIP emphasis: balance optimality and feasibility.
+MIP search method: dynamic search.
+Parallel mode: none, using 1 thread.
+Root relaxation solution time = 0.00 sec. (0.75 ticks)
+
+        Nodes                                         Cuts/
+   Node  Left     Objective  IInf  Best Integer    Best Bound    ItCnt     Gap
+
+*     0+    0                       119638.3596        0.0000           100.00%
+      0     0    50052.3929     5   119638.3596    50052.3929       95   58.16%
+*     0+    0                        51273.1245    50052.3929             2.38%
+      0     0    50718.8243     1    51273.1245      Cuts: 23      125    1.08%
+*     0+    0                        50718.8780    50718.8243             0.00%
+      0     0        cutoff          50718.8780                    128    0.00%
+Elapsed time = 0.02 sec. (4.55 ticks, tree = 0.01 MB, solutions = 3)
+
+Flow cuts applied:  11
+Mixed integer rounding cuts applied:  7
+Gomory fractional cuts applied:  2
+
+Root node processing (before b&c):
+  Real time             =    0.02 sec. (4.56 ticks)
+Sequential b&c:
+  Real time             =    0.00 sec. (0.00 ticks)
+                          ------------
+Total (root+branch&cut) =    0.02 sec. (4.56 ticks)
+SOLVE_END method=NOMINAL robustness=0.0000000000000000 status=Optimal certified=true objective=50718.878005743885 bestBound=50718.878005743885 gap=0.0000000000000000 solveSec=0.021592 selected=8
+SOLVE_BEGIN method=NOMINAL robustness=0.0000000000000000 scenarios=60 positiveWeights=60 ess=60.0000000000 threads=1 limitSec=600
+Version identifier: 22.1.1.0 | 2022-11-27 | 9160aff4d
+CPXPARAM_Threads                                 1
+CPXPARAM_TimeLimit                               600
+CPXPARAM_MIP_Tolerances_MIPGap                   1e-08
+Tried aggregator 1 time.
+MIP Presolve eliminated 142 rows and 142 columns.
+MIP Presolve modified 2125 coefficients.
+Reduced MIP has 9700 rows, 8990 columns, and 38592 nonzeros.
+Reduced MIP has 12 binaries, 0 generals, 0 SOSs, and 0 indicators.
+Presolve time = 0.03 sec. (24.01 ticks)
+Found incumbent of value 137742.552634 after 0.05 sec. (33.57 ticks)
+Probing time = 0.00 sec. (1.36 ticks)
+Tried aggregator 1 time.
+Detecting symmetries...
+Reduced MIP has 9700 rows, 8990 columns, and 38592 nonzeros.
+Reduced MIP has 12 binaries, 0 generals, 0 SOSs, and 0 indicators.
+Presolve time = 0.03 sec. (25.22 ticks)
+Probing time = 0.00 sec. (1.35 ticks)
+MIP emphasis: balance optimality and feasibility.
+MIP search method: dynamic search.
+Parallel mode: none, using 1 thread.
+Root relaxation solution time = 1.08 sec. (2173.12 ticks)
+
+        Nodes                                         Cuts/
+   Node  Left     Objective  IInf  Best Integer    Best Bound    ItCnt     Gap
+
+*     0+    0                       137742.5526    29816.3145            78.35%
+      0     0    74283.9868     3   137742.5526    74283.9868    13683   46.07%
+*     0+    0                        74294.4224    74283.9868             0.01%
+      0     0        cutoff          74294.4224                  13824    0.00%
+Elapsed time = 1.27 sec. (2360.45 ticks, tree = 0.01 MB, solutions = 2)
+
+Implied bound cuts applied:  10
+Flow cuts applied:  586
+Mixed integer rounding cuts applied:  409
+Gomory fractional cuts applied:  2
+
+Root node processing (before b&c):
+  Real time             =    1.27 sec. (2361.02 ticks)
+Sequential b&c:
+  Real time             =    0.00 sec. (0.00 ticks)
+                          ------------
+Total (root+branch&cut) =    1.27 sec. (2361.02 ticks)
+SOLVE_END method=NOMINAL robustness=0.0000000000000000 status=Optimal certified=true objective=74294.422363123170 bestBound=74294.422363123170 gap=0.0000000000000000 solveSec=1.273799 selected=9
+SOLVE_BEGIN method=NOMINAL robustness=0.0000000000000000 scenarios=60 positiveWeights=60 ess=7.1483005707 threads=1 limitSec=600
+Version identifier: 22.1.1.0 | 2022-11-27 | 9160aff4d
+CPXPARAM_Threads                                 1
+CPXPARAM_TimeLimit                               600
+CPXPARAM_MIP_Tolerances_MIPGap                   1e-08
+Tried aggregator 1 time.
+MIP Presolve eliminated 142 rows and 142 columns.
+MIP Presolve modified 2125 coefficients.
+Reduced MIP has 9700 rows, 8990 columns, and 38592 nonzeros.
+Reduced MIP has 12 binaries, 0 generals, 0 SOSs, and 0 indicators.
+Presolve time = 0.02 sec. (24.01 ticks)
+Found incumbent of value 81598.314471 after 0.03 sec. (33.57 ticks)
+Probing time = 0.00 sec. (1.36 ticks)
+Tried aggregator 1 time.
+Detecting symmetries...
+Reduced MIP has 9700 rows, 8990 columns, and 38592 nonzeros.
+Reduced MIP has 12 binaries, 0 generals, 0 SOSs, and 0 indicators.
+Presolve time = 0.02 sec. (24.54 ticks)
+Probing time = 0.00 sec. (1.35 ticks)
+MIP emphasis: balance optimality and feasibility.
+MIP search method: dynamic search.
+Parallel mode: none, using 1 thread.
+Root relaxation solution time = 1.17 sec. (2007.62 ticks)
+
+        Nodes                                         Cuts/
+   Node  Left     Objective  IInf  Best Integer    Best Bound    ItCnt     Gap
+
+*     0+    0                        81598.3145     8018.9345            90.17%
+      0     0    41503.4445     6    81598.3145    41503.4445    10432   49.14%
+*     0+    0                        43983.7164    41503.4445             5.64%
+*     0+    0                        41993.7871    41503.4445             1.17%
+      0     0    41823.7525     5    41993.7871    Cuts: 1500    11882    0.40%
+*     0+    0                        41834.6972    41823.7525             0.03%
+      0     0        cutoff          41834.6972                  11994    0.00%
+Elapsed time = 1.84 sec. (2786.22 ticks, tree = 0.01 MB, solutions = 4)
+
+Implied bound cuts applied:  3
+Flow cuts applied:  786
+Mixed integer rounding cuts applied:  520
+
+Root node processing (before b&c):
+  Real time             =    1.84 sec. (2786.93 ticks)
+Sequential b&c:
+  Real time             =    0.00 sec. (0.00 ticks)
+                          ------------
+Total (root+branch&cut) =    1.84 sec. (2786.93 ticks)
+SOLVE_END method=NOMINAL robustness=0.0000000000000000 status=Optimal certified=true objective=41834.697242148060 bestBound=41834.697242148070 gap=0.0000000000000000 solveSec=1.850523 selected=7
+SOLVE_BEGIN method=CHI_SQUARED robustness=0.050000000000000000 scenarios=60 positiveWeights=60 ess=7.1483005707 threads=1 limitSec=600
+Problem
+  Name                   : DRO-Extensive   
+  Objective sense        : minimize        
+  Type                   : CONIC (conic optimization problem)
+  Constraints            : 17102           
+  Affine conic cons.     : 1 (61 rows)
+  Disjunctive cons.      : 0               
+  Cones                  : 0               
+  Scalar variables       : 16395           
+  Matrix variables       : 0               
+  Integer variables      : 12              
+
+Optimizer started.
+Mixed integer optimizer started.
+Threads used: 1
+Presolve started.
+Presolve terminated. Time = 0.28, probing time =  0.04
+Presolved problem: 9052 variables, 9759 constraints, 47678 non-zeros
+Presolved problem: 0 general integer, 12 binary, 9040 continuous
+Presolved problem: 1 cones
+Clique table size: 0
+BRANCHES RELAXS   ACT_NDS  DEPTH    BEST_INT_OBJ         BEST_RELAX_OBJ       REL_GAP(%)  TIME  
+0        0        1        0        NA                   NA                   NA          0.3   
+0        1        1        0        NA                   4.3028676609e+04     NA          1.1   
+0        1        1        0        4.3385707883e+04     4.3028676609e+04     0.82        5.1   
+Root cut generation started.
+0        1        1        0        4.3385707883e+04     4.3028676609e+04     0.82        7.2   
+0        2        1        0        4.3385707883e+04     4.3163685714e+04     0.51        9.9   
+Root cut generation terminated. Time = 3.05
+0        5        1        0        4.3345939177e+04     4.3201778619e+04     0.33        12.6  
+7        15       0        2        4.3345939065e+04     4.3345939065e+04     0.00e+00    18.9  
+An optimal solution satisfying the relative gap tolerance of 1.00e-02(%) has been located.
+The relative gap is 0.00e+00(%).
+An optimal solution satisfying the absolute gap tolerance of 0.00e+00 has been located.
+The absolute gap is 0.00e+00.
+
+Objective of best integer solution : 4.334593906484e+04      
+Best objective bound               : 4.334593906484e+04      
+Initial feasible solution objective: Undefined
+Construct solution objective       : Not employed
+User objective cut value           : Not employed
+Number of cuts generated           : 306
+  Number of CMIR cuts              : 112
+  Number of implied bound cuts     : 193
+  Number of knapsack_cover cuts    : 1
+Number of branches                 : 7
+Number of relaxations solved       : 15
+Number of interior point iterations: 904
+Number of simplex iterations       : 0
+Time spend presolving the root     : 0.28
+Time spend optimizing the root     : 1.57
+Mixed integer optimizer terminated. Time: 18.98
+
+Optimizer terminated. Time: 18.99   
+
+
+Integer solution solution summary
+  Problem status  : PRIMAL_FEASIBLE
+  Solution status : INTEGER_OPTIMAL
+  Primal.  obj: 4.3345939065e+04    nrm: 4e+04    Viol.  con: 1e-03    var: 3e-05    acc: 0e+00    itg: 5e-07  
+SOLVE_END method=CHI_SQUARED robustness=0.050000000000000000 status=PrimalFeasible certified=true objective=43345.939064836064 bestBound=43345.939064836080 gap=0.0000000000000000 solveSec=19.409280 selected=7
+SOLVE_BEGIN method=NOMINAL robustness=0.0000000000000000 scenarios=100 positiveWeights=100 ess=100.0000000000 threads=1 limitSec=600
+Version identifier: 22.1.1.0 | 2022-11-27 | 9160aff4d
+CPXPARAM_Threads                                 1
+CPXPARAM_TimeLimit                               600
+CPXPARAM_MIP_Tolerances_MIPGap                   1e-08
+Tried aggregator 1 time.
+MIP Presolve eliminated 57 rows and 57 columns.
+MIP Presolve modified 5991 coefficients.
+Reduced MIP has 16345 rows, 15155 columns, and 65316 nonzeros.
+Reduced MIP has 12 binaries, 0 generals, 0 SOSs, and 0 indicators.
+Presolve time = 0.06 sec. (50.73 ticks)
+Found incumbent of value 75458.088915 after 0.09 sec. (66.98 ticks)
+Probing time = 0.00 sec. (2.22 ticks)
+Tried aggregator 1 time.
+Detecting symmetries...
+Reduced MIP has 16345 rows, 15155 columns, and 65316 nonzeros.
+Reduced MIP has 12 binaries, 0 generals, 0 SOSs, and 0 indicators.
+Presolve time = 0.06 sec. (44.76 ticks)
+Probing time = 0.00 sec. (2.22 ticks)
+MIP emphasis: balance optimality and feasibility.
+MIP search method: dynamic search.
+Parallel mode: none, using 1 thread.
+Root relaxation solution time = 5.19 sec. (6747.08 ticks)
+
+        Nodes                                         Cuts/
+   Node  Left     Objective  IInf  Best Integer    Best Bound    ItCnt     Gap
+
+*     0+    0                        75458.0889     3508.8364            95.35%
+      0     0    34818.3390     5    75458.0889    34818.3390    18484   53.86%
+*     0+    0                        35461.1693    34818.3390             1.81%
+*     0     0      integral     0    35305.8775    Cuts: 2395    20800    0.00%
+      0     0        cutoff          35305.8775    35305.8775    20800    0.00%
+Elapsed time = 6.78 sec. (8303.53 ticks, tree = 0.01 MB, solutions = 3)
+
+Implied bound cuts applied:  18
+Flow cuts applied:  1225
+Mixed integer rounding cuts applied:  841
+
+Root node processing (before b&c):
+  Real time             =    6.78 sec. (8304.61 ticks)
+Sequential b&c:
+  Real time             =    0.00 sec. (0.00 ticks)
+                          ------------
+Total (root+branch&cut) =    6.78 sec. (8304.61 ticks)
+SOLVE_END method=NOMINAL robustness=0.0000000000000000 status=Optimal certified=true objective=35305.877463409190 bestBound=35305.877463409190 gap=0.0000000000000000 solveSec=6.786280 selected=6
+SOLVE_BEGIN method=NOMINAL robustness=0.0000000000000000 scenarios=60 positiveWeights=60 ess=7.5981926933 threads=1 limitSec=600
+Version identifier: 22.1.1.0 | 2022-11-27 | 9160aff4d
+CPXPARAM_Threads                                 1
+CPXPARAM_TimeLimit                               600
+CPXPARAM_MIP_Tolerances_MIPGap                   1e-08
+Tried aggregator 1 time.
+MIP Presolve eliminated 142 rows and 142 columns.
+MIP Presolve modified 2125 coefficients.
+Reduced MIP has 9700 rows, 8990 columns, and 38592 nonzeros.
+Reduced MIP has 12 binaries, 0 generals, 0 SOSs, and 0 indicators.
+Presolve time = 0.03 sec. (24.01 ticks)
+Found incumbent of value 65485.641155 after 0.05 sec. (33.57 ticks)
+Probing time = 0.00 sec. (1.36 ticks)
+Tried aggregator 1 time.
+Detecting symmetries...
+Reduced MIP has 9700 rows, 8990 columns, and 38592 nonzeros.
+Reduced MIP has 12 binaries, 0 generals, 0 SOSs, and 0 indicators.
+Presolve time = 0.03 sec. (24.54 ticks)
+Probing time = 0.00 sec. (1.35 ticks)
+MIP emphasis: balance optimality and feasibility.
+MIP search method: dynamic search.
+Parallel mode: none, using 1 thread.
+Root relaxation solution time = 1.33 sec. (1721.33 ticks)
+
+        Nodes                                         Cuts/
+   Node  Left     Objective  IInf  Best Integer    Best Bound    ItCnt     Gap
+
+*     0+    0                        65485.6412     4937.9807            92.46%
+      0     0    32644.7459     5    65485.6412    32644.7459     9186   50.15%
+*     0+    0                        35761.8578    32644.7459             8.72%
+*     0+    0                        33355.8062    32644.7459             2.13%
+      0     0    32896.2389     5    33355.8062    Cuts: 1254    10572    1.38%
+*     0+    0                        32920.8242    32896.2389             0.07%
+      0     0    32919.9450     4    32920.8242     Cuts: 623    10963    0.00%
+      0     0    32920.7234     4    32920.8242     Cuts: 158    11096    0.00%
+      0     0    32920.8237     4    32920.8242      Cuts: 49    11140    0.00%
+Detecting symmetries...
+      0     0        cutoff          32920.8242    32920.8237    11142    0.00%
+Elapsed time = 2.34 sec. (2780.65 ticks, tree = 0.01 MB, solutions = 4)
+
+Implied bound cuts applied:  3
+Flow cuts applied:  660
+Mixed integer rounding cuts applied:  537
+Lift and project cuts applied:  1
+Gomory fractional cuts applied:  1
+
+Root node processing (before b&c):
+  Real time             =    2.34 sec. (2781.36 ticks)
+Sequential b&c:
+  Real time             =    0.00 sec. (0.00 ticks)
+                          ------------
+Total (root+branch&cut) =    2.34 sec. (2781.36 ticks)
+SOLVE_END method=NOMINAL robustness=0.0000000000000000 status=Optimal certified=true objective=32920.824160759130 bestBound=32920.824160759130 gap=0.0000000000000000 solveSec=2.355922 selected=6
+SOLVE_BEGIN method=CHI_SQUARED robustness=0.050000000000000000 scenarios=60 positiveWeights=60 ess=7.5981926933 threads=1 limitSec=600
+Problem
+  Name                   : DRO-Extensive   
+  Objective sense        : minimize        
+  Type                   : CONIC (conic optimization problem)
+  Constraints            : 17102           
+  Affine conic cons.     : 1 (61 rows)
+  Disjunctive cons.      : 0               
+  Cones                  : 0               
+  Scalar variables       : 16395           
+  Matrix variables       : 0               
+  Integer variables      : 12              
+
+Optimizer started.
+Mixed integer optimizer started.
+Threads used: 1
+Presolve started.
+Presolve terminated. Time = 0.21, probing time =  0.03
+Presolved problem: 9052 variables, 9759 constraints, 47678 non-zeros
+Presolved problem: 0 general integer, 12 binary, 9040 continuous
+Presolved problem: 1 cones
+Clique table size: 0
+BRANCHES RELAXS   ACT_NDS  DEPTH    BEST_INT_OBJ         BEST_RELAX_OBJ       REL_GAP(%)  TIME  
+0        0        1        0        NA                   NA                   NA          0.3   
+0        1        1        0        NA                   3.4215835669e+04     NA          1.0   
+0        1        1        0        3.4483597247e+04     3.4215835669e+04     0.78        2.4   
+Root cut generation started.
+0        1        1        0        3.4483597247e+04     3.4215835669e+04     0.78        4.6   
+Root cut generation terminated. Time = 1.36
+7        12       4        2        3.4483597247e+04     3.4370687887e+04     0.33        11.6  
+13       20       2        5        3.4483597183e+04     3.4415269060e+04     0.20        15.9  
+17       25       0        4        3.4483597175e+04     3.4483597175e+04     0.00e+00    17.0  
+An optimal solution satisfying the relative gap tolerance of 1.00e-02(%) has been located.
+The relative gap is 0.00e+00(%).
+An optimal solution satisfying the absolute gap tolerance of 0.00e+00 has been located.
+The absolute gap is 0.00e+00.
+
+Objective of best integer solution : 3.448359717501e+04      
+Best objective bound               : 3.448359717501e+04      
+Initial feasible solution objective: Undefined
+Construct solution objective       : Not employed
+User objective cut value           : Not employed
+Number of cuts generated           : 181
+  Number of CMIR cuts              : 99
+  Number of implied bound cuts     : 82
+Number of branches                 : 17
+Number of relaxations solved       : 25
+Number of interior point iterations: 1402
+Number of simplex iterations       : 0
+Time spend presolving the root     : 0.21
+Time spend optimizing the root     : 1.53
+Mixed integer optimizer terminated. Time: 17.06
+
+Optimizer terminated. Time: 17.07   
+
+
+Integer solution solution summary
+  Problem status  : PRIMAL_FEASIBLE
+  Solution status : INTEGER_OPTIMAL
+  Primal.  obj: 3.4483597175e+04    nrm: 3e+04    Viol.  con: 4e-05    var: 3e-06    acc: 0e+00    itg: 7e-09  
+SOLVE_END method=CHI_SQUARED robustness=0.050000000000000000 status=PrimalFeasible certified=true objective=34483.597175010014 bestBound=34483.597175010030 gap=0.0000000000000000 solveSec=17.255921 selected=6
+SOLVE_BEGIN method=NOMINAL robustness=0.0000000000000000 scenarios=100 positiveWeights=100 ess=100.0000000000 threads=1 limitSec=600
+Version identifier: 22.1.1.0 | 2022-11-27 | 9160aff4d
+CPXPARAM_Threads                                 1
+CPXPARAM_TimeLimit                               600
+CPXPARAM_MIP_Tolerances_MIPGap                   1e-08
+Tried aggregator 1 time.
+MIP Presolve modified 12011 coefficients.
+Reduced MIP has 16402 rows, 15212 columns, and 65624 nonzeros.
+Reduced MIP has 12 binaries, 0 generals, 0 SOSs, and 0 indicators.
+Presolve time = 0.05 sec. (46.79 ticks)
+Found incumbent of value 42315.443265 after 0.06 sec. (63.15 ticks)
+Probing time = 0.02 sec. (2.29 ticks)
+Tried aggregator 1 time.
+Detecting symmetries...
+Reduced MIP has 16402 rows, 15212 columns, and 65624 nonzeros.
+Reduced MIP has 12 binaries, 0 generals, 0 SOSs, and 0 indicators.
+Presolve time = 0.06 sec. (45.65 ticks)
+Probing time = 0.00 sec. (2.29 ticks)
+MIP emphasis: balance optimality and feasibility.
+MIP search method: dynamic search.
+Parallel mode: none, using 1 thread.
+Root relaxation solution time = 7.72 sec. (8386.01 ticks)
+
+        Nodes                                         Cuts/
+   Node  Left     Objective  IInf  Best Integer    Best Bound    ItCnt     Gap
+
+*     0+    0                        42315.4433        0.0000           100.00%
+      0     0    13268.2638     7    42315.4433    13268.2638    18790   68.64%
+*     0+    0                        24621.8618    13268.2638            46.11%
+*     0+    0                        13321.4681    13268.2638             0.40%
+      0     0        cutoff          13321.4681                  19557    0.00%
+Elapsed time = 8.47 sec. (9198.16 ticks, tree = 0.01 MB, solutions = 3)
+
+Flow cuts applied:  182
+Mixed integer rounding cuts applied:  252
+Gomory fractional cuts applied:  1
+
+Root node processing (before b&c):
+  Real time             =    8.47 sec. (9199.19 ticks)
+Sequential b&c:
+  Real time             =    0.00 sec. (0.00 ticks)
+                          ------------
+Total (root+branch&cut) =    8.47 sec. (9199.19 ticks)
+SOLVE_END method=NOMINAL robustness=0.0000000000000000 status=Optimal certified=true objective=13321.468148342336 bestBound=13321.468148342336 gap=0.0000000000000000 solveSec=8.472880 selected=3
+SOLVE_BEGIN method=NOMINAL robustness=0.0000000000000000 scenarios=60 positiveWeights=60 ess=9.4927594467 threads=1 limitSec=600
+Version identifier: 22.1.1.0 | 2022-11-27 | 9160aff4d
+CPXPARAM_Threads                                 1
+CPXPARAM_TimeLimit                               600
+CPXPARAM_MIP_Tolerances_MIPGap                   1e-08
+Tried aggregator 1 time.
+MIP Presolve eliminated 142 rows and 142 columns.
+MIP Presolve modified 2125 coefficients.
+Reduced MIP has 9700 rows, 8990 columns, and 38592 nonzeros.
+Reduced MIP has 12 binaries, 0 generals, 0 SOSs, and 0 indicators.
+Presolve time = 0.03 sec. (24.01 ticks)
+Found incumbent of value 176900.373291 after 0.05 sec. (33.57 ticks)
+Probing time = 0.00 sec. (1.36 ticks)
+Tried aggregator 1 time.
+Detecting symmetries...
+Reduced MIP has 9700 rows, 8990 columns, and 38592 nonzeros.
+Reduced MIP has 12 binaries, 0 generals, 0 SOSs, and 0 indicators.
+Presolve time = 0.05 sec. (24.54 ticks)
+Probing time = 0.00 sec. (1.35 ticks)
+MIP emphasis: balance optimality and feasibility.
+MIP search method: dynamic search.
+Parallel mode: none, using 1 thread.
+Root relaxation solution time = 1.14 sec. (1355.28 ticks)
+
+        Nodes                                         Cuts/
+   Node  Left     Objective  IInf  Best Integer    Best Bound    ItCnt     Gap
+
+*     0+    0                       176900.3733    36883.7156            79.15%
+      0     0    86756.5199     2   176900.3733    86756.5199    11528   50.96%
+*     0+    0                        86813.3442    86756.5199             0.07%
+      0     0        cutoff          86813.3442                  11889    0.00%
+Elapsed time = 1.41 sec. (1574.10 ticks, tree = 0.01 MB, solutions = 2)
+
+Implied bound cuts applied:  9
+Flow cuts applied:  395
+Mixed integer rounding cuts applied:  325
+Gomory fractional cuts applied:  2
+
+Root node processing (before b&c):
+  Real time             =    1.41 sec. (1574.67 ticks)
+Sequential b&c:
+  Real time             =    0.00 sec. (0.00 ticks)
+                          ------------
+Total (root+branch&cut) =    1.41 sec. (1574.67 ticks)
+SOLVE_END method=NOMINAL robustness=0.0000000000000000 status=Optimal certified=true objective=86813.344179112300 bestBound=86813.344179112300 gap=0.0000000000000000 solveSec=1.414624 selected=9
+SOLVE_BEGIN method=CHI_SQUARED robustness=0.050000000000000000 scenarios=60 positiveWeights=60 ess=9.4927594467 threads=1 limitSec=600
+Problem
+  Name                   : DRO-Extensive   
+  Objective sense        : minimize        
+  Type                   : CONIC (conic optimization problem)
+  Constraints            : 17102           
+  Affine conic cons.     : 1 (61 rows)
+  Disjunctive cons.      : 0               
+  Cones                  : 0               
+  Scalar variables       : 16395           
+  Matrix variables       : 0               
+  Integer variables      : 12              
+
+Optimizer started.
+Mixed integer optimizer started.
+Threads used: 1
+Presolve started.
+Presolve terminated. Time = 0.24, probing time =  0.03
+Presolved problem: 9052 variables, 9759 constraints, 47678 non-zeros
+Presolved problem: 0 general integer, 12 binary, 9040 continuous
+Presolved problem: 1 cones
+Clique table size: 0
+BRANCHES RELAXS   ACT_NDS  DEPTH    BEST_INT_OBJ         BEST_RELAX_OBJ       REL_GAP(%)  TIME  
+0        0        1        0        NA                   NA                   NA          0.3   
+0        1        1        0        NA                   8.8157184108e+04     NA          1.0   
+0        1        1        0        8.8209063698e+04     8.8157184108e+04     0.06        4.4   
+Root cut generation started.
+0        1        1        0        8.8209063698e+04     8.8157184108e+04     0.06        6.6   
+Root cut generation terminated. Time = 1.27
+An optimal solution satisfying the relative gap tolerance of 1.00e-02(%) has been located.
+The relative gap is 0.00e+00(%).
+An optimal solution satisfying the absolute gap tolerance of 0.00e+00 has been located.
+The absolute gap is 0.00e+00.
+
+Objective of best integer solution : 8.820906369845e+04      
+Best objective bound               : 8.820906369845e+04      
+Initial feasible solution objective: Undefined
+Construct solution objective       : Not employed
+User objective cut value           : Not employed
+Number of cuts generated           : 99
+  Number of CMIR cuts              : 70
+  Number of implied bound cuts     : 29
+Number of branches                 : 3
+Number of relaxations solved       : 7
+Number of interior point iterations: 357
+Number of simplex iterations       : 0
+Time spend presolving the root     : 0.24
+Time spend optimizing the root     : 1.11
+Mixed integer optimizer terminated. Time: 9.37
+
+Optimizer terminated. Time: 9.40    
+
+
+Integer solution solution summary
+  Problem status  : PRIMAL_FEASIBLE
+  Solution status : INTEGER_OPTIMAL
+  Primal.  obj: 8.8209063698e+04    nrm: 9e+04    Viol.  con: 6e-04    var: 4e-06    acc: 0e+00    itg: 3e-09  
+SOLVE_END method=CHI_SQUARED robustness=0.050000000000000000 status=PrimalFeasible certified=true objective=88209.063698445100 bestBound=88209.063698445040 gap=0.0000000000000000 solveSec=9.509207 selected=9
+SOLVE_BEGIN method=NOMINAL robustness=0.0000000000000000 scenarios=100 positiveWeights=100 ess=100.0000000000 threads=1 limitSec=600
+Version identifier: 22.1.1.0 | 2022-11-27 | 9160aff4d
+CPXPARAM_Threads                                 1
+CPXPARAM_TimeLimit                               600
+CPXPARAM_MIP_Tolerances_MIPGap                   1e-08
+Tried aggregator 1 time.
+MIP Presolve eliminated 348 rows and 348 columns.
+MIP Presolve modified 956 coefficients.
+Reduced MIP has 16054 rows, 14864 columns, and 63835 nonzeros.
+Reduced MIP has 12 binaries, 0 generals, 0 SOSs, and 0 indicators.
+Presolve time = 0.05 sec. (38.44 ticks)
+Found incumbent of value 184669.732787 after 0.08 sec. (54.04 ticks)
+Probing time = 0.00 sec. (2.25 ticks)
+Cover probing fixed 0 vars, tightened 3 bounds.
+Tried aggregator 1 time.
+Detecting symmetries...
+Reduced MIP has 16054 rows, 14864 columns, and 63835 nonzeros.
+Reduced MIP has 12 binaries, 0 generals, 0 SOSs, and 0 indicators.
+Presolve time = 0.06 sec. (43.57 ticks)
+Probing time = 0.00 sec. (2.24 ticks)
+MIP emphasis: balance optimality and feasibility.
+MIP search method: dynamic search.
+Parallel mode: none, using 1 thread.
+Root relaxation solution time = 7.05 sec. (7994.63 ticks)
+
+        Nodes                                         Cuts/
+   Node  Left     Objective  IInf  Best Integer    Best Bound    ItCnt     Gap
+
+*     0+    0                       184669.7328    44908.0433            75.68%
+      0     0    95387.5726     2   184669.7328    95387.5726    26278   48.35%
+*     0+    0                        95568.7794    95387.5726             0.19%
+      0     0    95568.5936     2    95568.7794    Cuts: 1914    27995    0.00%
+      0     0    95568.7681     2    95568.7794     Cuts: 266    28181    0.00%
+      0     0        cutoff          95568.7794                  28193    0.00%
+Elapsed time = 8.28 sec. (9196.27 ticks, tree = 0.01 MB, solutions = 2)
+
+Implied bound cuts applied:  13
+Flow cuts applied:  821
+Mixed integer rounding cuts applied:  668
+Gomory fractional cuts applied:  3
+
+Root node processing (before b&c):
+  Real time             =    8.28 sec. (9197.22 ticks)
+Sequential b&c:
+  Real time             =    0.00 sec. (0.00 ticks)
+                          ------------
+Total (root+branch&cut) =    8.28 sec. (9197.22 ticks)
+SOLVE_END method=NOMINAL robustness=0.0000000000000000 status=Optimal certified=true objective=95568.779379466460 bestBound=95568.779379466460 gap=0.0000000000000000 solveSec=8.294515 selected=9

@@ -21,13 +21,17 @@ public final class TRBSVUWideSameMeanOptimizationProbe {
     private TRBSVUWideSameMeanOptimizationProbe() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 2 || args.length > 3)
-            throw new IllegalArgumentException("Usage: <data-directory> <output-directory> [structures]");
+        if (args.length < 2 || args.length > 4)
+            throw new IllegalArgumentException("Usage: <data-directory> <output-directory> "
+                    + "[structures] [replications]");
         Path data = Path.of(args[0]).toAbsolutePath().normalize();
         Path output = Path.of(args[1]).toAbsolutePath().normalize();
         List<String> structures = args.length == 3
                 ? Arrays.asList(args[2].split(","))
                 : List.of("dense_proportional", "dense_wide_same_mean");
+        if (args.length == 4) structures = Arrays.asList(args[2].split(","));
+        int replications = args.length == 4 ? Integer.parseInt(args[3]) : 3;
+        if (replications <= 0) throw new IllegalArgumentException("Replications must be positive.");
         Files.createDirectories(output);
         Settings settings = new Settings(1, 600, 1e-4,
                 RCSAASolverVariant.LBBD_PRIMAL_EXACT, false, true);
@@ -35,7 +39,7 @@ public final class TRBSVUWideSameMeanOptimizationProbe {
         rows.add("replication\tstructure\tmethod\tobjective\tstatus\tcertified\tgap"
                 + "\tsolve_sec\tselected_count\tselected\toos_mean\toos_sd\toos_q95"
                 + "\toos_cvar95\toos_max\tspot_share\tmqc_penalty");
-        for (int replication = 1; replication <= 3; replication++) {
+        for (int replication = 1; replication <= replications; replication++) {
             for (String structure : structures) {
                 Path file = data.resolve(String.format(Locale.ROOT, "rep%02d_%s.instance.tsv",
                         replication, structure));

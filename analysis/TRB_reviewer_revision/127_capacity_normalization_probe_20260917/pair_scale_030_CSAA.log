@@ -1,0 +1,48 @@
+SOLVE_BEGIN method=NOMINAL robustness=0.0000000000000000 scenarios=100 positiveWeights=100 ess=44.0420029552 threads=2 limitSec=600
+Version identifier: 22.1.1.0 | 2022-11-27 | 9160aff4d
+CPXPARAM_Threads                                 2
+CPXPARAM_TimeLimit                               600
+Tried aggregator 1 time.
+MIP Presolve eliminated 1269 rows and 1269 columns.
+MIP Presolve modified 102 coefficients.
+Reduced MIP has 76533 rows, 74551 columns, and 338548 nonzeros.
+Reduced MIP has 20 binaries, 0 generals, 0 SOSs, and 0 indicators.
+Presolve time = 0.28 sec. (179.49 ticks)
+Found incumbent of value 250910.964097 after 0.41 sec. (254.83 ticks)
+Probing time = 0.03 sec. (9.27 ticks)
+Cover probing fixed 0 vars, tightened 2 bounds.
+Tried aggregator 1 time.
+Detecting symmetries...
+Reduced MIP has 76533 rows, 74551 columns, and 338548 nonzeros.
+Reduced MIP has 20 binaries, 0 generals, 0 SOSs, and 0 indicators.
+Presolve time = 0.20 sec. (177.79 ticks)
+Probing time = 0.02 sec. (12.65 ticks)
+MIP emphasis: balance optimality and feasibility.
+MIP search method: dynamic search.
+Parallel mode: deterministic, using up to 2 threads.
+Root relaxation solution time = 353.97 sec. (169616.49 ticks)
+
+        Nodes                                         Cuts/
+   Node  Left     Objective  IInf  Best Integer    Best Bound    ItCnt     Gap
+
+*     0+    0                       250910.9641    55125.2122            78.03%
+*     0+    0                       170818.4732    55125.2122            67.73%
+      0     0   159428.0920     2   170818.4732   159428.0920   145688    6.67%
+*     0+    0                       159468.9735   159428.0920             0.03%
+      0     0        cutoff         159468.9735                 147280    0.00%
+Elapsed time = 364.34 sec. (175202.32 ticks, tree = 0.01 MB, solutions = 3)
+
+Implied bound cuts applied:  24
+Flow cuts applied:  2107
+Mixed integer rounding cuts applied:  928
+Gomory fractional cuts applied:  2
+
+Root node processing (before b&c):
+  Real time             =  364.38 sec. (175207.54 ticks)
+Parallel b&c, 2 threads:
+  Real time             =    0.00 sec. (0.00 ticks)
+  Sync time (average)   =    0.00 sec.
+  Wait time (average)   =    0.00 sec.
+                          ------------
+Total (root+branch&cut) =  364.38 sec. (175207.54 ticks)
+SOLVE_END method=NOMINAL robustness=0.0000000000000000 status=Optimal certified=true objective=159468.97348664777 bestBound=159468.97348664777 gap=0.0000000000000000 solveSec=364.389732 selected=14

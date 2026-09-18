@@ -1,0 +1,823 @@
+\documentclass[11pt,a4paper]{ctexart}
+\usepackage[a4paper,margin=2.35cm]{geometry}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{booktabs,tabularx,array,longtable}
+\usepackage{enumitem}
+\usepackage{microtype}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{setspace}
+\usepackage{natbib}
+
+\setCJKmainfont{Noto Serif CJK SC}
+\setCJKsansfont{Noto Sans CJK SC}
+
+\hypersetup{colorlinks=true,linkcolor=black,citecolor=blue!55!black,urlcolor=blue!55!black}
+\setlength{\parindent}{2em}
+\setlength{\parskip}{0.25em}
+\setlength{\emergencystretch}{2em}
+\renewcommand{\arraystretch}{1.15}
+\titleformat{\section}{\large\bfseries}{\thesection}{0.7em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{0.6em}{}
+\titlespacing*{\section}{0pt}{1.35em}{0.55em}
+\titlespacing*{\subsection}{0pt}{1.0em}{0.35em}
+\setlist[itemize]{leftmargin=2em,itemsep=0.15em,topsep=0.2em}
+
+\newcommand{\I}{\mathcal I}
+\newcommand{\J}{\mathcal J}
+\newcommand{\Sset}{\mathcal S}
+\newcommand{\U}{\operatorname{U}}
+\newcommand{\Normal}{\mathcal N}
+
+\begin{document}
+\pagestyle{plain}
+
+\begin{center}
+{\LARGE\bfseries TSPP--SVU 数值实验详细说明书}\par
+\vspace{0.45em}
+{\large 数据生成、Synthetic Experiments 1--6、Olist case 与补充诊断（符号统一版）}\par
+\vspace{0.65em}
+{\small 2026年9月14日}\par
+\end{center}
+
+\vspace{0.5em}
+\noindent\textbf{说明。} 本文档是当前 TSPP--SVU 返修数值实验的详细执行说明书。前四节先固定 synthetic shipment-volume DGP 与 procurement-instance generator；随后按论文叙事顺序逐一规定 Synthetic Experiments 1--6 的数据、比较方法、调参逻辑、复用关系、输出指标与相互依赖；再单独规定 Olist real-data-based / semi-synthetic case 的 rolling protocol；最后记录审稿意见所需的附录诊断、diversification mechanism analysis、稳定性统计及代码复现规则。凡是已经在前期讨论中锁定的内容，本说明书直接写成执行规则；少数仍依赖前置实验结果或尚未最终确定的软件实现项，则明确标为“条件性设计”或“实施前待锁定项”，不在此处擅自填入新的参数。
+
+现有运输采购文献普遍使用随机生成的 market parameters 与 shipment-volume scenarios 检验模型和算法，例如 \citet{ma2010}、\citet{remli2013}、\citet{zhang2015}、\citet{remli2019} 和 \citet{li2023}。本研究据此采用 controlled synthetic study 提供方法学证据，并保留 Olist 真实 shipment-volume trajectory 作为 chronological external confirmation。除明确引用的数量级和设计先例外，本文具体参数区间均属于当前研究的 controlled design，而非声称逐项照搬某篇文献。
+
+\tableofcontents
+\clearpage
+
+\section{与原文模型的符号对应}
+
+原模型继续使用 $\I$ 表示 candidate carriers，$\J$ 表示 transportation lanes，$\J_i\subseteq\J$ 表示 carrier $i$ 可服务的 lanes；$r_{ij}$、$q_{ij}$ 分别表示 carrier $i$ 在 lane $j$ 上的 contracted unit rate 和 lane-specific capacity，$M_i$ 表示 carrier $i$ 的 total capacity upper bound，$g_i$ 表示 carrier-specific minimum quantity commitment (MQC)，$h_i$ 表示 MQC shortfall penalty，$e_j$ 表示 lane $j$ 的 spot-market unit cost。第一阶段 carrier-selection bounds 仍记为 $\alpha$ 和 $\beta$，因此本数据生成机制\textbf{不再使用 $\alpha_j$ 或 $\beta_{jr}$ 表示 DGP 参数}，避免与原模型符号冲突。历史 contextual observation 与 shipment-volume realization 仍记为 $(\boldsymbol\theta^t,\boldsymbol d^t)$，其中 $d_j^t$ 是 period $t$ 在 lane $j$ 上的 shipment volume。
+
+为描述 synthetic DGP，仅额外引入少量不会与原模型冲突的符号：$\mu_j^0$ 表示 lane $j$ 的 baseline nominal shipment-volume level，$\eta_{jM},\eta_{jT},\eta_{jA},\eta_{jC}$ 表示四类 contextual effects，$\mu_j^t$ 表示给定 context 后 period $t$ 的 nominal shipment-volume level，$c_j$ 表示 lane-specific volatility parameter。与原稿已有的 semi-synthetic generator 保持一致，$\bar d_j$ 继续表示用于缩放 capacity、MQC 等 procurement parameters 的 lane-level typical shipment-volume scale；在 synthetic experiment 中它由已知 DGP 的平均 nominal level 给出，在 Olist case 中则由可用历史 shipment-volume observations 估计。
+
+\section{Synthetic shipment-volume DGP}
+
+\subsection{基本规模与 contextual information}
+
+主 synthetic performance experiments 采用 $|\I|=15$ 个 candidate carriers、$|\J|=50$ 条 lanes，并生成 $H=75$ 个 historical periods。每个 period $t=1,\ldots,H$ 的 contextual information 写为
+\[
+\boldsymbol\theta^t=(M_t,T_t,A_t,C_t),
+\]
+其中 $M_t$ 表示 market/macroeconomic activity，$T_t$ 表示 normalized time trend，$A_t$ 表示 marketing/promotional activity，$C_t$ 表示 consumer interest/online attention。三个随机 context components 独立生成：
+\[
+M_t,A_t,C_t\sim \U(0,1),
+\]
+而时间趋势固定为
+\[
+T_t=\frac{t-1}{H},\qquad t=1,\ldots,H.
+\]
+因此历史期内 $T_t$ 从 $0$ 平滑增加到 $(H-1)/H$，最终 test period 使用 $T_{H+1}=1$。采用 promotions、market trends 以及 online/social-media information 作为需求侧 side information 与 contextual shipment-planning 文献的设定一致；例如 \citet{bertsimas2022} 的 shipment-planning experiment 明确使用 promotions、social media 和 market trends 作为 predictive side information。
+
+\subsection{Lane-specific nominal shipment-volume level}
+
+对每条 lane $j\in\J$，首先生成 baseline nominal level
+\[
+\mu_j^0\sim \U(10,30).
+\]
+三个主要随机 context 的系数独立生成于与 baseline 成比例的区间：
+\[
+\eta_{jM},\eta_{jA},\eta_{jC}\sim \U(0.3\mu_j^0,\,0.6\mu_j^0),
+\]
+而时间趋势的系数为
+\[
+\eta_{jT}\sim \U(0.2\mu_j^0,\,0.4\mu_j^0).
+\]
+上述 lane-specific DGP parameters 在一个 replication 开始时生成一次，并在该 replication 的全部 historical、validation 和 OOS evaluations 中保持不变。给定 $\boldsymbol\theta^t$ 后，lane $j$ 在 period $t$ 的 nominal shipment-volume level 定义为
+\[
+\mu_j^t
+=\mu_j^0
++\eta_{jM}M_t
++\eta_{jT}T_t
++\eta_{jA}A_t
++\eta_{jC}C_t.
+\]
+这里 $\mu_j^t$ 的作用是给 conditional shipment-volume distribution 提供中心尺度；对于后述 Normal DGP，由于负值会被重采样，它不被解释为重采样后分布的严格条件均值。
+
+为了统一后续 procurement parameter generation，定义
+\[
+\bar d_j:=\mathbb E\bigl[\mu_j(\widetilde{\boldsymbol\theta})\bigr]
+\]
+为 lane $j$ 在整个 synthetic horizon 上的 average nominal shipment-volume level，其中期望同时覆盖 $M,A,C$ 的生成分布以及 horizon 中的 time position。正文无需将该期望继续展开为各系数的 closed form；重要的是 $\bar d_j$ 由已知 DGP 的结构性尺度决定，而不是由某一次随机生成的 $100$ 个 realized shipment volumes 的样本均值得到。这样做可以避免某条偶然偏高或偏低的 realized path 反过来改变该 replication 的 carrier capacities 和 MQCs。
+
+\subsection{Normal / Lognormal 与 low--medium--high volatility}
+
+每个 lane $j$ 在一个 DGP cell 中生成一个 lane-specific volatility parameter $c_j$，并在对应 replication 内固定。三个 volatility regimes 定义为
+\[
+\begin{aligned}
+\text{Low: }&c_j\sim \U(0.1,0.3),\\
+\text{Medium: }&c_j\sim \U(0.4,0.6),\\
+\text{High: }&c_j\sim \U(0.7,0.9).
+\end{aligned}
+\]
+Baseline synthetic experiments 使用 low-volatility Normal DGP；distributional-robustness experiment 进一步考虑 Normal / Lognormal 与 low / medium / high 的 $2\times3$ 个组合。运输采购文献通常也采用相对于 nominal shipment volume 的比例扰动构造不确定性，例如 \citet{remli2013} 使用 nominal volume $\U(10,50)$ 并令偏差比例位于 $[0.10,0.50]$，\citet{li2023} 也采用 mean shipment volume $\U(10,50)$ 和 proportional fluctuation parameter $\U(0.1,0.5)$。更高的不确定性水平也并非异常；近期 carrier-selection / transportation-planning numerical study 进一步测试了约 $50\%$ 和 $100\%$ CV 的高波动需求环境 \citep{schmiedel2025}。
+
+在 Normal DGP 下，先生成 latent shipment volume
+\[
+(d_j^t)^*\sim \Normal\!\left(\mu_j^t,(c_j\mu_j^t)^2\right).
+\]
+若 $(d_j^t)^*<0$，则丢弃该 realization 并重新抽取，直至得到 $d_j^t\ge0$。本研究不再额外做 moment-matched truncated-Normal calibration，因此 $c_j$ 在论文中应称为控制波动强度的 volatility/noise-scale parameter，而不应声称重采样后分布的 conditional CV 精确等于 $c_j$。这一处理的目标是保持 DGP 简单，同时形成清晰的低、中、高不确定性环境。
+
+在 Lognormal robustness cells 中，使用与相应 Normal cell 相同的 nominal process $\mu_j^t$ 和 volatility-scale design。令
+\[
+\sigma_{Lj}^2=\ln(1+c_j^2),\qquad
+m_j^t=\ln(\mu_j^t)-\frac{1}{2}\sigma_{Lj}^2,
+\]
+并生成
+\[
+d_j^t\sim \operatorname{Lognormal}(m_j^t,\sigma_{Lj}^2).
+\]
+该参数化下 Lognormal distribution 的 conditional mean 为 $\mu_j^t$、CV 为 $c_j$。由于 Normal cell 采用负值重采样，本文不声称 Normal 与 Lognormal 在最终 realized moments 上严格匹配，而是将二者视为具有相同 nominal-level / volatility-scale 设计、但 distributional shape 不同的两类 DGP。
+
+Baseline DGP 中，给定 $\boldsymbol\theta^t$ 后，各 lanes 的 residual shocks 条件独立；但是所有 lanes 共享 $M_t,T_t,A_t,C_t$，因此 shipment volumes 仍会通过共同 context 产生系统性 co-movement。主实验不额外加入 residual correlation；显式 cross-lane residual correlation 可作为独立的 stress test，而不是 baseline generator 的组成部分。Zhang et al. 的 robust WDP 工作说明 correlated lane demands 可以被单独建模和测试，因此将其与 baseline DGP 分开处理在实验设计上是自然的 \citep{zhang2015}。
+
+\section{Procurement instance generation}
+
+\subsection{Carrier--lane eligibility 与 partial coverage}
+
+与原稿 full coverage 的计算设定不同，主 synthetic experiment 采用 heterogeneous partial coverage。对每个 carrier $i\in\I$，先独立生成一个 coverage ratio 于 $\U(0.4,0.7)$，随后从 $|\J|=50$ 条 lanes 中均匀、无放回抽取相应数量的 lanes 构成 $\J_i$。因此初始生成时每个 carrier 大约覆盖 $20$--$35$ 条 lanes，平均 coverage 为 $55\%$。完成初始抽样后，检查每条 lane 的 eligible-carrier 数量；若某条 lane 少于 $6$ 个 eligible carriers，则随机增加 carriers 到该 lane，直至至少有 $6$ 个 eligible carriers。除了这一最低覆盖修复外，不进行额外 degree balancing 或复杂交换。所有 rates 和 capacities 仅对 $j\in\J_i$ 的 eligible carrier--lane pairs 生成。
+
+Partial coverage 在 transportation-procurement numerical instances 中已有直接先例。例如 \citet{remli2019} 生成的 bids 平均覆盖约 $20\%$--$30\%$ 的 lanes。本文采用 $40\%$--$70\%$ 的较温和区间，目的不是复制该文献的稀疏度，而是在保留明显 carrier specialization 的同时避免过多 lanes 只剩极少数候选 carriers。
+
+\subsection{Contracted transportation rates}
+
+对每条 lane $j$，首先生成 lane-specific baseline rate 和 dispersion parameter：
+\[
+\bar r_j\sim \U(20,100),\qquad \tau_j\sim \U(0.05,0.30).
+\]
+随后，将 lane $j$ 上的 eligible carriers 尽量均匀地分入三个 price groups，并令对应 multiplier 为
+\[
+\phi_{ij}\in\{0.5,1,1.5\}.
+\]
+对每个 eligible pair $(i,j)$，contracted unit rate 按
+\[
+r_{ij}\sim
+\U\!\left[
+\bar r_j\phi_{ij}(1-\tau_j),\,
+\bar r_j\phi_{ij}(1+\tau_j)
+\right]
+\]
+生成。该结构同时制造 lane-to-lane cost heterogeneity 和同一 lane 内的 carrier price heterogeneity。既有 TSPP studies 广泛使用 Uniform distributions 生成 contracted rates，例如 \citet{remli2019} 使用 $[10,40]$，\citet{li2023} 使用 $[10,80]$；本文的 baseline-rate + three-price-group 结构是为了增强 carrier differentiation 的 controlled design，而不是文献中的固定行业参数。
+
+\subsection{Lane-specific capacity 与 carrier total capacity}
+
+对每个 eligible carrier--lane pair $(i,j)$，lane-specific capacity 直接按对应 lane 的 typical shipment-volume scale 生成：
+\[
+q_{ij}\sim \U(0.3\bar d_j,\,0.5\bar d_j),\qquad j\in\J_i.
+\]
+因此单个 carrier 在一条 eligible lane 上可承担的 volume 约为该 lane average nominal volume 的 $30\%$--$50\%$。随后按照原模型定义设置
+\[
+M_i=\sum_{j\in\J_i}q_{ij}.
+\]
+$q_{ij}$ 与 $M_i$ 均是 deterministic procurement-instance parameters：它们在一个 replication 开始时生成一次，然后对该 replication 的全部 historical observations、rolling validation problems、最终 test context 和 OOS shipment-volume draws 保持固定。\textbf{绝不能在每个 period 或 scenario 下重新生成 $q_{ij}$}；若这样做，就会把当前只研究 shipment-volume uncertainty 的模型改变为同时包含 carrier-capacity uncertainty 的问题。\citet{remli2019} 正是将 carrier-capacity uncertainty 作为独立的不确定性维度研究，因此当前实验把 capacity 固定在 instance level 是与模型 scope 一致的处理。
+
+\subsection{MQC 与 shortfall penalty}
+
+对 carrier $i$，先基于其 eligible lane portfolio 定义 aggregate nominal shipment-volume scale
+\[
+D_i=\sum_{j\in\J_i}\bar d_j.
+\]
+随后按
+\[
+g_i\sim \U(0.1D_i,\,0.2D_i)
+\]
+生成 carrier-specific MQC。由于 $q_{ij}\in[0.3\bar d_j,0.5\bar d_j]$，自动有 $M_i\in[0.3D_i,0.5D_i]$，从而 $g_i<M_i$ 对所有生成实例均成立，不会产生 MQC 超过 carrier maximum capacity 的病态设置。运输采购文献本身也通常同时设置 minimum/maximum volume restrictions；例如 \citet{remli2013} 和 \citet{li2023} 都随机生成相关参数，只是具体数值范围不同。
+
+MQC shortfall penalty 采用当前最新设定
+\[
+h_i=\min_{j\in\J_i}r_{ij}.
+\]
+该设置与旧 Olist 稿件中曾使用的 $\max_j r_{ij}$ 不同，后续统一代码与论文时应以本式为准。返修模型的 shipment-balance constraint 使用等式，因此这里不存在通过超额运输减少 MQC 罚金的问题。若论文基础模型仍以需求满足不等式书写，应明确说明：在当前 $h_i=\min_{j\in\J_i}r_{ij}$ 的实例机制下，允许超额运输不会严格降低成本，因而存在同值的等式最优 recourse；数值实现使用的是这一 value-equivalent equality formulation。取 $h_i=\min_{j\in\J_i}r_{ij}$，使单位 MQC shortfall compensation 不高于该 carrier 任一 eligible lane 的 contracted unit rate，是一个相对温和的 controlled penalty design；它不意味着 MQC 罚金对选择决策没有作用，也不应声称它是既有文献的统一行业规则。
+
+\subsection{Spot-market unit cost}
+
+令
+\[
+\I_j=\{i\in\I:j\in\J_i\}
+\]
+表示 lane $j$ 的 eligible carriers。对每条 lane 独立生成 spot markup factor
+\[
+\xi_j^{\mathrm{spot}}\sim \U(1.5,2.5),
+\]
+并设置
+\[
+e_j=
+\xi_j^{\mathrm{spot}}
+\left(
+\frac{1}{|\I_j|}\sum_{i\in\I_j}r_{ij}
+\right).
+\]
+因此 spot-market rate 为该 lane eligible contracted rates 平均值的 $1.5$--$2.5$ 倍。该设计使 spot service 通常明显贵于 contracted transportation，同时不强制 $e_j$ 高于该 lane 每一个极端高价 carrier quote。文献中 spot / third-party service 通常也被设定为更昂贵的 recourse option；例如 \citet{remli2019} 的 generated instances 使用 contract price $[10,40]$、spot price $[50,100]$，而 \citet{li2023} 使用 contract rate $[10,80]$、spot rate $[50,100]$。
+
+\subsection{Carrier-selection bounds}
+
+第一阶段 feasible set 中的 carrier-number bounds 保持原稿的比例设定：
+\[
+\alpha=\left\lceil0.1|\I|\right\rceil,
+\qquad
+\beta=\left\lceil0.7|\I|\right\rceil.
+\]
+在 $|\I|=15$ 的主 synthetic network 中，因此至少选择 $2$ 个、最多选择 $11$ 个 carriers。选人比例上下界沿用原稿；在该范围内，由 partial coverage、contracted rates、capacities 和 MQC penalties 共同决定 carrier-selection trade-off。运输采购文献普遍允许 shipper 对 winning-carrier 数量设置上下界，以控制 carrier portfolio size \citep{ma2010,remli2013,li2023}。
+
+\section{Replication、validation 与 OOS 数据生成规则}
+
+一个 independent replication 由一套 procurement instance、一套 lane-specific DGP parameters、一条长度为 $H=75$ 的 historical context/shipment-volume trajectory、一个 final test context 以及相应的 OOS shipment-volume realizations组成。不同 competing methods 在同一 replication 中必须共享完全相同的 procurement instance、historical data、validation origins、final test context 和 OOS draws，以形成严格 paired comparison；不同 independent replications 则重新生成这些对象。类似的 common-random-environment / common-random-number 思路也用于 carrier-selection simulation studies，以降低比较中的随机噪声 \citep{feki2016}。
+
+每个 replication 先生成 $t=1,\ldots,75$ 的 historical observations。Hyperparameter selection 使用 $25$ 个 rolling validation origins，每个 origin 固定使用前 $50$ 个 observations，即
+\[
+1{:}50\rightarrow51,\quad 2{:}51\rightarrow52,\quad \ldots,\quad 25{:}74\rightarrow75.
+\]
+Candidate hyperparameters 按对应 validation origin 上的 realized procurement cost 进行评价，而不是按 shipment-volume prediction MSE 选择。完成参数选择后，使用全部 $75$ 个 historical observations 构造最终模型。
+
+最终 evaluation 使用一个新的 test context $\boldsymbol\theta^{76}$，其中 $T_{76}=1$，而 $M_{76},A_{76},C_{76}\sim\U(0,1)$。每个 method 在该 context 下只求解\textbf{一次} first-stage carrier-selection decision。随后固定该 first-stage decision，从已知 conditional DGP $\boldsymbol d\mid\boldsymbol\theta^{76}$ 中独立生成 $1000$ 个 OOS shipment-volume realizations，并逐个求解二阶段 recourse 以估计 OOS mean cost、standard deviation 及 tail statistics。这里的 $1000$ 个 draws 是\textbf{同一个 test context 下的 conditional shipment-volume realizations}，不是 $1000$ 个新的 contexts，也不是 $1000$ 次 first-stage solves。Zhang et al. (2015) 同样采用先固定 first-stage procurement solution、再随机生成 shipment volumes 并反复求解 recourse 的 simulation-based evaluation 方式 \citep{zhang2015}。
+
+在 Normal/Lognormal $\times$ low/medium/high 的 DGP robustness experiment 中，应采用 paired design：同一 paired replication 尽可能共享 carrier--lane eligibility、contract rates、capacities、MQCs、spot costs 和 context path，只改变 shipment-volume distribution family 与 volatility regime。特别地，$q_{ij}$、$M_i$ 等 procurement parameters 不随 DGP cell 改变，从而使六个 cells 之间的差异主要归因于 shipment-volume distribution 和 uncertainty level，而不是同时发生的 procurement-instance 随机变化。
+
+
+\section{数值实验总体架构与统一执行规则}
+
+\subsection{整体顺序与各实验的分工}
+
+修订稿的 numerical study 按以下顺序组织：
+\begin{enumerate}[leftmargin=2.4em,itemsep=0.22em]
+\item \textbf{Experiment 1 --- Information / weighting selection：}比较 unconditional history aggregation 与多种 contextual weighting rules，建立后续使用的 nominal contextual reference；
+\item \textbf{Experiment 2 --- Robustification comparison：}在 Experiment 1 已确定的信息管道之上比较 mean--SD regularization、modified-$\chi^2$ DRO、$W_1$-Wasserstein DRO 与 moment-DRO；
+\item \textbf{Experiment 3 --- DGP robustness：}改变 shipment-volume volatility 与 distributional shape，检验主要结论是否依赖单一 DGP；
+\item \textbf{Experiment 4 --- RCSAA vs. modified-$\chi^2$ DRO：}在同一 contextual reference 与同一 robustness strength 下专门检验两者的 surrogate / exactness relationship 与 computation trade-off；
+\item \textbf{Experiment 5 --- Computational scalability：}扩大 carriers、lanes 与 historical scenario count，比较核心 robust formulations 的可计算性；
+\item \textbf{Experiment 6 --- Parameter sensitivity / mechanism：}复用 baseline data，解释 kernel localization 与 robustness strength 如何改变 weights、carrier portfolio 与 recourse behavior；
+\item \textbf{Olist case study：}在真实 multi-lane shipment-volume trajectory 上做 chronological rolling confirmation，不把 synthetic 中的每个 sensitivity block 机械重复一次。
+\end{enumerate}
+
+这一路径对应论文的证据链：
+\[
+\begin{aligned}
+&\text{information weighting}\rightarrow\text{robustification}\rightarrow\text{DGP robustness}
+\rightarrow\text{RCSAA--}\chi^2\text{ relationship}\\
+&\hspace{2.5em}\rightarrow\text{scalability}\rightarrow\text{parameter/operational mechanism}
+\rightarrow\text{real-data confirmation}.
+\end{aligned}
+\]
+
+\subsection{Baseline synthetic replications 与统一 OOS 评价}
+
+除 Experiment 3 的额外 DGP cells 和 Experiment 5 的 dedicated scale instances 外，baseline synthetic experiments 共享本说明书前述的 $15$-carrier、$50$-lane、$H=75$ generator，并使用 low-volatility Normal DGP。Baseline performance study 使用 $R=20$ 个 independent replications。每个 replication 都重新生成 procurement instance、DGP coefficients、historical context / shipment-volume history 与 final test context；但同一 replication 内的全部 competing methods 共享完全相同的数据和 random environment。
+
+所有 baseline OOS performance comparisons 都遵循同一规则：在完成 historical validation 后，用全部 $75$ 个 historical observations 建立最终 prescription；生成一个新的 $\boldsymbol\theta^{76}$；每个 method 仅求解一次 first-stage carrier-selection decision；然后在同一 $\boldsymbol\theta^{76}$ 下共享 $1000$ 个 conditional OOS shipment-volume realizations，并逐一求解 second-stage recourse。对每个 replication 先计算 OOS mean、standard deviation、quantile 等 statistics，再在 replications 间汇总；\textbf{禁止把 $20\times1000$ 个不同 replication / context 的 raw costs 直接 pooling 成一个 standard deviation。}
+
+Final-decision computation time 只记录 hyperparameters 已经确定以后、为 final test context 生成最终 first-stage decision 的 end-to-end solve time。Rolling validation / hyperparameter tuning 作为 offline model-selection cost 单独记录，不混入主表的 final-decision Time。
+
+\subsection{统一 rolling validation protocol}
+
+Baseline synthetic experiments 使用 $25$ 个 rolling validation origins：
+\[
+1{:}50\rightarrow51,\quad 2{:}51\rightarrow52,\quad \ldots,\quad 25{:}74\rightarrow75.
+\]
+在 origin $t\in\{51,\ldots,75\}$，candidate method 只能使用 $t-50,\ldots,t-1$ 的 $50$ 个 observations，先观察 $\boldsymbol\theta^t$，求得 $\boldsymbol y_t(a)$，再用 realized $\boldsymbol d^t$ 计算采购成本。统一 validation criterion 为
+\[
+\operatorname{ValCost}(a)
+=\frac{1}{25}\sum_{t=51}^{75}Q\!\left(\boldsymbol y_t(a),\boldsymbol d^t\right),
+\]
+即直接最小化 realized procurement cost，而非 prediction MSE。所有可调参数都必须只利用这些 validation costs；final OOS draws 不得反馈到 model / hyperparameter selection。
+
+\subsection{核心评价指标}
+
+主 synthetic performance tables 优先报告：Mean OOS cost、OOS standard deviation、$q_{0.95}$ 和 final-decision Time。Experiment 3 按既定设计以 Mean / Std / finite-sample Max 为主，其中 Max 仅解释为 $1000$ 个 conditional OOS draws 上的 descriptive maximum，不解释为真实 worst-case guarantee；如版面允许可在 appendix 同时列 $q_{0.95}$。Experiment 5 只报告 computation metrics，不做 OOS performance evaluation。
+
+为了回答 operational / managerial comments，在 baseline robustification comparison 之后另报告四个与模型直接对应的 operational statistics：
+\[
+\operatorname{ANC}=\sum_{i\in\I}y_i,
+\]
+\[
+\operatorname{Utilization}^{s}
+=\frac{\sum_{i\in\I}\sum_{j\in\J_i}x_{ij}^{s}}
+{\sum_{i\in\I}M_i y_i},
+\qquad
+\operatorname{SpotShare}^{s}
+=\frac{\sum_{j\in\J}v_j^{s}}
+{\sum_{j\in\J}d_j^{s}},
+\]
+以及 MQC shortfall penalty $\sum_i h_i u_i^s$ 的 OOS average。四个指标要联合解释，而不是预设某个“理想比例”。
+
+\section{Experiment 1：Information / Weighting Selection}
+
+\subsection{目的与数据}
+
+Experiment 1 在固定 baseline DGP 下回答三个问题：equal-weight historical information 是否足够；contextual weighting 是否带来额外 OOS value；以及这种 value 是否依赖特定 kernel family。使用 $R=20$ 个 baseline replications，每个 replication 均为 $15$ carriers $\times$ $50$ lanes $\times$ $75$ historical observations，并采用同一个 final test context 与 $1000$ conditional OOS draws。
+
+\subsection{比较方法}
+
+Experiment 1 比较八个 methods：
+\begin{enumerate}[leftmargin=2.4em,itemsep=0.18em]
+\item \textbf{D：}deterministic mean-volume benchmark；在每个 training pool 内以当前可用 historical shipment volumes 的 lane-wise arithmetic mean 作为单一 shipment-volume vector，求解对应 deterministic procurement problem；
+\item \textbf{SAA-All：}使用当前所有可用 historical observations 并赋 equal weights；
+\item \textbf{Tuned-SAA：}通过 validation 选择 history-retention ratio $\gamma$；
+\item \textbf{CSAA-Exp：}Exponential kernel；
+\item \textbf{CSAA-Gau：}Gaussian kernel；
+\item \textbf{CSAA-Epa：}Epanechnikov kernel；
+\item \textbf{CSAA-Tri：}Triangular kernel；
+\item \textbf{RF-CSAA：}random-forest-induced contextual weights。
+\end{enumerate}
+
+SAA-All 与 Tuned-SAA 在 Experiment 1 中承担不同角色。SAA-All 是最干净的 equal-weight empirical benchmark；Tuned-SAA 则给 unconditional SAA 一个 validation-selected recency mechanism，防止比较结果仅来自人为固定 historical window。后续 DGP robustness experiment 只保留 Tuned-SAA 作为 stronger nominal unconditional benchmark，不再重复 SAA-All。
+
+\subsection{Tuned-SAA 与 kernel-CSAA 的调参}
+
+Tuned-SAA 只选择
+\[
+\gamma\in\{0.4,0.6,0.8,1.0\}.
+\]
+在每个 synthetic validation origin 有 $50$ 个 training observations，因此 candidate $\gamma$ 使用最近 $\lceil50\gamma\rceil$ 个 observations；在 final solve 有 $75$ 个 historical observations，使用最近 $\lceil75\gamma^\star\rceil$ 个 observations。$\gamma^\star$ 通过 $25$-origin average validation procurement cost 选择。
+
+每个 kernel-CSAA 独立 tune 自己的 bandwidth constant
+\[
+B\in\{0.1,0.5,1,3,5,10,30,50,100\},
+\]
+并使用论文既有 scaling
+\[
+b=\frac{B}{n^{1/(l+4)}},
+\]
+其中 synthetic context dimension $l=4$，$n=50$ 用于 validation，$n=75$ 用于 final solve。不同 kernel family 不共享强制相同的 $B^\star$；每个 family 先在自己的 grid 上最小化 validation procurement cost，再比较各 family 的最优 validation performance。Synthetic 的四个 context 分量在生成时已经具有统一的 $[0,1]$ 尺度，因此 kernel 距离直接在该原始无量纲尺度上计算，不再做额外 max scaling 或 z-score。Olist case 的 lagged lane-demand context 保留两种训练内可选尺度：lane-wise z-score与lane-wise training-maximum scaling；前者以历史标准差为分母，后者以历史最大绝对值为分母。两者必须在相同training-only validation origins上配对比较后冻结，不得根据final OOS选择。Wasserstein ground metric仍对需求向量采用每个training pool的lane-wise maximum scaling。上述对象和目的不同，不强制共用一种标准化。
+
+对 compact-support kernels（Epanechnikov / Triangular），一个候选 $B$ 只有在全部 $25$ 个 validation origins 上均产生正权重时才是 valid；任一 origin 为空即将该 $B$ 的整体 validation cost 记为 invalid，不用 equal-weight fallback 冒充该 kernel。所有 valid $B$ 使用相同的 $25$ 个 origins 计算平均 validation cost并排序。最终 query 先尝试排名第一的 $B^\star$；若其为空支持，则严格按该 validation 排名依次尝试其余 valid $B$，取第一个有正权重者，并记录实际使用的 $B_{\mathrm{eff}}$。该回退规则不读取 OOS realization，也不反向修改 validation 选出的 $B^\star$。
+
+\subsection{RF-CSAA}
+
+RF-CSAA 采用 multivariate random forest 将 $\boldsymbol\theta$ 映射到 $\boldsymbol d$，并利用 same-leaf proximity 构造 weights。设 forest 有 $T_F=500$ 棵树，test context $\boldsymbol\theta$ 在 tree $b$ 所处 terminal leaf 为 $L_b(\boldsymbol\theta)$，则 observation $s$ 的 weight 可按
+\[
+\pi_s^{\mathrm{RF}}(\boldsymbol\theta)
+=\frac1{T_F}\sum_{b=1}^{T_F}
+\frac{\mathbf 1\{\boldsymbol\theta^s\in L_b(\boldsymbol\theta)\}}
+{|L_b(\boldsymbol\theta)|}
+\]
+计算，并在数值实现中检查 weights 非负且和为 $1$。所有 contextual features 在每次 split 时均可被使用；tree bootstrap / randomization 使用选定 RF library 的 standard implementation。Experiment 1 \textbf{不对 tree count、mtry、depth、minimum leaf size 等再做 prescriptive validation grid}；500 trees 与 all-features-at-split 已固定，minimum leaf size 等 secondary settings 在确定 RF software library 后一次性写死并记录。
+
+\subsection{输出与后续依赖}
+
+主表报告八种方法的 Mean OOS cost、OOS Std、$q_{0.95}$ 与 final-decision Time。除 OOS performance 外，还记录 Tuned-SAA 的 $\gamma^\star$ 选择频率、各 kernel 的 $B^\star$ 选择频率与 boundary-hit frequency；这些参数选择统计可移至 appendix。机器可读审计输出分为四层：instance层保存全部采购参数、history、final context、OOS需求与随机种子；validation层保存每个method--candidate--origin的训练区间、权重数/AESS、目标、状态、bound/gap/time、决策和realized validation cost；final-solve层保存选中参数、基础/实际带宽、最终参考权重、目标、状态、bound/gap/time、搜索统计及完整承运人决策；OOS层保存每个draw的总成本、合同运输成本、spot成本、MQC罚金、数量与利用率，并汇总Mean/Std/$q_{0.95}$/CVaR$_{0.95}$/Max。无法获得有效上下界时必须显式标为不可用，不得把gap写成0。
+
+定义 contextual candidate set
+\[
+\mathcal C=\{\text{Exp},\text{Gau},\text{Epa},\text{Tri},\text{RF}\}.
+\]
+每个 replication 内只根据 validation procurement cost 选择 contextual weighting family $C^\star$；final OOS result 不能用于挑 family。Experiment 2 以后不再重新做 kernel/RF family contest，而是继承 Experiment 1 的信息结构。若后续 scalability / sensitivity 需要一个跨 replications 的 global representative kernel bandwidth，则按 Experiment 1 各 replications 的 average validation cost 预先确定 global $B^\star$，而不是根据 scalability 结果反向选择。
+
+\section{Experiment 2：Robustification Comparison}
+
+\subsection{目的与数据复用}
+
+Experiment 2 直接复用 Experiment 1 的 $20$ 个 baseline replications、historical data、procurement instances、final test contexts 和 OOS draws；因此 nominal / robust methods 之间保持严格 paired comparison。它不再比较 kernel family，而是在既定 information pipeline 上回答：mean--SD regularization、probability-reweighting $\chi^2$ DRO、support-moving Wasserstein DRO 与 moment-based DRO 的 OOS cost-risk-computation trade-off 有何不同。
+
+\subsection{Unconditional 与 contextual reference}
+
+对 unconditional robust methods，当前 synthetic DGP 不预设 structural break，因此使用 training pool 内的\textbf{全部可用 observations 等权构造 empirical reference}：validation origins 使用全部 $50$ 个 observations，final problem 使用全部 $75$ 个 observations，
+\[
+\widehat P_U=\frac1n\sum_{s=1}^n\delta_{\boldsymbol d^s}.
+\]
+Tuned-SAA 即使在 Experiment 1 选择 $\gamma^\star<1$，也只说明 shorter equal-weight history 在 nominal prescription 的 validation cost 上表现较好，不意味着 robust reference 必须删除较早 observations。
+
+Contextual robust methods 使用同一批 observations，但采用 Experiment 1 确定的 contextual weighting structure：
+\[
+\widehat P_C(\boldsymbol\theta)=\sum_{s=1}^n\pi_s(\boldsymbol\theta)\delta_{\boldsymbol d^s}.
+\]
+若 $C^\star$ 是 compact-support kernel 或 RF 并产生 zero weights，则 modified-$\chi^2$ / RCSAA 只在 effective positive support
+\[
+\Sset_+(\boldsymbol\theta)=\{s:\pi_s(\boldsymbol\theta)>0\}
+\]
+上建模，并删除 zero-weight observations；剩余 positive weights 重新检查其和为 $1$。
+为避免极小正权重造成数值病态，modified-$\chi^2$与exact RCSAA均对$0<\pi_s<10^{-8}$的权重使用$10^{-8}$数值下限并重新归一化；严格零权重样本仍先从effective support中删除。两种模型因此使用完全相同的数值稳定化reference probabilities，相关输出同时记录调整后的求解器实际权重。
+
+\subsection{候选方法与“依赖 Experiment 1 的条件性冻结规则”}
+
+代码层面应先支持以下 broad candidate set：RSAA、RCSAA、$U/C$ modified-$\chi^2$ DRO、$U/C$ $W_1$-DRO 以及 $U/C$ PCM-DRO，并保留 selected nominal CSAA 作为 contextual nominal reference。最终论文主表\textbf{不在 Experiment 1 结果出来之前强行剪枝}：
+\begin{itemize}
+\item 若 Experiment 1 显示 contextual weighting 相对 SAA-All / Tuned-SAA 有清晰且稳定的优势，则主文可简化为 selected CSAA、RCSAA、$C$-$\chi^2$、$C$-$W_1$ 与 $C$-PCM，必要时仅保留 $U$-$W_1$ 作为一项 supplementary robustness benchmark；
+\item 若 contextual gain 较弱、mixed 或不稳定，则保留 RSAA、$U$-$\chi^2$、$U$-$W_1$、$U$-PCM 等 stronger unconditional robust baselines，避免主文预设“contextualization 必然更好”。
+\end{itemize}
+这是一项前置声明的 conditional design dependency，而非 post-hoc 挑结果。
+
+\subsection{Mean--SD / modified-$\chi^2$ 的 robustness parameter}
+
+RSAA / RCSAA 与 modified-$\chi^2$ DRO 的 main tuning grid 使用
+\[
+\lambda\in\{0.01,0.05,0.1,0.25,0.5,1,2,5,10,50,100\},
+\]
+并统一通过 $25$-origin realized procurement cost 选择。对等权 $n$ 样本，modified-$\chi^2$ 半径包含整个概率单纯形的阈值为 $\sqrt{n-1}$，因此 $n=75$ 时约为 $8.60$；contextual 权重的阈值可能因极小正权重而更大。若最终 manuscript 对 $\chi^2$ ambiguity-set radius 的 coefficient convention 做了代数重标度，则所有相关 experiments 必须同步做一致 rescaling，保持相同 physical robustness levels，而不能仅改某一表中的数值标签。
+
+\subsection{$W_1$-Wasserstein benchmark}
+
+Wasserstein benchmark 固定采用 type-1 Wasserstein distance、weighted $\ell_1$ ground metric 与逐 lane bounded box support；two-stage RHS uncertainty 使用 exact iterative column / column-and-constraint generation 求解，不显式枚举高维 box 的全部 vertices。以\emph{当前训练集} $\mathcal S_{\mathrm{tr}}$ 定义
+\[
+m_j=\max_{s\in\mathcal S_{\mathrm{tr}}}d_j^s>0,
+\qquad
+c(\boldsymbol d,\boldsymbol d')
+=\frac1{|\J|}\sum_{j\in\J}\frac{|d_j-d'_j|}{m_j},
+\qquad
+\mathcal U=\prod_{j\in\J}[0,1.5m_j].
+\]
+因此 $c$ 是无量纲的逐 lane 标准化平均 $L_1$ 距离，$\mathcal U$ 的 ground-metric diameter 至多为 $1.5$。对参考分布 $\widehat P_\pi=\sum_{s\in\mathcal S_{\mathrm{tr}}}\pi_s\delta_{\boldsymbol d^s}$，歧义集为
+\[
+\mathcal P_{\varepsilon}(\widehat P_\pi)
+=\{P:W_{1,c}(P,\widehat P_\pi)\le\varepsilon,
+\ \operatorname{supp}(P)\subseteq\mathcal U\}.
+\]
+正式半径是\emph{绝对、无量纲}的 $\varepsilon$，不再乘样本两两距离；预先固定的 main tuning grid 为
+\[
+\mathcal E_{\varepsilon}=\{0.005,0.01,0.025,0.05,0.10,0.25,0.50,1.00\}.
+\]
+每个 validation origin 仅用当时可用的训练数据重新计算 $m_j$、$c$ 与 $\mathcal U$，以该 origin 的 realized procurement cost 评价候选 $\varepsilon$；最终求解用全部最终训练样本重算这些尺度与支撑，沿用验证选出的同一数值 $\varepsilon^\star$。$U$-$W_1$ 与 $C$-$W_1$ 在同一 origin 共享 $m_j,c,\mathcal U$ 和半径网格，只改变参考概率（等权或 contextual weights），并各自独立通过 validation 选半径。$\varepsilon=0$ 保留作退化到 SAA/CSAA 的实现校验，不进入 main tuning grid。若正式 OOS 前的 training/validation pilot 显示网格边界频繁命中，只允许在 OOS 前按预先记录的规则扩展一次并冻结；不能根据正式 OOS 结果调整。
+
+若某 retained lane 在某一训练窗口内有 $m_j=0$，该 origin 的 Wasserstein 输入无定义，必须在建模前按事先声明的 lane/scale 预处理规则处理，不能在 solver 内临时加任意 positive floor。上述 max scaling 和 $1/|\J|$ 是本文为跨 lane 与跨 network 量级可比而采用的建模选择，并非 Wasserstein 理论强制的唯一标准化。
+
+\subsection{PCM-DRO benchmark}
+
+Moment 基准只保留 partial cross-moment (PCM)，不使用 Mean--MAD。对于参考权重 $\pi_s$，先计算
+\[
+\widehat\mu_j=\sum_s\pi_s d_j^s,\qquad
+\widehat v_j=\sum_s\pi_s(d_j^s-\widehat\mu_j)^2,\qquad
+\widehat v_{\Sigma}=\sum_s\pi_s\left(\sum_j(d_j^s-\widehat\mu_j)\right)^2.
+\]
+歧义集只保留逐 lane 的边际方差和一条总需求方差约束，而非 $60\times60$ full covariance：
+\[
+\mathcal P_{\mathrm{PCM}}(\kappa)
+=\left\{
+P:\ P(\boldsymbol d\in\mathcal U)=1,\ 
+\mathbb E_P[d_j]=\widehat\mu_j,\ 
+\mathbb E_P[(d_j-\widehat\mu_j)^2]\le \kappa^2\widehat v_j,\ \forall j,\quad
+\mathbb E_P\left[\left(\sum_j(d_j-\widehat\mu_j)\right)^2\right]
+\le\kappa^2\widehat v_{\Sigma}
+\right\}.
+\]
+其中 unconditional reference 使用 equal-weight estimates，contextual reference 使用 $\pi_s$-weighted estimates；两者只改变参考权重，不改变歧义集结构。总需求方差含跨 lane 协方差信息，但只约束其总和，不估计完整协方差矩阵。沿用本说明书的一个 global inflation factor，同时放大边际和总量方差上界：
+\[
+\kappa\in\{1,1.25,1.5,2\},
+\]
+并通过相同 rolling validation criterion 选择 $\kappa^\star$。正式求解采用 RSOME lifted affine decision rules，须明确标为策略近似，不能称为完全自适应二阶段 PCM-DRO 的精确解。当前适配器只接受 RSOME/MOSEK 的 Optimal 状态；在该状态下沿用现有输出约定 $\texttt{bestBound}=\texttt{objective}$、$\texttt{gap}=0$，其证书仅针对该 lifted-affine MISOCP 近似。Experiment 2 runner 已实现上述网格、U/C 两种矩估计和统一 OOS 评价；正式规模尚待运行。
+
+\subsection{输出与 operational table}
+
+Experiment 2 主 performance table 使用与 Experiment 1 一致的 Mean / Std / $q_{0.95}$ / Time columns。完成 main robustification comparison 后，另做一张 compact operational table；representative method set 在不重复所有 kernel family 的前提下预先定义为 D、Tuned-SAA、selected CSAA、RCSAA、$C$-$\chi^2$、$C$-$W_1$（若 Experiment 2 最终主表因前述条件性剪枝发生变化，只在同一 methodological family 内做最小调整）。报告 ANC、contracted-capacity utilization、spot-market volume share、MQC penalty。该表用于解释“成本和风险改善是通过怎样的 procurement decision 实现的”，而不是另设四个独立 optimization experiments。
+
+\section{Experiment 3：DGP Robustness --- Volatility 与 Distribution Shape}
+
+\subsection{六个 paired DGP cells}
+
+Experiment 3 使用当前最终 generator 的完整 $2\times3$ 设计：
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+Distribution & Low & Medium & High\\
+\midrule
+Normal & $c_j\sim\U(0.1,0.3)$ & $c_j\sim\U(0.4,0.6)$ & $c_j\sim\U(0.7,0.9)$\\
+Lognormal & $c_j\sim\U(0.1,0.3)$ & $c_j\sim\U(0.4,0.6)$ & $c_j\sim\U(0.7,0.9)$\\
+\bottomrule
+\end{tabular}
+\end{center}
+每个 cell 使用 $10$ 个 paired replications。Baseline Normal-Low cell 直接复用 Experiment 1 的 replications 1--10；这 $10$ 个 replications 在运行前固定，不能根据 performance 挑选。其余五个 cells 尽可能使用同一 replication index、procurement-instance seed 与 context-path seed，使 cell 间主要改变 distribution family 和 volatility level，而不是重造完全不同的 procurement environment。
+
+Normal 仍按前述 rejection sampling 保证非负；Lognormal 使用同一 $\mu_j^t$ / $c_j$ nominal scale。由于 Normal rejection 会轻微改变 realized moments，本实验的解释是“同一 nominal process 下改变 volatility-scale regime 与 distribution shape”，而不是宣称六个 cells 之间实现严格 moment matching。
+
+\subsection{比较方法与调参}
+
+固定八个 methods：
+\[
+\boxed{
+\begin{array}{cccc}
+\text{Tuned-SAA} & \text{CSAA} & \text{RSAA} & \text{RCSAA}\\
+U\!\!-\chi^2 & C\!\!-\chi^2 & U\!\!-W_1 & C\!\!-W_1
+\end{array}}
+\]
+其中 CSAA 只使用 Experiment 1 已确定的 contextual family，不再重新比较各 kernel 与 RF。Moment-DRO 也不在六个 DGP cells 中重复，因为它已在 Experiment 2 中承担不同 ambiguity philosophy 的 benchmark 角色。
+
+Method family / specification 固定，但 numerical hyperparameters 必须在每个 DGP cell、每个 replication 内用同一 leakage-free validation procedure 重新校准：Tuned-SAA 重选 $\gamma$；kernel-CSAA 若适用则重选 $B$；RSAA / RCSAA 重选 $\lambda$；$U/C$-$\chi^2$ 重选对应 robustness strength；$U/C$-$W_1$ 从共同的 $\mathcal E_{\varepsilon}$ 中重选各自的 $\varepsilon$。Candidate grids 在六个 cells 中保持完全一致。
+
+\subsection{输出}
+
+每个 replication 在同一个 fresh test context 下产生 $1000$ conditional OOS draws。当前主 reporting 指标为 Mean OOS cost、OOS Std 与 finite-sample Max；先在 replication 内计算，再对 $10$ 个 replications 汇总。Max 仅作为 stress statistic；需要更稳定 tail evidence 时，在 appendix 同时给 $q_{0.95}$。Experiment 3 不报告 runtime，以免与专门的 scalability study 混淆。
+
+主要比较首先看四组 unconditional/contextual pairs：Tuned-SAA vs CSAA、RSAA vs RCSAA、$U$-$\chi^2$ vs $C$-$\chi^2$、$U$-$W_1$ vs $C$-$W_1$；其次看 robustification 随 volatility 增大是否更有价值。任何“高波动一定更适合 robust model”或“contextual method 一定占优”都只作为待检验 hypothesis，不能预写成结论。
+
+\section{Experiment 4：RCSAA 与 Modified-$\chi^2$ DRO 的关系}
+
+\subsection{目的与 paired setup}
+
+Experiment 4 不是 general method benchmark，也不是 $B\times\lambda$ sensitivity，而是专门验证本文 RCSAA--modified-$\chi^2$ 理论关系的 numerical experiment。它复用 baseline Normal-Low synthetic data、Experiment 1 的 contextual reference、procurement instances、test contexts 和 OOS draws，仅比较
+\[
+\boxed{\text{RCSAA}\quad\text{vs.}\quad C\!\!-
+\chi^2\text{ DRO}.}
+\]
+若 contextual reference 包含 zero weights，则双方都限制在同一 $\Sset_+$ 上。
+
+\subsection{相同 $\lambda$，禁止独立 tuning}
+
+与 Experiment 2 不同，Experiment 4 在每个 comparison point 上强制两种 formulations 使用相同 mathematically corresponding $\lambda$：
+\[
+\lambda\in\{0.01,0.05,0.1,0.25,0.5,1,2,5,10,50,100\}.
+\]
+只有这样，objective discrepancy 才能解释为 $\chi^2$ surrogate 对 RCSAA 的 approximation gap，而不是两个 independently tuned decision rules 的 performance difference。
+
+\subsection{Diagnostics}
+
+对 replication $r$ 与 robustness level $\lambda$，计算
+\[
+\operatorname{Gap}_r(\lambda)
+=100\%\times
+\frac{Z_r^{\mathrm{RCSAA}}(\lambda)-Z_r^{\chi^2}(\lambda)}
+{Z_r^{\chi^2}(\lambda)}.
+\]
+同时在 $C$-$\chi^2$ 的 optimal first-stage solution 上检查论文 Proposition 所给 sufficient condition，报告
+\[
+\operatorname{CertificateRate}(\lambda)
+=\frac{\#\{r:\text{sufficient condition holds at }\boldsymbol y_r^{\chi^2}(\lambda)\}}{R}.
+\]
+主输出包括 objective gap、certificate rate、OOS Mean / Std / $q_{0.95}$、runtime；若 exact RCSAA 在统一 time limit 下未完成，则额外报告 solved rate 与 final MIP gap。旧版 first-stage agreement rate 不作为主要 approximation diagnostic。
+
+解释上，只允许得到如下分层结论：small-$\lambda$ 若 gap 小、certificate rate 高，可说明 $\chi^2$ closely tracks RCSAA；large-$\lambda$ 若 gap 增大，则把 $\chi^2$ 描述为 computationally attractive robust alternative，而不是声称它在所有 robustness regimes 中都是精确 approximation。
+
+\section{Experiment 5：Computational Scalability}
+
+\subsection{Scale design}
+
+Experiment 5 是 dedicated computation stress test，不做 OOS performance comparison，也不重新 tuning hyperparameters。采用当前 v24 锁定的 $3\times2$ design，每个 cell 生成 $3$ 个 independent instances：
+\begin{center}
+\small
+\begin{tabular}{ccccc}
+\toprule
+Cell & $|\I|$ & $|\J|$ & Historical scenarios $n$ & Instances\\
+\midrule
+S1 & 20 & 60  & 100 & 3\\
+S2 & 20 & 60  & 200 & 3\\
+S3 & 30 & 120 & 100 & 3\\
+S4 & 30 & 120 & 200 & 3\\
+S5 & 40 & 200 & 100 & 3\\
+S6 & 40 & 200 & 200 & 3\\
+\bottomrule
+\end{tabular}
+\end{center}
+所有 cells 使用与 Experiment 1 相同的 data / procurement generator（包括当前 $40\%$--$70\%$ partial coverage、capacity / MQC / rate / spot generation 和 baseline Normal-Low DGP），只改变 network size 与 historical scenario count。
+
+对于同一 network size 的 $n=100$ 与 $n=200$ paired cells，使用同一 procurement-instance seed 与 DGP/context seed，先生成 $200$ observations；$n=100$ 固定取\textbf{前100个}，$n=200$ 取全部200个，不按结果挑选 subset。
+
+\subsection{方法与固定参数}
+
+只比较 computation-relevant robust core：RCSAA、contextual modified-$\chi^2$ DRO、contextual $W_1$-DRO。SAA / CSAA 的 computation time 已在 Experiment 1 报告，不在 scale test 重复；Moment-DRO 也不进入主 scalability table，除非 Experiment 2 意外显示其成为核心 practical candidate。
+
+Experiment 5 不跑 rolling validation。固定前置实验已经给出的 global practical configuration：contextual family 来自 Experiment 1；若为 kernel，则 global $B^\star$ 由 Experiment 1 replications 的 lowest average validation cost 决定；RCSAA / $C$-$\chi^2$ 的 practical $\lambda^\star$ 由 Experiment 2 average validation cost 决定；Wasserstein 的 practical \emph{绝对半径} $\varepsilon^\star$ 也由 Experiment 2 average validation cost 决定。若 contextual family 是 RF，则直接使用固定 RF specification。
+
+跨 network dimensions 保持相同的候选数值半径 $\mathcal E_{\varepsilon}$ 和选定的 $\varepsilon^\star$，各 instance 仅根据自身 training observations 重算 $m_j$、$c$ 与 $\mathcal U$。Ground metric 已包含 $1/|\J|$，不再按样本平均两两距离或 network size 额外缩放半径。
+
+\subsection{Solver protocol 与输出}
+
+所有 methods / cells 使用完全相同的 hardware、threads、presolve / tolerance policy 与 solver version，并设置每个 solve 统一 $3600$-second wall-clock time limit。Timeout 是 scalability result，不是应删除的失败样本。每个 cell 报告三项：median wall-clock runtime、solved count（$0/3$ 至 $3/3$）、timed-out instances 的 final relative optimality gap。主实验共 $6\times3=18$ 个 scale instances，三种 methods 共 $54$ 个 core solves。该 experiment 不需要 1000 OOS draws。
+
+\section{Experiment 6：Parameter Sensitivity 与 Operational Mechanism}
+
+\subsection{数据复用原则}
+
+Experiment 6 不生成新 synthetic datasets，直接复用 Experiment 1 的全部 $20$ baseline replications，包括 procurement instance、$75$ historical observations、final test context 和同一组 $1000$ conditional OOS draws。不同 sensitivity configurations 只改变 parameter value、weights 与 resulting decision；不再运行 validation，因为这里的目的就是展示参数路径本身。
+
+\subsection{6A：Kernel bandwidth $B$ sensitivity}
+
+若 Experiment 1 证明至少有一种 kernel-CSAA 具有足够竞争力，则固定该 representative kernel family，令
+\[
+B\in\{0.1,0.5,1,3,5,10,30,50,100\},
+\]
+并设置 robustness strength 为零，即只运行 nominal CSAA。对每个 $B$、每个 replication 计算 Mean OOS cost、OOS Std、$q_{0.95}$ 与 final-context effective sample size
+\[
+\operatorname{ESS}(\boldsymbol\theta)=\frac{1}{\sum_s\pi_s(\boldsymbol\theta)^2},
+\]
+再在 $20$ replications 上平均得到 AESS。核心机制链为
+\[
+B\rightarrow\text{weight concentration / ESS}\rightarrow\text{OOS performance}.
+\]
+若 Experiment 1 显示 RF 显著且稳定地优于全部 kernels，则不强行把 6A 放进主文，可降为 appendix 或取消。
+
+\subsection{6B：$B\times\lambda$ interaction 与 diversification mechanism}
+
+若 Experiments 2 / 4 / 5 支持 contextual modified-$\chi^2$ DRO 在 performance--tractability 上具有实际价值，则用它作为 dense sensitivity vehicle。Bandwidth 取四个 representative levels：$0.1$、Experiment 1 的 global $B^\star$、$10$、$100$；若 $B^\star$ 与其中某点重复，则从原 $B$ grid 中选最近 unused value，保证四个不同 levels。Robustness grid 为
+\[
+\lambda\in\{0,0.01,0.05,0.1,0.25,0.5,1,2,5,10,50,100\}.
+\]
+大于 $100$ 的极端 $\lambda$ 只在主 curves 尚未显示 limiting regime 时作为 appendix stress path，不进入主 sensitivity table。
+
+每个 $(B,\lambda)$ 先报告 Mean / Std / $q_{0.95}$ / ANC；同时直接从同一批 second-stage solutions 计算 contracted-capacity utilization、spot-market volume share 与 MQC penalty，不需要额外 optimization solves。由此判断 regularization 是否通过更大的 carrier/capacity buffer 降低 ex-post spot exposure，以及这种 protection 是否伴随 lower utilization 或更高 MQC exposure。\textbf{不能预设这些指标必须按某一方向移动。} 若没有干净 monotonic pattern，就如实报告。
+
+若 modified-$\chi^2$ 在前置 experiments 中明显 inferior 且没有 computation advantage，则 6B 不应被强行保留；应把同样的 sensitivity logic 转移到真正被前置证据支持的 practical contextual robust model。
+
+\section{Olist Real-Data-Based / Semi-Synthetic Case Study}
+
+\subsection{角色与数据来源}
+
+Olist 部分的角色是 chronological external confirmation，而不是把 Synthetic Experiments 1--6 全部再做一遍。真实信息来自 $23$ 条 constructed OD lanes 的 $104$ 周 weekly shipment-volume trajectories；carrier bids、coverage、rates、capacities、MQCs、penalties 与 spot-market prices 并非 Olist 真实字段，仍按 semi-synthetic procurement generator 构造。因此正文应明确称为 real-data-based / semi-synthetic case study。
+
+正式 rolling OOS weeks 保持现有 protocol：
+\[
+t=54,55,\ldots,104,
+\]
+共 $51$ 个 chronological OOS decisions。每个 outer week 使用之前最近 $50$ 周作为 historical candidate pool，并用 week $t$ 的 realized $\boldsymbol d^t$ 做一次真实 chronological evaluation；这里不存在 synthetic study 那样的 $1000$ conditional OOS draws。
+
+\subsection{Olist procurement parameters}
+
+为保持原稿 Olist 半合成采购实例的生成口径，lane baseline scale 采用完整 $104$ 周需求轨迹的逐 lane 均值：
+\[
+\bar d_j^{\mathrm{Olist}}=\frac1{104}\sum_{t=1}^{104}d_j^t.
+\]
+该固定尺度仅用于一次性生成全部方法共享的半合成采购市场：$q_{ij}$ 与 $g_i$ 按上述 $\bar d_j^{\mathrm{Olist}}$ 缩放，$M_i$ 由 $q_{ij}$ 求和得到；报价、MQC 单位罚率与现货费率按前述 generation formulas 构造。生成的采购参数在全部 $51$ 个 OOS weeks 中保持不变，不逐周重估。由于市场尺度使用完整案例轨迹，这是一项 retrospective semi-synthetic calibration，不能称为采购参数完全由 OOS 前信息决定；与此不同，每个滚动决策的训练、特征标准化和超参数选择仍只使用该测试周之前的需求观测。
+
+\textbf{Olist procurement network 的当前锁定设定：}为与 revised synthetic generator 保持一致，Olist rerun 固定使用 $20$ 个 candidate carriers，并完全复用相同的 heterogeneous partial-coverage rule。对每个 carrier $i\in\I$ 独立生成 coverage ratio 于 $U(0.4,0.7)$，从 $23$ 条 Olist lanes 中均匀、无放回抽取相应数量的 lanes 构成 $\J_i$；初始生成后，若某条 lane 少于 $6$ 个 eligible carriers，则随机补充 carriers 直至达到 $6$ 个。相应地，Olist 中 carrier-selection bounds 沿用原稿比例，为 $\alpha=\lceil0.1|\I|\rceil=2$、$\beta=\lceil0.7|\I|\rceil=14$。Rates 与 capacities 仅对 eligible carrier--lane pairs 生成，$D_i$、$M_i$、$h_i$ 以及 lane-level spot-rate benchmark 均按实际 $\J_i$ / eligible-carrier set 计算。该修改只统一 semi-synthetic procurement-side environment；Olist 的真实部分仍然是 $23$ 条 OD lanes 上的 $104$ 周 shipment-volume trajectories。
+
+\subsection{Olist contextual information 与 standardization}
+
+Olist 没有 synthetic 中的 $M,T,A,C$ 外生 covariates，因此继续使用 lagged shipment-volume information 作为 observable context。对 $k\in\{1,2,3\}$，
+\[
+\boldsymbol\theta^t
+=\left(\boldsymbol d^{t-k},\boldsymbol d^{t-k+1},\ldots,\boldsymbol d^{t-1}\right).
+\]
+在构造 Euclidean contextual distance 之前，必须对每条 lane 的 shipment-volume dimension 使用当前 training history 进行 lane-wise standardization；validation / OOS origin 只能使用该 origin 之前的数据计算 scaling parameters，避免 future leakage。正文要明确：real case 的 context 是 lagged observable side information，不应把它包装成 synthetic case 那样的 rich exogenous covariates。
+
+\subsection{Outer-week hyperparameter validation}
+
+每个 outer OOS week $t$ 只用 week $t$ 以前的信息调参。现有 CSAA / RCSAA protocol 继续使用 outer historical pool 的最后 $10$ 个 weeks 作为 validation origins；对 kernel-based contextual model，每个 validation origin 使用其之前的 $40$ 个 historical weeks 构造 contextual scenario set，选择 $(k,B)$ 后再 tune robust parameter。Outer OOS realization $\boldsymbol d^t$ 只用于最终 evaluation，绝不进入 tuning。
+
+Tuned-SAA 单独按照 Reviewer M28 已锁定的 three-rule selection 执行：在每个 outer decision 内，通过同一组 historical validation origins 比较 \{20, 40, all available\}。Fixed-window rule 使用 validation origin 前最近 $20$ 或 $40$ 个 observations；``all available'' 在 inner validation 中按已可用 history expanding，并在 final outer decision 使用全部 $50$ 个 historical weeks。按 average validation realized procurement cost 选择；outer OOS week 不参与 window selection。
+
+CSAA 与 Tuned-SAA 的 history mechanism 要区分：Tuned-SAA 的 window 本身就是 data selection；CSAA final solve 仍保留 $50$-week historical candidate pool，再由 contextual weights / bandwidth 控制每周 observation 的实际 influence。不能因为 Tuned-SAA 选择了 shorter window，就强行令 CSAA 使用同一 shorter pool。
+
+\subsection{Olist main methods 与报告}
+
+Olist main text 重复 core tuned comparison：D、Tuned-SAA、选定 kernel 的 CSAA、RF-CSAA、RCSAA、contextual modified-$\chi^2$ DRO。RF-CSAA 使用 Experiment~1 已固定的 specification，以检验 data-adaptive contextual weights 在真实 lagged-volume context 下是否改变 kernel-CSAA 的结论；不进一步扩展为 RF-RCSAA / RF-DRO。Contextual $W_1$-DRO 仅在 synthetic benchmark 已显示其具有足够信息价值、且 Olist computation 可控时作为 optional confirmation；四种 kernel 的完整 Olist 对照可作为 supplementary option，Moment-DRO 与 full $B\times\lambda$ sweeps 不在 Olist 中机械重复。
+
+Olist main table 记录 $51$ weeks 的 realized procurement costs，可报告 chronological mean、median / IQR、standard deviation、$q_{0.95}$ 与 descriptive maximum，并给出相对 Tuned-SAA 的 improvement。这里的 Std 是\textbf{跨不同 weeks / contexts 的 chronological cost dispersion}，不能称为某个固定 context 下的 conditional standard deviation；Max 也只是 $51$ 个 realized weeks 中的 sample maximum，不能承担强 worst-case claim。Formal tail-risk evidence 放在 repeated synthetic OOS study 中。
+
+\section{附录与补充诊断}
+
+\subsection{A. 51-week paired improvement distribution：回答“结果是否由少数周驱动”}
+
+针对 Reviewer 对 Olist gain stability 的质疑，不新增 optimization runs。令 $m$ 分别取 CSAA、RCSAA 与 $C\!\!-\chi^2$，按 week 计算相对 Tuned-SAA 的 paired improvement
+\[
+r_t^m
+=100\%\times
+\frac{Q(\boldsymbol y^{\mathrm{Tuned\text{-}SAA},t},\boldsymbol d^t)
+-Q(\boldsymbol y^{m,t},\boldsymbol d^t)}
+{Q(\boldsymbol y^{\mathrm{Tuned\text{-}SAA},t},\boldsymbol d^t)},
+\qquad t=54,\ldots,104.
+\]
+Appendix 画三组 side-by-side boxplots，并加 $0$ improvement reference line；同图旁报告 mean improvement、median improvement、win rate $\Pr(r_t^m>0)$ 与一个 paired Wilcoxon signed-rank p-value。该分析直接回答“平均改善是否只被少数 favorable weeks 拉动”。默认\textbf{不再另做 bootstrap confidence interval}，除非这组 paired evidence 结果含糊或后续 editor 明确要求。
+
+\subsection{B. Tail-risk stability：把正式证据放到 repeated synthetic OOS}
+
+Reviewer 关于 $51$-week maximum 不稳定的意见不需要独立新实验。主证据来自 Experiments 1 与 3：每个 replication 有 $1000$ conditional OOS draws，且有 independent replications。Mean、Std 与 $q_{0.95}$ 作为主要稳定 summaries；finite-sample Max 只作为 secondary statistic。Olist Max 降级为 descriptive case-study result，不再写成 worst-case guarantee。因为已经有 repeated synthetic data、large conditional OOS set 和 real chronological case，默认不再追加 bootstrap 或第三套 real dataset。
+
+\subsection{C. Cardinality-matched CSAA：检验 robustness 是否只是“多选 carriers”}
+
+针对 reviewer 对 diversification mechanism 的质疑，在 baseline synthetic environment 做一个 narrowly targeted diagnostic，而不是新增完整 experiment number。主对象优先选择 tuned contextual modified-$\chi^2$ DRO；若 RCSAA computation 方便且结果有额外解释价值，可同步做一份 RCSAA version，但不是默认要求。
+
+对 replication $r$，先得到 robust solution $\boldsymbol y_r^{\mathrm{rob}}$，记
+\[
+K_r=\sum_{i\in\I}y_{ri}^{\mathrm{rob}}.
+\]
+随后在\textbf{相同 historical data、相同 contextual weights、相同 final test context} 下重新求解 nominal CSAA，但增加
+\[
+\sum_{i\in\I}y_i=K_r.
+\]
+得到 cardinality-matched CSAA solution $\boldsymbol y_r^{\mathrm{CM}}$。两者在完全相同的 $1000$ OOS draws 上评价 Mean / Std / $q_{0.95}$、capacity utilization、spot share 与 MQC penalty。由于两者 ANC 按 construction 完全相同，该 diagnostic 把“选了多少 carriers”的 quantity effect 与“选了哪些 carriers / robust objective 如何评价 adverse realizations”的 composition/robustification effect 分开。
+
+若 robust method 在相同 cardinality 下仍明显优于 matched CSAA，则不能把 robustness gain 简化为“多选 carriers”；若大部分 advantage 消失，则 diversification / larger portfolio 本身是主要机制。两种结果都可形成有意义的 managerial interpretation。不要额外创造 aggregate capacity-buffer heuristic，因为 partial lane coverage 下 $M_i$ 的系统级加总不能干净代表每条 lane 的可用 capacity，反而会引入新的 forecast target / reserve factor tuning。
+
+\subsection{D. Operational mechanism 与 $\lambda$ 的解释}
+
+Experiment 2 的 cross-method operational table 与 Experiment 6B 的 $B\times\lambda$ curves 合在一起回答 managerial mechanism。重点观察：ANC 是否增大；spot share 是否下降；capacity utilization 是否下降；MQC penalty 是否上升。若观察到“更大 ANC / capacity buffer $\rightarrow$ 更少 spot，但 utilization 下降或 MQC exposure 增加”，可解释为 ex-ante contracted-capacity insurance 与 ex-post recourse 的 trade-off；若 spot exposure 降低而 utilization / MQC 没有明显恶化，则可写成更强的 efficiency result。没有清晰 pattern 时，不强行制造 diversification story。
+
+Synthetic study 不计算 carrier switching frequency，因为 independent replications / one-cycle decisions 没有自然的 chronological switching state，而且模型没有 switching cost。若 reviewer 仍坚持该 statistic，只在 Olist appendix 计算相邻 weeks selected-carrier sets 的 turnover，明确说明 turnover 更低并不天然更好。
+
+\subsection{E. Olist contextual informativeness diagnostic}
+
+保留现有 context-distance / shipment-volume-distance diagnostic，但按修订要求使用 lane-wise standardized volumes。对每个 OOS week $t$ 和 candidate $k$，计算 current context $\boldsymbol\theta^t$ 与前 $50$ 个 historical contexts 的 Euclidean distances，并计算对应 realized shipment-volume vectors 的 Euclidean distances；对 $50$ 对距离计算 Pearson correlation。汇总 $51$ 个 OOS weeks 的 correlation distribution。该结果只用于说明 lagged context 与未来 shipment-volume similarity 存在 empirical association，并支持 Euclidean localization 的可解释性；不能把它写成“证明 NW 最优”。
+
+\subsection{F. Olist trend / seasonality diagnostics}
+
+为回应 temporal-structure comment，可把以下诊断放 appendix：画 $104$ 周 aggregate shipment-volume trajectory 并标出正式 OOS boundary；分别对 full 104-week sample 与 OOS weeks 做 linear trend；OOS 额外给 Kendall $\tau$；对 $23$ lanes 做 lane-wise OOS trends 并用 FDR 控制 multiple testing；检查 lag-52 Pearson / Spearman correlation；必要时比较简单 AR(3) 与 AR(3)+trend 的 rolling predictive error。该 block 的作用是判断真实数据中是否存在明显 residual temporal structure，不要求为此把主模型扩展成 time-series forecasting paper。
+
+\subsection{G. 参数选择与稳定性 appendix}
+
+为了增强 reproducibility，可在 appendix 汇报：Experiment 1 中 Tuned-SAA 的 $\gamma$ selection frequencies、kernel family / $B$ selection frequencies 与 grid-boundary hits；Olist 中 $k$、$B$、SAA window 与 $\lambda$ 的 selection frequencies / median / IQR；Experiment 6A 的 AESS curves。若某个 parameter 经常命中 grid boundary，应先检查 grid 是否覆盖不足，再决定是否在正式 run 前扩 grid；不能在看到 final OOS 结果以后按性能扩展。
+
+\section{代码实现与复现规则}
+
+\begin{enumerate}[leftmargin=2.4em,itemsep=0.28em]
+\item \textbf{Seed 分层。} 至少分别维护 procurement-instance seed、context/DGP seed、OOS seed、RF seed 和 scalability seed block。新增 method 或改变 solve order 不应改变其他 methods 看到的数据。
+\item \textbf{Instance persistence。} 每个 replication 生成后保存 $\J_i,r_{ij},q_{ij},M_i,g_i,h_i,e_j$、DGP coefficients、historical contexts / volumes、final context 和 OOS draw seed；允许任意 method 后续复跑同一 instance。
+\item \textbf{Price groups。} 每条 lane 先随机打乱 eligible carriers，再尽量均匀分到 $\phi_{ij}\in\{0.5,1,1.5\}$，各组 cardinality 差不超过 $1$。
+\item \textbf{Capacity 只生成一次。} $q_{ij}$ 绝不能按 week / scenario 重抽；否则模型 scope 变成 shipment volume + carrier capacity 双不确定。
+\item \textbf{Normal rejection sampling。} 负值反复重抽直到非负；日志中记录 rejection rate 便于 sanity check，但不据此重新 calibration。
+\item \textbf{Final context 只生成一次。} 同一 replication 的所有 methods 共享一个 $\boldsymbol\theta^{76}$ 和同一 $1000$ OOS vectors。
+\item \textbf{Zero contextual weights。} 对 RCSAA / modified-$\chi^2$ 明确构造 $\Sset_+$；不要把 $1/\pi_s$ 类项带到 zero-weight scenario 上。
+\item \textbf{Runtime definition。} 主 performance table 的 Time 从 hyperparameters 已固定后的 final-decision model construction / solve 开始计时；validation total time 可另存日志。Java methods 的外层计时包含 Java adapter/preprocessing 至求解返回，PCM 的 Python 内部计时从输入解析完成后的 RSOME model construction/reformulation 开始并包含 MOSEK solve，但排除 Java/Python process 与文件开销；严格横向解释毫秒或秒级差异时必须披露这一边界差别。
+\item \textbf{Scale test。} 统一 solver version、threads、presolve、MIP / conic tolerances 与 $3600$s limit；timeout 保留并记录 final gap。
+\item \textbf{Aggregation。} 每个 replication 先产生自己的 OOS summaries，再在 replications 上求 mean / dispersion；不要把不同 final contexts 的 raw OOS draws 混在一起算“conditional Std”。
+\item \textbf{Olist 时间信息口径。} 每个 outer OOS origin 的模型训练、standardization、window selection 与 $k/B/\lambda$ tuning 只使用该 origin 之前的数据。采购市场的固定需求尺度按完整 $104$ 周轨迹一次性校准，明确披露为 retrospective semi-synthetic construction，不将其误写为只用 pre-OOS 周生成。
+\end{enumerate}
+
+\section{实施前待锁定清单}
+
+对\textbf{数据生成机制本身}而言，synthetic DGP、coverage、rate、capacity、MQC、penalty、spot cost、replication、validation 与 final OOS 规则已经足以直接编码。仍未完全锁定的主要是 method-specific implementation 与 Olist 结构项，必须在正式 batch run 前一次性解决：
+\begin{enumerate}[leftmargin=2.4em,itemsep=0.24em]
+\item RF library 以及500 trees、all-features-at-split、minimum leaf size等secondary fixed settings已在当前实现中冻结，不再另设validation grid；
+\item Wasserstein 的 $m_j=0$ lane 预处理规则以及正式 OOS 前的边界命中 pilot；其 ground metric、box 与 $\varepsilon$ 网格已在本说明书锁定；
+\item Experiment 2 最终主表是否保留全部 unconditional robust counterparts：按 Experiment 1 的预先声明规则决定，不提前 post-hoc 剪枝；
+\item Experiment 5 的 $n=100$ fixed prefix rule 已锁定为 200-observation history 的前100个；代码须与此一致；
+\item 正式 solver threads、tolerances、presolve 等 reproducibility values：从最终代码 / solver configuration 原样记录，而不是在论文中猜默认值。
+\end{enumerate}
+
+上述项目之外，不再新增 sample-size sensitivity、full volatility $\times$ distribution $\times$ method $\times$ parameter Cartesian product、synthetic switching-frequency experiment 或 ad hoc capacity-buffer heuristic。若 pilot 结果显示某一现有 method 根本无法实现或某个 parameter grid 明显覆盖不足，再针对对应项做最小修改，并保留版本记录。
+
+\section{参数与实验配置汇总（当前版本）}
+
+\begin{center}
+\small
+\begin{longtable}{>{\raggedright\arraybackslash}p{3.6cm} >{\raggedright\arraybackslash}p{7.1cm} >{\raggedright\arraybackslash}p{4.0cm}}
+\toprule
+对象 & 当前配置 & 用途 / 备注\\
+\midrule
+\endfirsthead
+\toprule
+对象 & 当前配置 & 用途 / 备注\\
+\midrule
+\endhead
+Synthetic baseline & $|\I|=15, |\J|=50, H=75$; Normal-Low & Exp.~1,2,4,6\\
+Independent replications & $R=20$ & baseline performance\\
+Final OOS & one test context + 1000 conditional draws & one first-stage solve / method\\
+Validation & 25 origins, fixed 50-observation training & realized procurement cost\\
+Context & $M,A,C\sim U(0,1)$, $T=(t-1)/H$ & $l=4$\\
+Volatility & Low $U(.1,.3)$; Medium $U(.4,.6)$; High $U(.7,.9)$ & lane-specific $c_j$\\
+Coverage & initial $U(.4,.7)$, min 6 eligible/lane & 15-carrier synthetic settings\\
+Carrier bounds & $\alpha=\lceil .1|\I|\rceil,\ \beta=\lceil .7|\I|\rceil$ & $|\I|=15$ 时为 $2$--$11$\\
+Capacity & $q_{ij}\sim U(.3\bar d_j,.5\bar d_j)$ & fixed within replication\\
+MQC & $g_i\sim U(.1D_i,.2D_i)$ & $D_i=\sum_{j\in\J_i}\bar d_j$\\
+Penalty & $h_i=\min_{j\in\J_i}r_{ij}$ & current latest setting\\
+Spot & $1.5$--$2.5\times$ eligible average contract rate & lane-specific\\
+Exp.~1 methods & D, SAA-All, Tuned-SAA, 4 kernels, RF-CSAA & weighting selection\\
+Tuned-SAA $\gamma$ & $\{.4,.6,.8,1\}$ & Exp.~1 / later retuning\\
+Kernel $B$ & $\{.1,.5,1,3,5,10,30,50,100\}$ & CSAA / Exp.~6A\\
+RF & 500 trees, all contextual features available at splits & secondary settings fixed ex ante\\
+Mean--SD / $\chi^2$ main $\lambda$ & $\{.01,.05,.1,.25,.5,1,2,5,10,50,100\}$ & Exp.~2 tuning\\
+Wasserstein geometry & training-max-scaled average-lane $L_1$; box $[0,1.5m_j]$ & exact definition in Exp.~2\\
+Wasserstein radius & $\{.005,.01,.025,.05,.1,.25,.5,1\}$ & absolute $\varepsilon$, validation-selected\\
+PCM $\kappa$ & $\{1,1.25,1.5,2\}$ & Exp.~2 only; marginal and total-demand bounds\\
+Exp.~3 DGP cells & Normal/Lognormal $\times$ Low/Medium/High & 10 paired reps/cell\\
+Exp.~3 methods & Tuned-SAA, CSAA, RSAA, RCSAA, U/C-$\chi^2$, U/C-$W_1$ & no Moment, no SAA-All\\
+Exp.~4 & RCSAA vs C-$\chi^2$, same $\lambda$ & gap + certificate + OOS + time\\
+Exp.~5 cells & $(20,60,100/200)$; $(30,120,100/200)$; $(40,200,100/200)$ & 3 instances/cell\\
+Exp.~5 methods & RCSAA, C-$\chi^2$, C-$W_1$ & 3600s/solve\\
+Exp.~6A & $B$ full grid, nominal CSAA & Mean/Std/q95/AESS\\
+Exp.~6B & $B\in\{.1,B^\star,10,100\}$; $\lambda\in\{0,.01,.05,.1,.25,.5,1,2,5,10,50,100\}$ & Mean/Std/q95/ANC + operational metrics\\
+Olist & 20 carriers, 23 lanes, 104 weeks, 51 OOS weeks & chronological confirmation\\
+Olist $\bar d_j$ & full 104-week lane mean & fixed retrospective market scale\\
+Olist coverage & initial $U(.4,.7)$, min 6 eligible/lane & same rule as synthetic procurement generator\\
+Olist outer history & most recent 50 weeks & $t=54,\ldots,104$\\
+Olist context & $k\in\{1,2,3\}$ lagged standardized lane volumes & training-only scaling\\
+Olist Tuned-SAA & \{20,40,all available\} & 10 inner validation origins\\
+Appendix stability & paired improvement boxplots + median/win rate/Wilcoxon & no default bootstrap\\
+Diversification diagnostic & cardinality-matched CSAA & baseline synthetic appendix\\
+\bottomrule
+\end{longtable}
+\end{center}
+
+\begin{thebibliography}{99}
+\bibitem[Ma et al.(2010)]{ma2010}
+Ma, Z., Kwon, R.H., Lee, C.-G., 2010. \emph{A stochastic programming winner determination model for truckload procurement under shipment uncertainty}. Transportation Research Part E 46, 49--60.
+
+\bibitem[Remli and Rekik(2013)]{remli2013}
+Remli, N., Rekik, M., 2013. \emph{A robust winner determination problem for combinatorial transportation auctions under uncertain shipment volumes}. Transportation Research Part C 35, 204--217.
+
+\bibitem[Zhang et al.(2015)]{zhang2015}
+Zhang, B., et al., 2015. \emph{A tractable two-stage robust winner determination model for truckload service procurement via combinatorial auctions}. Transportation Research Part B 78, 16--31.
+
+\bibitem[Feki et al.(2016)]{feki2016}
+Feki, Y., et al., 2016. \emph{A hedging policy for carriers' selection under availability and demand uncertainty}. Transportation Research Part E 85, 149--165.
+
+\bibitem[Remli et al.(2019)]{remli2019}
+Remli, N., Amrouss, A., El Hallaoui, I., et al., 2019. \emph{A robust optimization approach for the winner determination problem with uncertainty on shipment volumes and carriers' capacity}. Transportation Research Part B 123, 127--148.
+
+\bibitem[Bertsimas et al.(2022)]{bertsimas2022}
+Bertsimas, D., McCord, C., Sturt, B., 2022. \emph{Dynamic optimization with side information}. European Journal of Operational Research.
+
+\bibitem[Li et al.(2023)]{li2023}
+Li, N., Zhang, Y., Tiwari, S., Kou, G., 2023. \emph{Winner determination problem with purchase budget for transportation procurement under uncertain shipment volume}. Transportation Research Part E 176, 103182.
+
+\bibitem[Schmiedel et al.(2025)]{schmiedel2025}
+Schmiedel, S., Boujemaa, R., Rekik, M., Hajji, A., 2025. \emph{From strategic to tactical carriers' selection: A new SDDP algorithm to handle dynamic stochastic demand}. Transportation Research Part C 177, 105174.
+
+\bibitem[Saif and Delage(2021)]{saif2021}
+Saif, A., Delage, E., 2021. \emph{Data-driven distributionally robust capacitated facility location problem}. European Journal of Operational Research 291(3), 995--1007.
+
+\bibitem[Delage and Ye(2010)]{delage2010}
+Delage, E., Ye, Y., 2010. \emph{Distributionally robust optimization under moment uncertainty with application to data-driven problems}. Operations Research 58(3), 595--612.
+
+\end{thebibliography}
+
+\end{document}
