@@ -31,7 +31,7 @@ import java.util.SplittableRandom;
  */
 public final class TRBSVUPersistentRateMqcMethodProbe {
     private static final int DEFAULT_CARRIERS = 12;
-    private static final int LANES = 20;
+    private static final int DEFAULT_LANES = 20;
     private static final int HISTORY = 60;
     private static final int OOS = 500;
     private static final double DEFAULT_BANDWIDTH = 0.5;
@@ -39,7 +39,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
     private TRBSVUPersistentRateMqcMethodProbe() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1 || args.length > 25) {
+        if (args.length < 1 || args.length > 26) {
             throw new IllegalArgumentException(
                     "Usage: <output-directory> [replications] [queries] [mqc-scale]"
                             + " [volatility] [context-scale] [bandwidth] [spot-scale]"
@@ -52,7 +52,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                             + " [top-high-demand-queries; 0 means all]"
                             + " [heterogeneous-surge: true|false]"
                             + " [regional-groups; <=1 disables] [global-variance-share]"
-                            + " [home-group-coverage; <=0 disables]");
+                            + " [home-group-coverage; <=0 disables] [lanes]");
         }
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
         int replications = args.length >= 2 ? Integer.parseInt(args[1]) : 3;
@@ -100,6 +100,8 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
         int regionalGroups = args.length >= 23 ? Integer.parseInt(args[22]) : 0;
         double globalVarianceShare = args.length >= 24 ? Double.parseDouble(args[23]) : 1.0;
         double homeGroupCoverage = args.length >= 25 ? Double.parseDouble(args[24]) : 0.0;
+        int laneCount = args.length >= 26 ? Integer.parseInt(args[25]) : DEFAULT_LANES;
+        if (laneCount <= 0) throw new IllegalArgumentException("Lane count must be positive.");
         if (surgeProbability > 0.0 && regionalGroups > 1) {
             throw new IllegalArgumentException(
                     "Rare-surge and regional-factor diagnostics cannot be enabled together.");
@@ -134,7 +136,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                             fixedDesign.demandParameters(), fixedDesign.procurement(),
                             sampled.contexts(), sampled.historicalNoise(), sampled.oosNoise());
             Parameters parameters = TRBSVUSyntheticDemandGenerator.sampleParameters(
-                    LANES, historySize, paired.demandParameters(), contextScale,
+                    laneCount, historySize, paired.demandParameters(), contextScale,
                     contextStructure,
                     BaseStructure.THREE_LEVEL_WIDE,
                     commonLoadingLower, commonLoadingUpper);
@@ -165,7 +167,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
             ProcurementParams current;
             if (homeGroupCoverage > 0.0) {
                 int[] laneGroup = TRBSVUSyntheticDemandGenerator.balancedRegionalGroups(
-                        LANES, regionalGroups, paired.contexts());
+                        laneCount, regionalGroups, paired.contexts());
                 current = TRBSVUProcurementGenerator.generateWithHomeGroupCoverage(
                         carriers, parameters.typicalDemand(), paired.procurement(),
                         laneGroup, regionalGroups, homeGroupCoverage);
@@ -182,7 +184,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
 
             if (oracleSamples == 0) {
                 runMarket(rows, "CURRENT", replication, parameters, demand, current, bandwidth,
-                        0, robustness, robustMethods, topHighDemandQueries, settings,
+                        0, robustness, robustMethods, topHighDemandQueries, laneCount, settings,
                         output.resolve("method_probe.tsv"));
             }
             String marketName = String.format(Locale.ROOT, "PERSISTENT_WIDE_MQC_%.2f", mqcScale);
@@ -198,7 +200,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
             runMarket(rows, marketName,
                     replication,
                     parameters, demand, candidate, bandwidth, oracleSamples, robustness,
-                    robustMethods, topHighDemandQueries, settings,
+                    robustMethods, topHighDemandQueries, laneCount, settings,
                     output.resolve("method_probe.tsv"));
             Files.write(output.resolve("method_probe.tsv"), rows, StandardCharsets.UTF_8);
         }
@@ -223,9 +225,10 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                                   double robustness,
                                   String robustMethods,
                                   int topHighDemandQueries,
+                                  int laneCount,
                                   Settings settings,
                                   Path checkpointFile) throws Exception {
-        List<String> lanes = laneNames();
+        List<String> lanes = laneNames(laneCount);
         ConditionalQuery first = demand.queries.get(0);
         Solution d = solve(market, lanes,
                 TRBSVUScenarioWeights.arithmeticMean(demand.history), first,
@@ -359,9 +362,9 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
         return result.toString();
     }
 
-    private static List<String> laneNames() {
-        List<String> result = new ArrayList<>(LANES);
-        for (int j = 0; j < LANES; j++) result.add("L" + (j + 1));
+    private static List<String> laneNames(int laneCount) {
+        List<String> result = new ArrayList<>(laneCount);
+        for (int j = 0; j < laneCount; j++) result.add("L" + (j + 1));
         return result;
     }
 
