@@ -285,7 +285,8 @@ public class DROModel {
 			solution.relativeGap = relativeGap;
 			solution.nodeCount = nodeCount;
 			solution.cutCount = selectedCuts;
-			solution.certifiedOptimal = Double.isFinite(relativeGap) && relativeGap <= cfg.tol;
+			solution.certifiedOptimal = Double.isFinite(bestBound)
+					&& Double.isFinite(relativeGap) && relativeGap <= cfg.tol;
 			M.dispose();
 			return solution;
 		}
