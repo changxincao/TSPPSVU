@@ -36,6 +36,7 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
         checkAlternativeStructures(h);
         checkContextDistributions(p, oosCount);
         checkRegionalFactorPairing(p, oosCount);
+        checkPromotionCvPairing(p, oosCount);
         Replication normal = generate(p, Distribution.NORMAL, Volatility.LOW, oosCount);
         Replication repeat = generate(p, Distribution.NORMAL, Volatility.LOW, oosCount);
         Replication lognormal = generate(p, Distribution.LOGNORMAL, Volatility.HIGH, oosCount);
@@ -180,6 +181,56 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
             }
         }
         require(changed, "tau=0.5 regional hierarchy did not change joint draws.");
+    }
+
+    private static void checkPromotionCvPairing(Parameters parameters, int oosCount) {
+        MultiQueryReplication baseline =
+                TRBSVUSyntheticDemandGenerator.generateMultiQueryWithRegionalFactors(
+                        parameters, Distribution.LOGNORMAL, Volatility.MEDIUM, 3, oosCount,
+                        23L, 29L, 31L, ContextDistribution.UNIFORM, 5, 0.5);
+        MultiQueryReplication zero =
+                TRBSVUSyntheticDemandGenerator.generateMultiQueryWithRegionalFactors(
+                        parameters, Distribution.LOGNORMAL, Volatility.MEDIUM, 3, oosCount,
+                        23L, 29L, 31L, ContextDistribution.UNIFORM, 5, 0.5, 0.0);
+        MultiQueryReplication varied =
+                TRBSVUSyntheticDemandGenerator.generateMultiQueryWithRegionalFactors(
+                        parameters, Distribution.LOGNORMAL, Volatility.MEDIUM, 3, oosCount,
+                        23L, 29L, 31L, ContextDistribution.UNIFORM, 5, 0.5, 0.8);
+        MultiQueryReplication demandLevel =
+                TRBSVUSyntheticDemandGenerator.generateMultiQueryWithRegionalFactors(
+                        parameters, Distribution.LOGNORMAL, Volatility.MEDIUM, 3, oosCount,
+                        23L, 29L, 31L, ContextDistribution.UNIFORM, 5, 0.5, 1.0, true);
+        for (int t = 0; t < baseline.history.size(); t++) {
+            require(Arrays.equals(baseline.history.get(t).demand(), zero.history.get(t).demand()),
+                    "Zero CV slope changed baseline history.");
+            require(Arrays.equals(baseline.history.get(t).theta.values(),
+                            varied.history.get(t).theta.values()),
+                    "CV slope changed historical contexts.");
+            require(Arrays.equals(baseline.history.get(t).theta.values(),
+                            demandLevel.history.get(t).theta.values()),
+                    "Demand-level CV changed historical contexts.");
+        }
+        for (int q = 0; q < baseline.queries.size(); q++) {
+            require(Arrays.equals(baseline.queries.get(q).context.values(),
+                            varied.queries.get(q).context.values()),
+                    "CV slope changed query contexts.");
+            require(Arrays.equals(baseline.queries.get(q).context.values(),
+                            demandLevel.queries.get(q).context.values()),
+                    "Demand-level CV changed query contexts.");
+            double[] nominal = parameters.nominalDemand(demandLevel.queries.get(q).context);
+            for (int j = 0; j < nominal.length; j++) {
+                double mean = 0.0;
+                for (Sample draw : demandLevel.queries.get(q).oos)
+                    mean += draw.demand()[j] / oosCount;
+                require(Math.abs(mean / nominal[j] - 1.0) < 0.15,
+                        "Conditional-CV lognormal draws lost their nominal mean.");
+            }
+            for (int s = 0; s < oosCount; s++) {
+                require(Arrays.equals(baseline.queries.get(q).oos.get(s).demand(),
+                                zero.queries.get(q).oos.get(s).demand()),
+                        "Zero CV slope changed baseline OOS draws.");
+            }
+        }
     }
 
     private static void checkUnitCubeClosed(double[] context, String label) {

@@ -39,7 +39,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
     private TRBSVUPersistentRateMqcMethodProbe() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1 || args.length > 26) {
+        if (args.length < 1 || args.length > 28) {
             throw new IllegalArgumentException(
                     "Usage: <output-directory> [replications] [queries] [mqc-scale]"
                             + " [volatility] [context-scale] [bandwidth] [spot-scale]"
@@ -52,7 +52,8 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                             + " [top-high-demand-queries; 0 means all]"
                             + " [heterogeneous-surge: true|false]"
                             + " [regional-groups; <=1 disables] [global-variance-share]"
-                            + " [home-group-coverage; <=0 disables] [lanes]");
+                            + " [home-group-coverage; <=0 disables] [lanes]"
+                            + " [cv-slope; 0 disables] [cv-driver: PROMOTION|TOTAL]");
         }
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
         int replications = args.length >= 2 ? Integer.parseInt(args[1]) : 3;
@@ -102,6 +103,17 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
         double homeGroupCoverage = args.length >= 25 ? Double.parseDouble(args[24]) : 0.0;
         int laneCount = args.length >= 26 ? Integer.parseInt(args[25]) : DEFAULT_LANES;
         if (laneCount <= 0) throw new IllegalArgumentException("Lane count must be positive.");
+        double cvSlope = args.length >= 27 ? Double.parseDouble(args[26]) : 0.0;
+        String cvDriver = args.length >= 28 ? args[27].toUpperCase(Locale.ROOT) : "PROMOTION";
+        if (!(cvSlope >= 0.0 && cvSlope <= 1.0) || !Double.isFinite(cvSlope)) {
+            throw new IllegalArgumentException("CV slope must lie in [0,1].");
+        }
+        if (!List.of("PROMOTION", "TOTAL").contains(cvDriver)) {
+            throw new IllegalArgumentException("CV driver must be PROMOTION or TOTAL.");
+        }
+        if (cvSlope > 0.0 && regionalGroups <= 1) {
+            throw new IllegalArgumentException("Conditional CV diagnostic requires regional groups.");
+        }
         if (surgeProbability > 0.0 && regionalGroups > 1) {
             throw new IllegalArgumentException(
                     "Rare-surge and regional-factor diagnostics cannot be enabled together.");
@@ -146,7 +158,8 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                         parameters, Distribution.LOGNORMAL, volatility, queryCount,
                         OOS + oracleSamples,
                         paired.contexts(), paired.historicalNoise(), paired.oosNoise(),
-                        contextDistribution, regionalGroups, globalVarianceShare);
+                        contextDistribution, regionalGroups, globalVarianceShare,
+                        cvSlope, "TOTAL".equals(cvDriver));
             } else if (surgeProbability <= 0.0) {
                 demand = TRBSVUSyntheticDemandGenerator.generateMultiQuery(
                         parameters, Distribution.LOGNORMAL, volatility, queryCount,
@@ -193,6 +206,10 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
             if (regionalGroups > 1) {
                 marketName += String.format(Locale.ROOT, "_REGIONAL_K%d_TAU%.2f",
                         regionalGroups, globalVarianceShare);
+            }
+            if (cvSlope > 0.0) {
+                marketName += String.format(Locale.ROOT, "_%s_CV%.2f",
+                        cvDriver, cvSlope);
             }
             if (homeGroupCoverage > 0.0) {
                 marketName += String.format(Locale.ROOT, "_HOME%.2f", homeGroupCoverage);

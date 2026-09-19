@@ -533,6 +533,31 @@ public final class TRBSVUSyntheticDemandGenerator {
             long historyNoiseSeed, long oosNoiseSeed,
             ContextDistribution contextDistribution,
             int groupCount, double globalVarianceShare) {
+        return generateMultiQueryWithRegionalFactors(parameters, distribution, regime,
+                queryCount, oosCount, contextSeed, historyNoiseSeed, oosNoiseSeed,
+                contextDistribution, groupCount, globalVarianceShare, 0.0);
+    }
+
+    /** Exploratory conditional-CV cell; zero slope exactly reproduces the base DGP. */
+    public static MultiQueryReplication generateMultiQueryWithRegionalFactors(
+            Parameters parameters, Distribution distribution, Volatility regime,
+            int queryCount, int oosCount, long contextSeed,
+            long historyNoiseSeed, long oosNoiseSeed,
+            ContextDistribution contextDistribution,
+            int groupCount, double globalVarianceShare, double promotionCvSlope) {
+        return generateMultiQueryWithRegionalFactors(parameters, distribution, regime,
+                queryCount, oosCount, contextSeed, historyNoiseSeed, oosNoiseSeed,
+                contextDistribution, groupCount, globalVarianceShare, promotionCvSlope, false);
+    }
+
+    /** Exploratory scale based on an existing context or its predicted total demand. */
+    public static MultiQueryReplication generateMultiQueryWithRegionalFactors(
+            Parameters parameters, Distribution distribution, Volatility regime,
+            int queryCount, int oosCount, long contextSeed,
+            long historyNoiseSeed, long oosNoiseSeed,
+            ContextDistribution contextDistribution,
+            int groupCount, double globalVarianceShare, double cvSlope,
+            boolean demandLevelDriver) {
         if (parameters == null || distribution == null || regime == null
                 || contextDistribution == null || queryCount <= 0 || oosCount <= 0) {
             throw new IllegalArgumentException(
@@ -546,6 +571,9 @@ public final class TRBSVUSyntheticDemandGenerator {
                 || !Double.isFinite(globalVarianceShare)) {
             throw new IllegalArgumentException("Global variance share must lie in [0,1].");
         }
+        if (!(cvSlope >= 0.0 && cvSlope <= 1.0) || !Double.isFinite(cvSlope)) {
+            throw new IllegalArgumentException("CV slope must lie in [0,1].");
+        }
         int h = parameters.historicalPeriods();
         int[] laneGroup = balancedGroups(parameters.laneCount(), groupCount,
                 contextSeed ^ REGIONAL_GROUP_SALT);
@@ -557,11 +585,16 @@ public final class TRBSVUSyntheticDemandGenerator {
         Random historyRegionalRandom = new Random(historyNoiseSeed ^ REGIONAL_NOISE_SALT);
         Random oosRegionalRandom = new Random(oosNoiseSeed ^ REGIONAL_NOISE_SALT);
         double[] cv = parameters.volatilityParameters(regime);
+        double typicalTotal = 0.0;
+        for (double value : parameters.typicalDemand()) typicalTotal += value;
         List<Sample> history = new ArrayList<>(h);
         for (int t = 0; t < h; t++) {
             CovariateVector context = context(contextRandom, contextDistribution);
+            double[] nominal = parameters.nominalDemand(context);
             double[] demand = drawDemandWithRegionalFactors(
-                    parameters.nominalDemand(context), cv, parameters.commonLoading,
+                    nominal, contextualCv(cv, context, nominal, typicalTotal,
+                            cvSlope, demandLevelDriver),
+                    parameters.commonLoading,
                     distribution, historyRandom, historyCommonRandom,
                     historyRegionalRandom, laneGroup, groupCount, globalVarianceShare);
             history.add(sample(t, t, context, demand, 1.0 / h));
@@ -571,10 +604,12 @@ public final class TRBSVUSyntheticDemandGenerator {
         for (int query = 0; query < queryCount; query++) {
             CovariateVector queryContext = context(contextRandom, contextDistribution);
             double[] nominal = parameters.nominalDemand(queryContext);
+            double[] queryCv = contextualCv(cv, queryContext, nominal, typicalTotal,
+                    cvSlope, demandLevelDriver);
             List<Sample> oos = new ArrayList<>(oosCount);
             for (int draw = 0; draw < oosCount; draw++) {
                 double[] demand = drawDemandWithRegionalFactors(
-                        nominal, cv, parameters.commonLoading, distribution,
+                        nominal, queryCv, parameters.commonLoading, distribution,
                         oosRandom, oosCommonRandom, oosRegionalRandom,
                         laneGroup, groupCount, globalVarianceShare);
                 oos.add(sample(query * oosCount + draw, h, queryContext.copy(), demand,
@@ -583,6 +618,22 @@ public final class TRBSVUSyntheticDemandGenerator {
             queries.add(new ConditionalQuery(queryContext, oos));
         }
         return new MultiQueryReplication(parameters, history, queries);
+    }
+
+    private static double[] contextualCv(double[] baseCv, CovariateVector context,
+                                         double[] nominal, double typicalTotal,
+                                         double slope, boolean demandLevelDriver) {
+        if (slope == 0.0) return baseCv;
+        double driver = context.values()[2] - 0.5;
+        if (demandLevelDriver) {
+            double total = 0.0;
+            for (double value : nominal) total += value;
+            driver = total / typicalTotal - 1.0;
+        }
+        double factor = 1.0 + slope * driver;
+        double[] adjusted = new double[baseCv.length];
+        for (int j = 0; j < adjusted.length; j++) adjusted[j] = baseCv[j] * factor;
+        return adjusted;
     }
 
     /**
