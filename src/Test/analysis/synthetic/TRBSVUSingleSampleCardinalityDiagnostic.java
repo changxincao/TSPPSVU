@@ -46,7 +46,7 @@ public final class TRBSVUSingleSampleCardinalityDiagnostic {
         Files.createDirectories(output);
 
         TRBSVUSolveMethods.Settings settings = new TRBSVUSolveMethods.Settings(
-                1, 600, 1e-8, RCSAASolverVariant.LBBD_PRIMAL_EXACT, false, true);
+                1, 600, 1e-4, RCSAASolverVariant.LBBD_PRIMAL_EXACT, false, true);
         SplittableRandom seeds = new SplittableRandom(20260917L);
         List<String> lanes = laneNames();
 

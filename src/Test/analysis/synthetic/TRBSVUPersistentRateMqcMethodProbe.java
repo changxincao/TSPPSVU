@@ -116,7 +116,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
         }
         Files.createDirectories(output);
 
-        Settings settings = new Settings(1, 600, 1e-8,
+        Settings settings = new Settings(1, 600, 1e-4,
                 RCSAASolverVariant.LBBD_PRIMAL_EXACT, false, true);
         List<String> rows = new ArrayList<>();
         rows.add("market\treplication\tquery\tmethod\tstatus\tcertified\tobjective\tgap"

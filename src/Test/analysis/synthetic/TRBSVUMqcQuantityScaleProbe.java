@@ -37,7 +37,7 @@ public final class TRBSVUMqcQuantityScaleProbe {
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
         Files.createDirectories(output);
         TRBSVUSolveMethods.Settings settings = new TRBSVUSolveMethods.Settings(
-                1, 600, 1e-8, RCSAASolverVariant.LBBD_PRIMAL_EXACT, false, true);
+                1, 600, 1e-4, RCSAASolverVariant.LBBD_PRIMAL_EXACT, false, true);
         List<String> lanes = laneNames();
         List<String> rows = new ArrayList<>();
         rows.add("replication\tmqc_scale\tsample\tdemand_type\ttotal_demand"
