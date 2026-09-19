@@ -166,6 +166,17 @@ public final class TRBSVUSingleSampleCardinalityDiagnostic {
     static ProcurementParams persistentCarrierRates(ProcurementParams source, long seed,
                                                      double factorLower,
                                                      double factorUpper) {
+        return persistentCarrierRates(source, seed, factorLower, factorUpper, 0.9, 1.1);
+    }
+
+    /** Keeps the carrier factor fixed while varying only within-carrier lane rates. */
+    static ProcurementParams persistentCarrierRates(ProcurementParams source, long seed,
+                                                     double factorLower, double factorUpper,
+                                                     double localLower, double localUpper) {
+        if (!(localLower > 0.0 && localUpper >= localLower)
+                || !Double.isFinite(localLower) || !Double.isFinite(localUpper)) {
+            throw new IllegalArgumentException("Invalid local rate-factor interval.");
+        }
         Random random = new Random(seed);
         double[] carrierFactor = new double[source.I];
         for (int i = 0; i < source.I; i++) {
@@ -183,7 +194,7 @@ public final class TRBSVUSingleSampleCardinalityDiagnostic {
             laneMean /= eligibleCount;
             for (int i = 0; i < source.I; i++) {
                 rates[i][j] = source.eligible[i][j]
-                        ? laneMean * carrierFactor[i] * uniform(random, 0.9, 1.1)
+                        ? laneMean * carrierFactor[i] * uniform(random, localLower, localUpper)
                         : Double.MAX_VALUE;
             }
         }

@@ -39,7 +39,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
     private TRBSVUPersistentRateMqcMethodProbe() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1 || args.length > 28) {
+        if (args.length < 1 || args.length > 30) {
             throw new IllegalArgumentException(
                     "Usage: <output-directory> [replications] [queries] [mqc-scale]"
                             + " [volatility] [context-scale] [bandwidth] [spot-scale]"
@@ -53,7 +53,9 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                             + " [heterogeneous-surge: true|false]"
                             + " [regional-groups; <=1 disables] [global-variance-share]"
                             + " [home-group-coverage; <=0 disables] [lanes]"
-                            + " [cv-slope; 0 disables] [cv-driver: PROMOTION|TOTAL]");
+                            + " [cv-slope; 0 disables] [cv-driver: PROMOTION|TOTAL]"
+                            + " [local-rate-halfwidth; default 0.1]"
+                            + " [query-index; -1 means all]");
         }
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
         int replications = args.length >= 2 ? Integer.parseInt(args[1]) : 3;
@@ -105,6 +107,12 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
         if (laneCount <= 0) throw new IllegalArgumentException("Lane count must be positive.");
         double cvSlope = args.length >= 27 ? Double.parseDouble(args[26]) : 0.0;
         String cvDriver = args.length >= 28 ? args[27].toUpperCase(Locale.ROOT) : "PROMOTION";
+        double localRateHalfwidth = args.length >= 29 ? Double.parseDouble(args[28]) : 0.1;
+        int specificQueryIndex = args.length >= 30 ? Integer.parseInt(args[29]) : -1;
+        if (!(localRateHalfwidth >= 0.0 && localRateHalfwidth < 1.0)
+                || !Double.isFinite(localRateHalfwidth)) {
+            throw new IllegalArgumentException("Local rate halfwidth must lie in [0,1).");
+        }
         if (!(cvSlope >= 0.0 && cvSlope <= 1.0) || !Double.isFinite(cvSlope)) {
             throw new IllegalArgumentException("CV slope must lie in [0,1].");
         }
@@ -125,6 +133,10 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
         if (topHighDemandQueries < 0 || topHighDemandQueries > queryCount) {
             throw new IllegalArgumentException(
                     "top-high-demand-queries must be between 0 and query-count.");
+        }
+        if (specificQueryIndex < -1 || specificQueryIndex >= queryCount
+                || (specificQueryIndex >= 0 && topHighDemandQueries > 0)) {
+            throw new IllegalArgumentException("Invalid or conflicting query index.");
         }
         Files.createDirectories(output);
 
@@ -190,17 +202,22 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
             }
             ProcurementParams persistent =
                     TRBSVUSingleSampleCardinalityDiagnostic.persistentCarrierRates(current,
-                            paired.procurement() ^ 0x5DEECE66DL, 0.7, 1.3);
+                            paired.procurement() ^ 0x5DEECE66DL, 0.7, 1.3,
+                            1.0 - localRateHalfwidth, 1.0 + localRateHalfwidth);
             ProcurementParams candidate =
                     TRBSVUSingleSampleCardinalityDiagnostic.scaleMqc(persistent, mqcScale);
             candidate = scaleSpot(candidate, spotScale);
 
             if (oracleSamples == 0) {
                 runMarket(rows, "CURRENT", replication, parameters, demand, current, bandwidth,
-                        0, robustness, robustMethods, topHighDemandQueries, laneCount, settings,
+                        0, robustness, robustMethods, topHighDemandQueries, specificQueryIndex,
+                        laneCount, settings,
                         output.resolve("method_probe.tsv"));
             }
             String marketName = String.format(Locale.ROOT, "PERSISTENT_WIDE_MQC_%.2f", mqcScale);
+            if (localRateHalfwidth != 0.1) {
+                marketName += String.format(Locale.ROOT, "_LOCALRATE_%.2f", localRateHalfwidth);
+            }
             if (fixedDesignIndex > 0) marketName += "_FIXED_DESIGN_" + fixedDesignIndex;
             if (heterogeneousSurge) marketName += "_HETEROGENEOUS_SURGE";
             if (regionalGroups > 1) {
@@ -217,7 +234,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
             runMarket(rows, marketName,
                     replication,
                     parameters, demand, candidate, bandwidth, oracleSamples, robustness,
-                    robustMethods, topHighDemandQueries, laneCount, settings,
+                    robustMethods, topHighDemandQueries, specificQueryIndex, laneCount, settings,
                     output.resolve("method_probe.tsv"));
             Files.write(output.resolve("method_probe.tsv"), rows, StandardCharsets.UTF_8);
         }
@@ -242,6 +259,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                                   double robustness,
                                   String robustMethods,
                                   int topHighDemandQueries,
+                                  int specificQueryIndex,
                                   int laneCount,
                                   Settings settings,
                                   Path checkpointFile) throws Exception {
@@ -254,8 +272,8 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                 TRBSVUScenarioWeights.equal(demand.history), first,
                 Method.NOMINAL, 0.0, settings);
 
-        List<Integer> queryIndices = selectedQueryIndices(parameters, demand,
-                topHighDemandQueries);
+        List<Integer> queryIndices = specificQueryIndex >= 0 ? List.of(specificQueryIndex)
+                : selectedQueryIndices(parameters, demand, topHighDemandQueries);
         for (int query : queryIndices) {
             ConditionalQuery conditional = demand.queries.get(query);
             List<Sample> evaluation = conditional.oos.subList(oracleSamples,
