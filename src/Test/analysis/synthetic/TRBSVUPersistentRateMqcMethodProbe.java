@@ -39,7 +39,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
     private TRBSVUPersistentRateMqcMethodProbe() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1 || args.length > 30) {
+        if (args.length < 1 || args.length > 33) {
             throw new IllegalArgumentException(
                     "Usage: <output-directory> [replications] [queries] [mqc-scale]"
                             + " [volatility] [context-scale] [bandwidth] [spot-scale]"
@@ -55,7 +55,10 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                             + " [home-group-coverage; <=0 disables] [lanes]"
                             + " [cv-slope; 0 disables] [cv-driver: PROMOTION|TOTAL]"
                             + " [local-rate-halfwidth; default 0.1]"
-                            + " [query-index; -1 means all]");
+                            + " [query-index; -1 means all]"
+                            + " [conditional-W1-radius; <=0 disables]"
+                            + " [unconditional-chi2-lambda; <=0 disables]"
+                            + " [unconditional-W1-radius; <=0 disables]");
         }
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
         int replications = args.length >= 2 ? Integer.parseInt(args[1]) : 3;
@@ -109,6 +112,9 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
         String cvDriver = args.length >= 28 ? args[27].toUpperCase(Locale.ROOT) : "PROMOTION";
         double localRateHalfwidth = args.length >= 29 ? Double.parseDouble(args[28]) : 0.1;
         int specificQueryIndex = args.length >= 30 ? Integer.parseInt(args[29]) : -1;
+        double conditionalW1 = args.length >= 31 ? Double.parseDouble(args[30]) : 0.0;
+        double unconditionalChi2 = args.length >= 32 ? Double.parseDouble(args[31]) : 0.0;
+        double unconditionalW1 = args.length >= 33 ? Double.parseDouble(args[32]) : 0.0;
         if (!(localRateHalfwidth >= 0.0 && localRateHalfwidth < 1.0)
                 || !Double.isFinite(localRateHalfwidth)) {
             throw new IllegalArgumentException("Local rate halfwidth must lie in [0,1).");
@@ -146,7 +152,9 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
         rows.add("market\treplication\tquery\tmethod\tstatus\tcertified\tobjective\tgap"
                 + "\tsolve_sec\tess\tselected_count\tselected\tnominal_total"
                 + "\toos_mean\toos_sd\toos_q95\toos_cvar95\toos_max\tspot_share"
-                + "\tmqc_penalty");
+                + "\tmqc_penalty\ttraining_weighted_mean\ttraining_weighted_sd"
+                + "\tchi_no_lift_limit\ttraining_robust_premium"
+                + "\toos_transport_cost\toos_spot_cost\toos_mqc_shortfall");
 
         SplittableRandom seeds = new SplittableRandom(20260917L);
         TRBSVUSyntheticCase.Seeds fixedDesign = fixedDesignIndex == 0
@@ -210,7 +218,8 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
 
             if (oracleSamples == 0) {
                 runMarket(rows, "CURRENT", replication, parameters, demand, current, bandwidth,
-                        0, robustness, robustMethods, topHighDemandQueries, specificQueryIndex,
+                        0, robustness, robustMethods, conditionalW1, unconditionalChi2,
+                        unconditionalW1, topHighDemandQueries, specificQueryIndex,
                         laneCount, settings,
                         output.resolve("method_probe.tsv"));
             }
@@ -234,7 +243,8 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
             runMarket(rows, marketName,
                     replication,
                     parameters, demand, candidate, bandwidth, oracleSamples, robustness,
-                    robustMethods, topHighDemandQueries, specificQueryIndex, laneCount, settings,
+                    robustMethods, conditionalW1, unconditionalChi2, unconditionalW1,
+                    topHighDemandQueries, specificQueryIndex, laneCount, settings,
                     output.resolve("method_probe.tsv"));
             Files.write(output.resolve("method_probe.tsv"), rows, StandardCharsets.UTF_8);
         }
@@ -258,6 +268,9 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                                   int oracleSamples,
                                   double robustness,
                                   String robustMethods,
+                                  double conditionalW1,
+                                  double unconditionalChi2,
+                                  double unconditionalW1,
                                   int topHighDemandQueries,
                                   int specificQueryIndex,
                                   int laneCount,
@@ -271,6 +284,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
         Solution saa = solve(market, lanes,
                 TRBSVUScenarioWeights.equal(demand.history), first,
                 Method.NOMINAL, 0.0, settings);
+        List<Sample> unconditional = TRBSVUScenarioWeights.equal(demand.history);
 
         List<Integer> queryIndices = specificQueryIndex >= 0 ? List.of(specificQueryIndex)
                 : selectedQueryIndices(parameters, demand, topHighDemandQueries);
@@ -279,8 +293,10 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
             List<Sample> evaluation = conditional.oos.subList(oracleSamples,
                     conditional.oos.size());
             write(rows, marketName, replication, query, "D", d, 1.0,
+                    TRBSVUScenarioWeights.arithmeticMean(demand.history),
                     parameters, conditional.context, evaluation, market);
             write(rows, marketName, replication, query, "SAA", saa, demand.history.size(),
+                    unconditional,
                     parameters, conditional.context, evaluation, market);
             List<Sample> contextual = TRBSVUScenarioWeights.kernel(demand.history,
                     conditional.context, TRBSVUScenarioWeights.Kernel.EXPONENTIAL, bandwidth);
@@ -288,6 +304,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                     Method.NOMINAL, 0.0, settings);
             write(rows, marketName, replication, query, "CSAA", csaa,
                     TRBSVUExperiment1Runner.ess(contextual),
+                    contextual,
                     parameters, conditional.context, evaluation, market);
             Files.write(checkpointFile, rows, StandardCharsets.UTF_8);
             if (robustness > 0.0) {
@@ -297,6 +314,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                                 Method.RCSAA, robustness, settings);
                         write(rows, marketName, replication, query, "RCSAA", rcsaa,
                                 TRBSVUExperiment1Runner.ess(contextual),
+                                contextual,
                                 parameters, conditional.context, evaluation, market);
                         Files.write(checkpointFile, rows, StandardCharsets.UTF_8);
                     } catch (IllegalStateException failure) {
@@ -311,6 +329,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                                 Method.CHI_SQUARED, robustness, settings);
                         write(rows, marketName, replication, query, "C-CHI2", chiSquared,
                                 TRBSVUExperiment1Runner.ess(contextual),
+                                contextual,
                                 parameters, conditional.context, evaluation, market);
                         Files.write(checkpointFile, rows, StandardCharsets.UTF_8);
                     } catch (IllegalStateException failure) {
@@ -320,13 +339,56 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                     }
                 }
             }
+            if (conditionalW1 > 0.0) {
+                try {
+                    Solution wasserstein = solve(market, lanes, contextual, conditional,
+                            Method.WASSERSTEIN, conditionalW1, settings);
+                    write(rows, marketName, replication, query, "C-W1", wasserstein,
+                            TRBSVUExperiment1Runner.ess(contextual), contextual,
+                            parameters, conditional.context, evaluation, market);
+                } catch (IllegalStateException failure) {
+                    System.err.printf(Locale.ROOT,
+                            "SKIP_UNCERTIFIED method=C-W1 replication=%d query=%d reason=%s%n",
+                            replication, query, failure.getMessage());
+                }
+                Files.write(checkpointFile, rows, StandardCharsets.UTF_8);
+            }
+            if (unconditionalChi2 > 0.0) {
+                try {
+                    Solution robustSaa = solve(market, lanes, unconditional, conditional,
+                            Method.CHI_SQUARED, unconditionalChi2, settings);
+                    write(rows, marketName, replication, query, "U-CHI2", robustSaa,
+                            unconditional.size(), unconditional,
+                            parameters, conditional.context, evaluation, market);
+                } catch (IllegalStateException failure) {
+                    System.err.printf(Locale.ROOT,
+                            "SKIP_UNCERTIFIED method=U-CHI2 replication=%d query=%d reason=%s%n",
+                            replication, query, failure.getMessage());
+                }
+                Files.write(checkpointFile, rows, StandardCharsets.UTF_8);
+            }
+            if (unconditionalW1 > 0.0) {
+                try {
+                    Solution robustSaa = solve(market, lanes, unconditional, conditional,
+                            Method.WASSERSTEIN, unconditionalW1, settings);
+                    write(rows, marketName, replication, query, "U-W1", robustSaa,
+                            unconditional.size(), unconditional,
+                            parameters, conditional.context, evaluation, market);
+                } catch (IllegalStateException failure) {
+                    System.err.printf(Locale.ROOT,
+                            "SKIP_UNCERTIFIED method=U-W1 replication=%d query=%d reason=%s%n",
+                            replication, query, failure.getMessage());
+                }
+                Files.write(checkpointFile, rows, StandardCharsets.UTF_8);
+            }
             if (oracleSamples > 0) {
                 List<Sample> oracleTraining = TRBSVUScenarioWeights.equal(
                         conditional.oos.subList(0, oracleSamples));
                 Solution oracle = solve(market, lanes, oracleTraining, conditional,
                         Method.NOMINAL, 0.0, settings);
                 write(rows, marketName, replication, query, "ORACLE", oracle,
-                        oracleSamples, parameters, conditional.context, evaluation, market);
+                        oracleSamples, oracleTraining,
+                        parameters, conditional.context, evaluation, market);
             }
             Files.write(checkpointFile, rows, StandardCharsets.UTF_8);
         }
@@ -365,20 +427,38 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
 
     private static void write(List<String> rows, String marketName, int replication,
                               int query, String method, Solution solution, double ess,
+                              List<Sample> training,
                               Parameters parameters, CovariateVector context,
                               List<Sample> evaluation,
                               ProcurementParams market) throws Exception {
         Oos oos = TRBSVUSolveMethods.evaluate(market, solution.y, evaluation);
+        double trainingMean = 0.0;
+        double trainingSecondMoment = 0.0;
+        double trainingMinimum = Double.POSITIVE_INFINITY;
+        for (Sample sample : training) {
+            double cost = TRBSVUSolveMethods.realizedCost(market, solution.y, sample.demand());
+            trainingMean += sample.weight * cost;
+            trainingSecondMoment += sample.weight * cost * cost;
+            trainingMinimum = Math.min(trainingMinimum, cost);
+        }
+        double trainingSd = Math.sqrt(Math.max(0.0,
+                trainingSecondMoment - trainingMean * trainingMean));
+        // Below this lambda, the chi-squared upper-envelope minimizer is t_s = C_s.
+        double noLiftLimit = trainingMean > trainingMinimum && trainingSd > 0.0
+                ? trainingSd / (trainingMean - trainingMinimum) : Double.POSITIVE_INFINITY;
         double nominalTotal = 0.0;
         for (double value : parameters.nominalDemand(context)) nominalTotal += value;
         rows.add(String.format(Locale.ROOT,
                 "%s\t%d\t%d\t%s\t%s\t%s\t%.10f\t%.10g\t%.6f\t%.10f\t%d\t%s"
-                        + "\t%.10f\t%.10f\t%.10f\t%.10f\t%.10f\t%.10f\t%.10f\t%.10f",
+                        + "\t%.10f\t%.10f\t%.10f\t%.10f\t%.10f\t%.10f\t%.10f\t%.10f"
+                        + "\t%.10f\t%.10f\t%.10f\t%.10f\t%.10f\t%.10f\t%.10f",
                 marketName, replication, query, method, solution.solverStatus,
                 solution.certifiedOptimal, solution.objValue, solution.relativeGap,
                 solution.solveTimeSec, ess, selectedCount(solution.y), selected(solution.y),
                 nominalTotal, oos.mean(), oos.standardDeviation(), oos.q95(), oos.cvar95(),
-                oos.maximum(), oos.spotShare(), oos.meanPenalty()));
+                oos.maximum(), oos.spotShare(), oos.meanPenalty(), trainingMean,
+                trainingSd, noLiftLimit, solution.objValue - trainingMean, oos.meanTransportCost(),
+                oos.meanSpotCost(), oos.meanMqcShortfallQuantity()));
     }
 
     private static int selectedCount(double[] y) {
