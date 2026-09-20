@@ -39,7 +39,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
     private TRBSVUPersistentRateMqcMethodProbe() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1 || args.length > 33) {
+        if (args.length < 1 || args.length > 34) {
             throw new IllegalArgumentException(
                     "Usage: <output-directory> [replications] [queries] [mqc-scale]"
                             + " [volatility] [context-scale] [bandwidth] [spot-scale]"
@@ -58,7 +58,8 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                             + " [query-index; -1 means all]"
                             + " [conditional-W1-radius; <=0 disables]"
                             + " [unconditional-chi2-lambda; <=0 disables]"
-                            + " [unconditional-W1-radius; <=0 disables]");
+                            + " [unconditional-W1-radius; <=0 disables]"
+                            + " [context-shift; 0 means unchanged]");
         }
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
         int replications = args.length >= 2 ? Integer.parseInt(args[1]) : 3;
@@ -115,6 +116,13 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
         double conditionalW1 = args.length >= 31 ? Double.parseDouble(args[30]) : 0.0;
         double unconditionalChi2 = args.length >= 32 ? Double.parseDouble(args[31]) : 0.0;
         double unconditionalW1 = args.length >= 33 ? Double.parseDouble(args[32]) : 0.0;
+        double contextShift = args.length >= 34 ? Double.parseDouble(args[33]) : 0.0;
+        if (!(contextShift >= 0.0 && contextShift < 1.0)
+                || (contextShift > 0.0 && cvSlope > 0.0)
+                || (contextShift > 0.0 && contextDistribution != ContextDistribution.UNIFORM)) {
+            throw new IllegalArgumentException(
+                    "Context shift requires uniform contexts and context-independent CV.");
+        }
         if (!(localRateHalfwidth >= 0.0 && localRateHalfwidth < 1.0)
                 || !Double.isFinite(localRateHalfwidth)) {
             throw new IllegalArgumentException("Local rate halfwidth must lie in [0,1).");
@@ -197,6 +205,8 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                         paired.contexts(), paired.historicalNoise(), paired.oosNoise(),
                         contextDistribution, surgeProbability, surgeMultiplier);
             }
+            demand = TRBSVUSyntheticDemandGenerator.shiftLognormalContexts(demand,
+                    contextShift);
             ProcurementParams current;
             if (homeGroupCoverage > 0.0) {
                 int[] laneGroup = TRBSVUSyntheticDemandGenerator.balancedRegionalGroups(
@@ -228,6 +238,9 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                 marketName += String.format(Locale.ROOT, "_LOCALRATE_%.2f", localRateHalfwidth);
             }
             if (fixedDesignIndex > 0) marketName += "_FIXED_DESIGN_" + fixedDesignIndex;
+            if (contextShift > 0.0) {
+                marketName += String.format(Locale.ROOT, "_CONTEXT_SHIFT_%.2f", contextShift);
+            }
             if (heterogeneousSurge) marketName += "_HETEROGENEOUS_SURGE";
             if (regionalGroups > 1) {
                 marketName += String.format(Locale.ROOT, "_REGIONAL_K%d_TAU%.2f",

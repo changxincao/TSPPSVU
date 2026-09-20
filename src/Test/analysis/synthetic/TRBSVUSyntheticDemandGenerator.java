@@ -202,6 +202,57 @@ public final class TRBSVUSyntheticDemandGenerator {
         }
     }
 
+    /**
+     * Diagnostic covariate shift for the context-independent, multiplicative
+     * lognormal DGP: history X is uniform on [0,1-shift], while query X is
+     * uniform on [shift,1]. The same latent demand innovations are retained.
+     * Do not use when the innovation distribution itself depends on context.
+     */
+    static MultiQueryReplication shiftLognormalContexts(MultiQueryReplication source,
+                                                        double shift) {
+        if (source == null || !(shift >= 0.0 && shift < 1.0)) {
+            throw new IllegalArgumentException("Context shift must lie in [0,1).");
+        }
+        if (shift == 0.0) return source;
+        List<Sample> history = new ArrayList<>(source.history.size());
+        for (Sample sample : source.history) {
+            history.add(rescaleLognormalSample(source.parameters, sample,
+                    shiftedContext(sample.theta, 0.0, 1.0 - shift)));
+        }
+        List<ConditionalQuery> queries = new ArrayList<>(source.queries.size());
+        for (ConditionalQuery query : source.queries) {
+            CovariateVector context = shiftedContext(query.context, shift, 1.0 - shift);
+            List<Sample> oos = new ArrayList<>(query.oos.size());
+            for (Sample sample : query.oos) {
+                oos.add(rescaleLognormalSample(source.parameters, sample, context));
+            }
+            queries.add(new ConditionalQuery(context, oos));
+        }
+        return new MultiQueryReplication(source.parameters, history, queries);
+    }
+
+    private static CovariateVector shiftedContext(CovariateVector source,
+                                                  double offset, double scale) {
+        double[] values = source.values().clone();
+        for (int k = 0; k < values.length; k++) values[k] = offset + scale * values[k];
+        return new CovariateVector(values);
+    }
+
+    private static Sample rescaleLognormalSample(Parameters parameters, Sample source,
+                                                CovariateVector context) {
+        double[] oldMean = parameters.nominalDemand(source.theta);
+        double[] newMean = parameters.nominalDemand(context);
+        double[] demand = source.demand().clone();
+        for (int j = 0; j < demand.length; j++) {
+            demand[j] *= newMean[j] / oldMean[j];
+        }
+        PeriodData old = source.period;
+        PeriodData period = new PeriodData(old.tIndex, old.startDate, old.endDate,
+                demand, old.holidayCount, old.avgFreightIndex,
+                old.avgConsumptionIndex, old.avgWEIIndex);
+        return new Sample(source.id, period, context.copy(), source.weight);
+    }
+
     public static Parameters sampleParameters(int laneCount, int historicalPeriods, long seed) {
         return sampleParameters(laneCount, historicalPeriods, seed, 1.0);
     }

@@ -37,6 +37,7 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
         checkContextDistributions(p, oosCount);
         checkRegionalFactorPairing(p, oosCount);
         checkPromotionCvPairing(p, oosCount);
+        checkShiftedLognormalContexts(p);
         Replication normal = generate(p, Distribution.NORMAL, Volatility.LOW, oosCount);
         Replication repeat = generate(p, Distribution.NORMAL, Volatility.LOW, oosCount);
         Replication lognormal = generate(p, Distribution.LOGNORMAL, Volatility.HIGH, oosCount);
@@ -113,6 +114,45 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
         require(context.length == 4, label + " dimension changed.");
         for (double value : context)
             require(value >= 0.0 && value < 1.0, label + " left [0,1). ");
+    }
+
+    private static void checkShiftedLognormalContexts(Parameters parameters) {
+        MultiQueryReplication original =
+                TRBSVUSyntheticDemandGenerator.generateMultiQueryWithRegionalFactors(
+                        parameters, Distribution.LOGNORMAL, Volatility.MEDIUM,
+                        2, 10, 41L, 43L, 47L, ContextDistribution.UNIFORM,
+                        5, 0.5);
+        require(TRBSVUSyntheticDemandGenerator.shiftLognormalContexts(original, 0.0)
+                        == original, "Zero context shift changed the paired baseline.");
+        MultiQueryReplication shifted =
+                TRBSVUSyntheticDemandGenerator.shiftLognormalContexts(original, 0.4);
+        for (int t = 0; t < original.history.size(); t++) {
+            checkShiftedSample(parameters, original.history.get(t),
+                    shifted.history.get(t), 0.0, 0.6);
+        }
+        for (int q = 0; q < original.queries.size(); q++) {
+            for (int s = 0; s < original.queries.get(q).oos.size(); s++) {
+                checkShiftedSample(parameters, original.queries.get(q).oos.get(s),
+                        shifted.queries.get(q).oos.get(s), 0.4, 0.6);
+            }
+        }
+    }
+
+    private static void checkShiftedSample(Parameters parameters, Sample original,
+                                           Sample shifted, double offset, double scale) {
+        double[] oldMean = parameters.nominalDemand(original.theta);
+        double[] newMean = parameters.nominalDemand(shifted.theta);
+        for (int k = 0; k < 4; k++) {
+            require(Math.abs(shifted.theta.values()[k]
+                            - (offset + scale * original.theta.values()[k])) < 1e-12,
+                    "Context shift changed the latent draw.");
+        }
+        for (int j = 0; j < oldMean.length; j++) {
+            double expected = original.demand()[j] * newMean[j] / oldMean[j];
+            require(Math.abs(shifted.demand()[j] - expected)
+                            <= 1e-10 * Math.max(1.0, expected),
+                    "Context shift changed the conditional lognormal innovation.");
+        }
     }
 
     private static void checkAlternativeStructures(int h) {
