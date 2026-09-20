@@ -126,14 +126,32 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
                         == original, "Zero context shift changed the paired baseline.");
         MultiQueryReplication shifted =
                 TRBSVUSyntheticDemandGenerator.shiftLognormalContexts(original, 0.4);
+        MultiQueryReplication highHigh =
+                TRBSVUSyntheticDemandGenerator.rewindowLognormalContexts(
+                        original, 0.4, true, true);
+        MultiQueryReplication lowLow =
+                TRBSVUSyntheticDemandGenerator.rewindowLognormalContexts(
+                        original, 0.4, false, false);
         for (int t = 0; t < original.history.size(); t++) {
             checkShiftedSample(parameters, original.history.get(t),
                     shifted.history.get(t), 0.0, 0.6);
+            checkShiftedSample(parameters, original.history.get(t),
+                    highHigh.history.get(t), 0.4, 0.6);
+            checkShiftedSample(parameters, original.history.get(t),
+                    lowLow.history.get(t), 0.0, 0.6);
         }
         for (int q = 0; q < original.queries.size(); q++) {
             for (int s = 0; s < original.queries.get(q).oos.size(); s++) {
                 checkShiftedSample(parameters, original.queries.get(q).oos.get(s),
                         shifted.queries.get(q).oos.get(s), 0.4, 0.6);
+                checkShiftedSample(parameters, original.queries.get(q).oos.get(s),
+                        highHigh.queries.get(q).oos.get(s), 0.4, 0.6);
+                checkShiftedSample(parameters, original.queries.get(q).oos.get(s),
+                        lowLow.queries.get(q).oos.get(s), 0.0, 0.6);
+                double[] lowHighDemand = shifted.queries.get(q).oos.get(s).demand();
+                double[] highHighDemand = highHigh.queries.get(q).oos.get(s).demand();
+                require(java.util.Arrays.equals(lowHighDemand, highHighDemand),
+                        "Low/high and high/high must use identical paired OOS draws.");
             }
         }
     }

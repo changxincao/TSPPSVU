@@ -210,6 +210,14 @@ public final class TRBSVUSyntheticDemandGenerator {
      */
     static MultiQueryReplication shiftLognormalContexts(MultiQueryReplication source,
                                                         double shift) {
+        return rewindowLognormalContexts(source, shift, false, true);
+    }
+
+    /** Paired low/high context windows; the underlying lognormal shocks are unchanged. */
+    static MultiQueryReplication rewindowLognormalContexts(MultiQueryReplication source,
+                                                            double shift,
+                                                            boolean highHistory,
+                                                            boolean highQueries) {
         if (source == null || !(shift >= 0.0 && shift < 1.0)) {
             throw new IllegalArgumentException("Context shift must lie in [0,1).");
         }
@@ -217,11 +225,12 @@ public final class TRBSVUSyntheticDemandGenerator {
         List<Sample> history = new ArrayList<>(source.history.size());
         for (Sample sample : source.history) {
             history.add(rescaleLognormalSample(source.parameters, sample,
-                    shiftedContext(sample.theta, 0.0, 1.0 - shift)));
+                    shiftedContext(sample.theta, highHistory ? shift : 0.0, 1.0 - shift)));
         }
         List<ConditionalQuery> queries = new ArrayList<>(source.queries.size());
         for (ConditionalQuery query : source.queries) {
-            CovariateVector context = shiftedContext(query.context, shift, 1.0 - shift);
+            CovariateVector context = shiftedContext(query.context,
+                    highQueries ? shift : 0.0, 1.0 - shift);
             List<Sample> oos = new ArrayList<>(query.oos.size());
             for (Sample sample : query.oos) {
                 oos.add(rescaleLognormalSample(source.parameters, sample, context));

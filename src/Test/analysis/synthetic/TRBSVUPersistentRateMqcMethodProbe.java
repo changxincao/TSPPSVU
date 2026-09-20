@@ -39,7 +39,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
     private TRBSVUPersistentRateMqcMethodProbe() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1 || args.length > 34) {
+        if (args.length < 1 || args.length > 36) {
             throw new IllegalArgumentException(
                     "Usage: <output-directory> [replications] [queries] [mqc-scale]"
                             + " [volatility] [context-scale] [bandwidth] [spot-scale]"
@@ -59,7 +59,9 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                             + " [conditional-W1-radius; <=0 disables]"
                             + " [unconditional-chi2-lambda; <=0 disables]"
                             + " [unconditional-W1-radius; <=0 disables]"
-                            + " [context-shift; 0 means unchanged]");
+                            + " [context-shift; 0 means unchanged]"
+                            + " [context-window: LOW_HIGH|LOW_LOW|HIGH_HIGH]"
+                            + " [recalibrate-high-market: true|false]");
         }
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
         int replications = args.length >= 2 ? Integer.parseInt(args[1]) : 3;
@@ -117,6 +119,14 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
         double unconditionalChi2 = args.length >= 32 ? Double.parseDouble(args[31]) : 0.0;
         double unconditionalW1 = args.length >= 33 ? Double.parseDouble(args[32]) : 0.0;
         double contextShift = args.length >= 34 ? Double.parseDouble(args[33]) : 0.0;
+        String contextWindow = args.length >= 35
+                ? args[34].trim().toUpperCase(Locale.ROOT) : "LOW_HIGH";
+        boolean recalibrateHighMarket = args.length >= 36 && Boolean.parseBoolean(args[35]);
+        if (!List.of("LOW_HIGH", "LOW_LOW", "HIGH_HIGH").contains(contextWindow)
+                || (recalibrateHighMarket
+                    && (!(contextShift > 0.0) || !"HIGH_HIGH".equals(contextWindow)))) {
+            throw new IllegalArgumentException("Invalid context window or market calibration.");
+        }
         if (!(contextShift >= 0.0 && contextShift < 1.0)
                 || (contextShift > 0.0 && cvSlope > 0.0)
                 || (contextShift > 0.0 && contextDistribution != ContextDistribution.UNIFORM)) {
@@ -205,18 +215,30 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                         paired.contexts(), paired.historicalNoise(), paired.oosNoise(),
                         contextDistribution, surgeProbability, surgeMultiplier);
             }
-            demand = TRBSVUSyntheticDemandGenerator.shiftLognormalContexts(demand,
-                    contextShift);
+            demand = TRBSVUSyntheticDemandGenerator.rewindowLognormalContexts(demand,
+                    contextShift, "HIGH_HIGH".equals(contextWindow),
+                    !"LOW_LOW".equals(contextWindow));
+            double[] procurementDemand = parameters.typicalDemand();
+            if (recalibrateHighMarket) {
+                double[] market = parameters.market();
+                double[] trend = parameters.trend();
+                double[] promotion = parameters.promotion();
+                double[] attention = parameters.attention();
+                for (int j = 0; j < procurementDemand.length; j++) {
+                    procurementDemand[j] += 0.5 * contextShift
+                            * (market[j] + trend[j] + promotion[j] + attention[j]);
+                }
+            }
             ProcurementParams current;
             if (homeGroupCoverage > 0.0) {
                 int[] laneGroup = TRBSVUSyntheticDemandGenerator.balancedRegionalGroups(
                         laneCount, regionalGroups, paired.contexts());
                 current = TRBSVUProcurementGenerator.generateWithHomeGroupCoverage(
-                        carriers, parameters.typicalDemand(), paired.procurement(),
+                        carriers, procurementDemand, paired.procurement(),
                         laneGroup, regionalGroups, homeGroupCoverage);
             } else {
                 current = TRBSVUProcurementGenerator.generate(
-                        carriers, parameters.typicalDemand(), paired.procurement());
+                        carriers, procurementDemand, paired.procurement());
             }
             ProcurementParams persistent =
                     TRBSVUSingleSampleCardinalityDiagnostic.persistentCarrierRates(current,
@@ -240,6 +262,8 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
             if (fixedDesignIndex > 0) marketName += "_FIXED_DESIGN_" + fixedDesignIndex;
             if (contextShift > 0.0) {
                 marketName += String.format(Locale.ROOT, "_CONTEXT_SHIFT_%.2f", contextShift);
+                if (!"LOW_HIGH".equals(contextWindow)) marketName += "_" + contextWindow;
+                if (recalibrateHighMarket) marketName += "_RECALIBRATED";
             }
             if (heterogeneousSurge) marketName += "_HETEROGENEOUS_SURGE";
             if (regionalGroups > 1) {
