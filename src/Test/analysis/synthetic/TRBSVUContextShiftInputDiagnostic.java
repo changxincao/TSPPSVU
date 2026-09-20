@@ -18,8 +18,10 @@ public final class TRBSVUContextShiftInputDiagnostic {
     private TRBSVUContextShiftInputDiagnostic() { }
 
     public static void main(String[] args) {
-        if (args.length != 1) throw new IllegalArgumentException("Usage: <context-shift>");
+        if (args.length < 1 || args.length > 2)
+            throw new IllegalArgumentException("Usage: <context-shift> [bandwidth]");
         double shift = Double.parseDouble(args[0]);
+        double bandwidth = args.length == 2 ? Double.parseDouble(args[1]) : 0.5;
         SplittableRandom seeds = new SplittableRandom(20260917L);
         long parameterSeed = seeds.nextLong();
         seeds.nextLong(); // Procurement seed, not used for demand-only statistics.
@@ -49,16 +51,18 @@ public final class TRBSVUContextShiftInputDiagnostic {
             var query = demand.queries.get(q);
             List<Sample> evaluation = query.oos.subList(1, query.oos.size());
             List<Sample> weighted = TRBSVUScenarioWeights.kernel(demand.history,
-                    query.context, TRBSVUScenarioWeights.Kernel.EXPONENTIAL, 0.5);
+                    query.context, TRBSVUScenarioWeights.Kernel.EXPONENTIAL, bandwidth);
             double weightedTrainingTotal = 0.0;
             for (Sample sample : weighted)
                 weightedTrainingTotal += sample.weight * total(sample.demand());
             long aboveHistoryMax = evaluation.stream()
                     .filter(sample -> total(sample.demand()) > historyMax).count();
             System.out.printf(Locale.ROOT,
-                    "query=%d nominal=%.4f weighted_training=%.4f oos_mean=%.4f"
+                    "query=%d bandwidth=%.4f ess=%.4f nominal=%.4f"
+                            + " weighted_training=%.4f oos_mean=%.4f"
                             + " oos_max=%.4f fraction_above_history_max=%.3f%n",
-                    q, total(parameters.nominalDemand(query.context)),
+                    q, bandwidth, TRBSVUExperiment1Runner.ess(weighted),
+                    total(parameters.nominalDemand(query.context)),
                     weightedTrainingTotal, meanTotal(evaluation), maxTotal(evaluation),
                     aboveHistoryMax / (double) evaluation.size());
         }
