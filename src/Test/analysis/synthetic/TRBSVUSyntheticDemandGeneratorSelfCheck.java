@@ -43,11 +43,31 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
         Replication lognormal = generate(p, Distribution.LOGNORMAL, Volatility.HIGH, oosCount);
         MultiQueryReplication multi = TRBSVUSyntheticDemandGenerator.generateMultiQuery(
                 p, Distribution.NORMAL, Volatility.LOW, 3, oosCount, 23L, 29L, 31L);
+        MultiQueryReplication trend =
+                TRBSVUSyntheticDemandGenerator.generateMultiQueryWithLinearTrend(
+                        p, Distribution.NORMAL, Volatility.LOW, 3, oosCount,
+                        23L, 29L, 31L, ContextDistribution.UNIFORM);
 
         require(normal.history.size() == h && normal.oos.size() == oosCount,
                 "History/OOS sample count differs from the experiment protocol.");
         require(multi.history.size() == h && multi.queries.size() == 3,
                 "Multi-query sample count differs from the requested protocol.");
+        for (int t = 0; t < h; t++) {
+            double[] iid = multi.history.get(t).theta.values();
+            double[] linear = trend.history.get(t).theta.values();
+            require(linear[1] == (double) t / h,
+                    "Linear-trend history has the wrong time coordinate at " + t);
+            require(iid[0] == linear[0] && iid[2] == linear[2] && iid[3] == linear[3],
+                    "Linear-trend protocol changed a non-trend context coordinate at " + t);
+        }
+        for (int query = 0; query < trend.queries.size(); query++) {
+            double[] iid = multi.queries.get(query).context.values();
+            double[] linear = trend.queries.get(query).context.values();
+            require(linear[1] == 1.0,
+                    "Linear-trend query must use the next-period endpoint.");
+            require(iid[0] == linear[0] && iid[2] == linear[2] && iid[3] == linear[3],
+                    "Linear-trend protocol changed a non-trend query coordinate.");
+        }
         for (Sample sample : normal.history)
             checkUnitCube(sample.theta.values(), "Historical context");
         checkUnitCube(normal.testContext.values(), "Test context");

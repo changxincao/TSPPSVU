@@ -39,7 +39,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
     private TRBSVUPersistentRateMqcMethodProbe() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1 || args.length > 36) {
+        if (args.length < 1 || args.length > 37) {
             throw new IllegalArgumentException(
                     "Usage: <output-directory> [replications] [queries] [mqc-scale]"
                             + " [volatility] [context-scale] [bandwidth] [spot-scale]"
@@ -61,7 +61,8 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                             + " [unconditional-W1-radius; <=0 disables]"
                             + " [context-shift; 0 means unchanged]"
                             + " [context-window: LOW_HIGH|LOW_LOW|HIGH_HIGH]"
-                            + " [recalibrate-high-market: true|false]");
+                            + " [recalibrate-high-market: true|false]"
+                            + " [linear-trend: true|false]");
         }
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
         int replications = args.length >= 2 ? Integer.parseInt(args[1]) : 3;
@@ -122,6 +123,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
         String contextWindow = args.length >= 35
                 ? args[34].trim().toUpperCase(Locale.ROOT) : "LOW_HIGH";
         boolean recalibrateHighMarket = args.length >= 36 && Boolean.parseBoolean(args[35]);
+        boolean linearTrend = args.length >= 37 && Boolean.parseBoolean(args[36]);
         if (!List.of("LOW_HIGH", "LOW_LOW", "HIGH_HIGH").contains(contextWindow)
                 || (recalibrateHighMarket
                     && (!(contextShift > 0.0) || !"HIGH_HIGH".equals(contextWindow)))) {
@@ -150,6 +152,11 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
             throw new IllegalArgumentException(
                     "Rare-surge and regional-factor diagnostics cannot be enabled together.");
         }
+        if (linearTrend && (surgeProbability > 0.0 || regionalGroups > 1
+                || contextShift > 0.0)) {
+            throw new IllegalArgumentException(
+                    "Linear-trend pilot cannot be combined with other demand diagnostics.");
+        }
         if (homeGroupCoverage > 0.0 && regionalGroups <= 1) {
             throw new IllegalArgumentException(
                     "Home-group coverage requires regional demand groups.");
@@ -173,6 +180,14 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                 + "\tmqc_penalty\ttraining_weighted_mean\ttraining_weighted_sd"
                 + "\tchi_no_lift_limit\ttraining_robust_premium"
                 + "\toos_transport_cost\toos_spot_cost\toos_mqc_shortfall");
+        List<String> trendRows = new ArrayList<>();
+        trendRows.add("replication\tquery\tquery_trend\thistory_total_mean"
+                + "\thistory_total_max\tlast10_total_mean\tquery_nominal_total"
+                + "\toos_total_mean\toos_over_history_mean_ratio"
+                + "\toos_over_last10_mean_ratio\toos_above_history_mean_share"
+                + "\toos_above_history_max_share\ttrend_coefficient_min"
+                + "\ttrend_coefficient_mean\ttrend_coefficient_max"
+                + "\tnegative_trend_coefficient_count");
 
         SplittableRandom seeds = new SplittableRandom(20260917L);
         TRBSVUSyntheticCase.Seeds fixedDesign = fixedDesignIndex == 0
@@ -199,11 +214,15 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                         contextDistribution, regionalGroups, globalVarianceShare,
                         cvSlope, "TOTAL".equals(cvDriver));
             } else if (surgeProbability <= 0.0) {
-                demand = TRBSVUSyntheticDemandGenerator.generateMultiQuery(
-                        parameters, Distribution.LOGNORMAL, volatility, queryCount,
-                        OOS + oracleSamples,
-                        paired.contexts(), paired.historicalNoise(), paired.oosNoise(),
-                        contextDistribution);
+                demand = linearTrend
+                        ? TRBSVUSyntheticDemandGenerator.generateMultiQueryWithLinearTrend(
+                                parameters, Distribution.LOGNORMAL, volatility, queryCount,
+                                OOS + oracleSamples, paired.contexts(), paired.historicalNoise(),
+                                paired.oosNoise(), contextDistribution)
+                        : TRBSVUSyntheticDemandGenerator.generateMultiQuery(
+                                parameters, Distribution.LOGNORMAL, volatility, queryCount,
+                                OOS + oracleSamples, paired.contexts(), paired.historicalNoise(),
+                                paired.oosNoise(), contextDistribution);
             } else if (heterogeneousSurge) {
                 demand = TRBSVUSyntheticDemandGenerator.generateMultiQueryWithHeterogeneousRareSurge(
                         parameters, volatility, queryCount, OOS + oracleSamples,
@@ -218,6 +237,11 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
             demand = TRBSVUSyntheticDemandGenerator.rewindowLognormalContexts(demand,
                     contextShift, "HIGH_HIGH".equals(contextWindow),
                     !"LOW_LOW".equals(contextWindow));
+            if (linearTrend) {
+                appendTrendDiagnostics(trendRows, replication, parameters, demand);
+                Files.write(output.resolve("trend_diagnostics.tsv"), trendRows,
+                        StandardCharsets.UTF_8);
+            }
             double[] procurementDemand = parameters.typicalDemand();
             if (recalibrateHighMarket) {
                 double[] market = parameters.market();
@@ -248,7 +272,10 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                     TRBSVUSingleSampleCardinalityDiagnostic.scaleMqc(persistent, mqcScale);
             candidate = scaleSpot(candidate, spotScale);
 
-            if (oracleSamples == 0) {
+            // The legacy CURRENT market is intentionally saturated and is not part of the
+            // linear-trend mechanism check. Mixing it into the same console/TSV obscures
+            // the candidate-market cardinality diagnostic.
+            if (oracleSamples == 0 && !linearTrend) {
                 runMarket(rows, "CURRENT", replication, parameters, demand, current, bandwidth,
                         0, robustness, robustMethods, conditionalW1, unconditionalChi2,
                         unconditionalW1, topHighDemandQueries, specificQueryIndex,
@@ -285,6 +312,47 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                     output.resolve("method_probe.tsv"));
             Files.write(output.resolve("method_probe.tsv"), rows, StandardCharsets.UTF_8);
         }
+    }
+
+    private static void appendTrendDiagnostics(List<String> rows, int replication,
+                                               Parameters parameters,
+                                               MultiQueryReplication demand) {
+        double historyMean = demand.history.stream().mapToDouble(
+                sample -> total(sample.demand())).average().orElseThrow();
+        double historyMax = demand.history.stream().mapToDouble(
+                sample -> total(sample.demand())).max().orElseThrow();
+        int firstLast = Math.max(0, demand.history.size() - 10);
+        double lastMean = demand.history.subList(firstLast, demand.history.size()).stream()
+                .mapToDouble(sample -> total(sample.demand())).average().orElseThrow();
+        double[] coefficients = parameters.trend();
+        double coefficientMin = java.util.Arrays.stream(coefficients).min().orElseThrow();
+        double coefficientMean = java.util.Arrays.stream(coefficients).average().orElseThrow();
+        double coefficientMax = java.util.Arrays.stream(coefficients).max().orElseThrow();
+        long negative = java.util.Arrays.stream(coefficients).filter(value -> value < 0.0).count();
+        for (int query = 0; query < demand.queries.size(); query++) {
+            ConditionalQuery conditional = demand.queries.get(query);
+            double oosMean = conditional.oos.stream().mapToDouble(
+                    sample -> total(sample.demand())).average().orElseThrow();
+            long aboveMean = conditional.oos.stream().filter(
+                    sample -> total(sample.demand()) > historyMean).count();
+            long aboveMax = conditional.oos.stream().filter(
+                    sample -> total(sample.demand()) > historyMax).count();
+            rows.add(String.format(Locale.ROOT,
+                    "%d\t%d\t%.10f\t%.10f\t%.10f\t%.10f\t%.10f\t%.10f"
+                            + "\t%.10f\t%.10f\t%.10f\t%.10f\t%.10f\t%.10f\t%.10f\t%d",
+                    replication, query, conditional.context.values()[1], historyMean, historyMax,
+                    lastMean, nominalTotal(parameters, conditional.context), oosMean,
+                    oosMean / historyMean, oosMean / lastMean,
+                    (double) aboveMean / conditional.oos.size(),
+                    (double) aboveMax / conditional.oos.size(), coefficientMin,
+                    coefficientMean, coefficientMax, negative));
+        }
+    }
+
+    private static double total(double[] values) {
+        double result = 0.0;
+        for (double value : values) result += value;
+        return result;
     }
 
     private static TRBSVUSyntheticCase.Seeds designSeeds(int oneBasedIndex) {

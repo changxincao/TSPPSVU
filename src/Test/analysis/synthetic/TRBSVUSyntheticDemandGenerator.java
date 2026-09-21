@@ -583,6 +583,56 @@ public final class TRBSVUSyntheticDemandGenerator {
     }
 
     /**
+     * Diagnostic counterpart of {@link #generateMultiQuery} with a deterministic
+     * linear time trend: history uses t/H and every next-period query uses 1.
+     * The random generator still consumes all four context draws, so market,
+     * promotion and attention remain paired with the i.i.d.-context protocol.
+     */
+    public static MultiQueryReplication generateMultiQueryWithLinearTrend(
+            Parameters parameters, Distribution distribution, Volatility regime,
+            int queryCount, int oosCount, long contextSeed,
+            long historyNoiseSeed, long oosNoiseSeed,
+            ContextDistribution contextDistribution) {
+        if (parameters == null || distribution == null || regime == null
+                || contextDistribution == null || queryCount <= 0 || oosCount <= 0) {
+            throw new IllegalArgumentException(
+                    "Parameters, DGP cell, query count and OOS count are required.");
+        }
+        int h = parameters.historicalPeriods();
+        Random contextRandom = new Random(contextSeed);
+        Random historyRandom = new Random(historyNoiseSeed);
+        Random oosRandom = new Random(oosNoiseSeed);
+        Random historyCommonRandom = new Random(historyNoiseSeed ^ COMMON_NOISE_SALT);
+        Random oosCommonRandom = new Random(oosNoiseSeed ^ COMMON_NOISE_SALT);
+        double[] cv = parameters.volatilityParameters(regime);
+        List<Sample> history = new ArrayList<>(h);
+        for (int t = 0; t < h; t++) {
+            CovariateVector context = contextWithTrend(
+                    contextRandom, contextDistribution, (double) t / h);
+            double[] demand = drawDemand(parameters.nominalDemand(context), cv,
+                    parameters.commonLoading, distribution, historyRandom,
+                    historyCommonRandom, true);
+            history.add(sample(t, t, context, demand, 1.0 / h));
+        }
+
+        List<ConditionalQuery> queries = new ArrayList<>(queryCount);
+        for (int query = 0; query < queryCount; query++) {
+            CovariateVector queryContext = contextWithTrend(
+                    contextRandom, contextDistribution, 1.0);
+            double[] nominal = parameters.nominalDemand(queryContext);
+            List<Sample> oos = new ArrayList<>(oosCount);
+            for (int draw = 0; draw < oosCount; draw++) {
+                double[] demand = drawDemand(nominal, cv, parameters.commonLoading,
+                        distribution, oosRandom, oosCommonRandom, true);
+                oos.add(sample(query * oosCount + draw, h, queryContext.copy(), demand,
+                        1.0 / oosCount));
+            }
+            queries.add(new ConditionalQuery(queryContext, oos));
+        }
+        return new MultiQueryReplication(parameters, history, queries);
+    }
+
+    /**
      * Diagnostic hierarchy that preserves every lane's Gaussian marginal shock
      * while splitting its common component into global and regional factors.
      * A global-variance share of one exactly reproduces {@link #generateMultiQuery}.
@@ -869,6 +919,14 @@ public final class TRBSVUSyntheticDemandGenerator {
                 case BINARY -> uniform < 0.5 ? 0.0 : 1.0;
             };
         }
+        return new CovariateVector(values);
+    }
+
+    private static CovariateVector contextWithTrend(Random random,
+                                                     ContextDistribution distribution,
+                                                     double trend) {
+        double[] values = context(random, distribution).values();
+        values[1] = trend;
         return new CovariateVector(values);
     }
 
