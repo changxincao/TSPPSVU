@@ -207,6 +207,8 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                     laneCount, historySize, paired.demandParameters(), contextScale,
                     contextStructure,
                     contextStructure == ContextStructure.DENSE_INDEPENDENT_UNIFORM_POSITIVE
+                            || (oracleOnly && contextStructure
+                                    == ContextStructure.WIDE_RANDOM_POSITIVE_CENTERED)
                             ? BaseStructure.THREE_LEVEL_10_30_50_70
                             : BaseStructure.THREE_LEVEL_WIDE,
                     commonLoadingLower, commonLoadingUpper);
