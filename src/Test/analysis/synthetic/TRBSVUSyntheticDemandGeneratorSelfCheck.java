@@ -32,6 +32,7 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
         checkWideSameMeanPairing(h);
         checkThreeLevelWidePositive(h);
         checkThreeLevelIndependentEffects(h);
+        checkIndependentUniformPositive(h);
         checkParameters(p);
         checkAlternativeStructures(h);
         checkContextDistributions(p, oosCount);
@@ -401,6 +402,30 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
             }
         }
         for (int count : counts) require(count > 0, "An independent effect tier was never used.");
+    }
+
+    private static void checkIndependentUniformPositive(int h) {
+        Parameters p = TRBSVUSyntheticDemandGenerator.sampleParameters(
+                50, h, 59L, 1.8, ContextStructure.DENSE_INDEPENDENT_UNIFORM_POSITIVE,
+                BaseStructure.THREE_LEVEL_10_30_50_70);
+        int[] counts = new int[3];
+        double[][] coefficients = {p.market(), p.trend(), p.promotion(), p.attention()};
+        for (int j = 0; j < p.laneCount(); j++) {
+            double base = p.base()[j];
+            int tier = base < 30.0 ? 0 : base < 50.0 ? 1 : 2;
+            counts[tier]++;
+            require(base >= 10.0 && base < 70.0, "Independent-uniform base outside tiers.");
+            double sum = 0.0;
+            for (double[] coefficient : coefficients) {
+                require(coefficient[j] >= 0.0 && coefficient[j] < 1.8 * base,
+                        "Independent-uniform coefficient outside its declared range.");
+                sum += coefficient[j];
+            }
+            require(Math.abs(p.typicalDemand()[j] - (base + 0.5 * sum)) < 1e-9,
+                    "Independent-uniform procurement demand scale is wrong.");
+        }
+        require(counts[0] == 17 && counts[1] == 17 && counts[2] == 16,
+                "Independent-uniform base tiers are not balanced.");
     }
 
     private static Replication generate(Parameters p, Distribution family,

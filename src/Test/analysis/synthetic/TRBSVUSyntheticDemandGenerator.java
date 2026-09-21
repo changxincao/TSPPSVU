@@ -45,11 +45,12 @@ public final class TRBSVUSyntheticDemandGenerator {
         SQUARED_GAUSSIAN_POSITIVE_CENTERED,
         FOURTH_POWER_GAUSSIAN_POSITIVE_CENTERED,
         DOMINANT_POSITIVE_CENTERED,
-        TWO_ACTIVE, ONE_ACTIVE, SIGNED_CENTERED, GROUPED_CENTERED
+        TWO_ACTIVE, ONE_ACTIVE, SIGNED_CENTERED, GROUPED_CENTERED,
+        DENSE_INDEPENDENT_UNIFORM_POSITIVE
     }
 
     public enum BaseStructure {
-        UNIFORM_10_30, THREE_LEVEL_WIDE
+        UNIFORM_10_30, THREE_LEVEL_WIDE, THREE_LEVEL_10_30_50_70
     }
 
     public enum Volatility {
@@ -342,6 +343,10 @@ public final class TRBSVUSyntheticDemandGenerator {
     private static void restructure(double[] ratios, ContextStructure structure, Random random,
                                     int lane) {
         if (structure == ContextStructure.DENSE_PROPORTIONAL) return;
+        if (structure == ContextStructure.DENSE_INDEPENDENT_UNIFORM_POSITIVE) {
+            for (int k = 0; k < ratios.length; k++) ratios[k] = random.nextDouble();
+            return;
+        }
         if (structure == ContextStructure.DENSE_WIDE_POSITIVE) {
             ratios[0] = 0.1 + (0.8 / 0.3) * (ratios[0] - 0.3);
             ratios[1] = 0.1 + (0.8 / 0.2) * (ratios[1] - 0.2);
@@ -478,6 +483,8 @@ public final class TRBSVUSyntheticDemandGenerator {
 
     private static double base(BaseStructure structure, int level, double quantile) {
         if (structure == BaseStructure.UNIFORM_10_30) return 10.0 + 20.0 * quantile;
+        if (structure == BaseStructure.THREE_LEVEL_10_30_50_70)
+            return 10.0 + 20.0 * (level + quantile);
         return switch (level) {
             case 0 -> 5.0 + 10.0 * quantile;
             case 1 -> 25.0 + 25.0 * quantile;

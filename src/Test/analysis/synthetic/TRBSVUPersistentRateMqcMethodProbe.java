@@ -39,7 +39,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
     private TRBSVUPersistentRateMqcMethodProbe() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1 || args.length > 37) {
+        if (args.length < 1 || args.length > 38) {
             throw new IllegalArgumentException(
                     "Usage: <output-directory> [replications] [queries] [mqc-scale]"
                             + " [volatility] [context-scale] [bandwidth] [spot-scale]"
@@ -62,7 +62,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                             + " [context-shift; 0 means unchanged]"
                             + " [context-window: LOW_HIGH|LOW_LOW|HIGH_HIGH]"
                             + " [recalibrate-high-market: true|false]"
-                            + " [linear-trend: true|false]");
+                             + " [linear-trend: true|false] [oracle-only: true|false]");
         }
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
         int replications = args.length >= 2 ? Integer.parseInt(args[1]) : 3;
@@ -124,6 +124,9 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                 ? args[34].trim().toUpperCase(Locale.ROOT) : "LOW_HIGH";
         boolean recalibrateHighMarket = args.length >= 36 && Boolean.parseBoolean(args[35]);
         boolean linearTrend = args.length >= 37 && Boolean.parseBoolean(args[36]);
+        boolean oracleOnly = args.length >= 38 && Boolean.parseBoolean(args[37]);
+        if (oracleOnly && oracleSamples <= 0)
+            throw new IllegalArgumentException("Oracle-only mode requires oracle samples.");
         if (!List.of("LOW_HIGH", "LOW_LOW", "HIGH_HIGH").contains(contextWindow)
                 || (recalibrateHighMarket
                     && (!(contextShift > 0.0) || !"HIGH_HIGH".equals(contextWindow)))) {
@@ -203,7 +206,9 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
             Parameters parameters = TRBSVUSyntheticDemandGenerator.sampleParameters(
                     laneCount, historySize, paired.demandParameters(), contextScale,
                     contextStructure,
-                    BaseStructure.THREE_LEVEL_WIDE,
+                    contextStructure == ContextStructure.DENSE_INDEPENDENT_UNIFORM_POSITIVE
+                            ? BaseStructure.THREE_LEVEL_10_30_50_70
+                            : BaseStructure.THREE_LEVEL_WIDE,
                     commonLoadingLower, commonLoadingUpper);
             MultiQueryReplication demand;
             if (regionalGroups > 1) {
@@ -280,7 +285,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                         0, robustness, robustMethods, conditionalW1, unconditionalChi2,
                         unconditionalW1, topHighDemandQueries, specificQueryIndex,
                         laneCount, settings,
-                        output.resolve("method_probe.tsv"));
+                        output.resolve("method_probe.tsv"), oracleOnly);
             }
             String marketName = String.format(Locale.ROOT, "PERSISTENT_WIDE_MQC_%.2f", mqcScale);
             if (localRateHalfwidth != 0.1) {
@@ -309,7 +314,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                     parameters, demand, candidate, bandwidth, oracleSamples, robustness,
                     robustMethods, conditionalW1, unconditionalChi2, unconditionalW1,
                     topHighDemandQueries, specificQueryIndex, laneCount, settings,
-                    output.resolve("method_probe.tsv"));
+                    output.resolve("method_probe.tsv"), oracleOnly);
             Files.write(output.resolve("method_probe.tsv"), rows, StandardCharsets.UTF_8);
         }
     }
@@ -380,8 +385,32 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                                   int specificQueryIndex,
                                   int laneCount,
                                   Settings settings,
-                                  Path checkpointFile) throws Exception {
+                                  Path checkpointFile,
+                                  boolean oracleOnly) throws Exception {
         List<String> lanes = laneNames(laneCount);
+        if (oracleOnly) {
+            List<Sample> unconditional = TRBSVUScenarioWeights.equal(demand.history);
+            Solution saa = solve(market, lanes, unconditional, demand.queries.get(0),
+                    Method.NOMINAL, 0.0, settings);
+            for (int query : selectedQueryIndices(parameters, demand, topHighDemandQueries)) {
+                if (specificQueryIndex >= 0 && query != specificQueryIndex) continue;
+                ConditionalQuery conditional = demand.queries.get(query);
+                List<Sample> evaluation = conditional.oos.subList(oracleSamples,
+                        conditional.oos.size());
+                write(rows, marketName, replication, query, "SAA", saa,
+                        unconditional.size(), unconditional, parameters,
+                        conditional.context, evaluation, market);
+                List<Sample> oracleTraining = TRBSVUScenarioWeights.equal(
+                        conditional.oos.subList(0, oracleSamples));
+                Solution oracle = solve(market, lanes, oracleTraining, conditional,
+                        Method.NOMINAL, 0.0, settings);
+                write(rows, marketName, replication, query, "ORACLE", oracle,
+                        oracleSamples, oracleTraining, parameters,
+                        conditional.context, evaluation, market);
+                Files.write(checkpointFile, rows, StandardCharsets.UTF_8);
+            }
+            return;
+        }
         ConditionalQuery first = demand.queries.get(0);
         Solution d = solve(market, lanes,
                 TRBSVUScenarioWeights.arithmeticMean(demand.history), first,
