@@ -128,6 +128,9 @@ public final class TRBSVURunnerSelfCheck {
                 require(pcm.y != null && pcm.y.length == instance.params.I
                                 && pcm.certifiedOptimal && Double.isFinite(pcm.objValue),
                         "Lifted-affine PCM solve failed.");
+                require(Double.isFinite(pcm.optimizerTimeSec) && pcm.optimizerTimeSec >= 0.0
+                                && pcm.optimizerTimeSec <= pcm.solveTimeSec + 1e-9,
+                        "PCM native optimizer time was not propagated correctly.");
                 require(pcm.objValue + 1e-6 >= previous,
                         "PCM objective decreased when the ambiguity set expanded.");
                 previous = pcm.objValue;

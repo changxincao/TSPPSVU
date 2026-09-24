@@ -102,7 +102,8 @@ public final class TRBSVUExperiment12Main {
                 + "|javaSourceSha256=" + javaSourceSha256
                 + "|pythonEnvironment=" + pythonEnvironment
                  + "|chi2PositiveWeightFloor=1e-8|chi2StrictZeroWeightsPruned=true"
-                 + "|w1ZeroWeightsRetainedForSharedSupport=true";
+                 + "|w1ZeroWeightSamplesExcludedFromCenter=true"
+                 + "|w1SharedSupportUsesFullTrainingPool=true";
         String experiment1Protocol = sha256((commonProtocol
                 + "|experiment=1|retention=" + Arrays.toString(TRBSVUExperiment1Runner.RETENTION)
                 + "|bandwidth=" + Arrays.toString(TRBSVUExperiment1Runner.BANDWIDTH))
@@ -135,7 +136,8 @@ public final class TRBSVUExperiment12Main {
                 + "javaSourceSha256=" + javaSourceSha256 + "\n"
                  + "chi2PositiveWeightFloor=1e-8\n"
                  + "chi2StrictZeroWeightsPruned=true\n"
-                 + "w1ZeroWeightsRetainedForSharedSupport=true\n"
+                 + "w1ZeroWeightSamplesExcludedFromCenter=true\n"
+                 + "w1SharedSupportUsesFullTrainingPool=true\n"
                  + "rcsaaCompactFormulation="
                  + (algorithm.equals("compact") ? "PRODUCT_MCCORMICK_COMPACT" : "REPAIR_CUT") + "\n";
         Path completionMarker = replication.resolve("experiment12_complete.txt");

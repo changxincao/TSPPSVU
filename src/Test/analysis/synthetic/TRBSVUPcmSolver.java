@@ -74,9 +74,9 @@ public final class TRBSVUPcmSolver {
                         + "; inspect the run log above this marker.");
             Solution solution = readSolution(directory.resolve("solution.json"), params.I);
             System.out.printf(java.util.Locale.ROOT,
-                    "%s_SOLVE_END status=%s certified=%s objective=%.17g solveSec=%.6f selected=%d%n",
+                    "%s_SOLVE_END status=%s certified=%s objective=%.17g modelBuildAndSolveSec=%.6f optimizerSec=%.6f selected=%d%n",
                     modelLabel, solution.solverStatus, solution.certifiedOptimal, solution.objValue,
-                    solution.solveTimeSec, selectedCount(solution.y));
+                    solution.solveTimeSec, solution.optimizerTimeSec, selectedCount(solution.y));
             return solution;
         } catch (Exception | Error failure) {
             primaryFailure = failure;
@@ -230,6 +230,7 @@ public final class TRBSVUPcmSolver {
         double[] y = new double[carriers];
         for (int i = 0; i < carriers; i++) y[i] = Double.parseDouble(fields[i].trim());
         Solution solution = new Solution(objective, y, seconds);
+        solution.optimizerTimeSec = number(json, "solver_seconds");
         solution.solverStatus = status;
         solution.bestBound = number(json, "best_bound");
         solution.relativeGap = number(json, "relative_gap");
