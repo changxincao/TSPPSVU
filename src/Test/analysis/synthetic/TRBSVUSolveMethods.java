@@ -83,14 +83,12 @@ public final class TRBSVUSolveMethods {
             }
             case WASSERSTEIN -> {
                 if (!(robustness >= 0.0)) throw new IllegalArgumentException("Negative W1 radius.");
-                double[] max = trainingMax(weighted, params.J);
-                double[] upper = new double[params.J];
+                double[] upper = wassersteinSupportUpper(weighted, params.J);
                 double[] distanceScale = new double[params.J];
                 for (int j = 0; j < params.J; j++) {
                     // No arbitrary floor: a zero-max lane invalidates this training origin.
-                    if (!(max[j] > 0.0)) throw new IllegalArgumentException("Zero training maximum at lane " + j);
-                    upper[j] = 1.5 * max[j];
-                    distanceScale[j] = params.J * max[j];
+                    if (!(upper[j] > 0.0)) throw new IllegalArgumentException("Zero training maximum at lane " + j);
+                    distanceScale[j] = params.J * upper[j];
                 }
                 WassersteinBoxInput input = WassersteinBoxInput.fromData(data,
                         upper, distanceScale, robustness);
@@ -217,5 +215,10 @@ public final class TRBSVUSolveMethods {
             for (int j = 0; j < lanes; j++) max[j] = Math.max(max[j], sample.demand()[j]);
         }
         return max;
+    }
+
+    /** W1 support is the smallest lane-wise box containing every training demand. */
+    static double[] wassersteinSupportUpper(List<Sample> weighted, int lanes) {
+        return trainingMax(weighted, lanes);
     }
 }

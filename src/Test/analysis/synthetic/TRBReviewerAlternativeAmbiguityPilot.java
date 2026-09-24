@@ -311,7 +311,6 @@ public final class TRBReviewerAlternativeAmbiguityPilot {
                 upper[j] = Math.max(upper[j], sample.demand()[j]);
             }
         }
-        for (int j = 0; j < laneCount; j++) upper[j] *= 1.5;
         return upper;
     }
 
@@ -382,7 +381,7 @@ public final class TRBReviewerAlternativeAmbiguityPilot {
         lines.add("C_h_grid=" + Arrays.toString(C_H_GRID) + "; selected=" + cH);
         lines.add("lambda_grid=" + Arrays.toString(LAMBDA_GRID)
                 + "; selected_RCSAA=" + rcsaaLambda + "; selected_chi_square_DRO=" + droLambda);
-        lines.add("W1=scaled L1; box upper=1.5*lane training maximum; radius_multiplier_grid="
+        lines.add("W1=scaled L1; box upper=lane training maximum; radius_multiplier_grid="
                 + Arrays.toString(W1_RADIUS_GRID) + "; selected=" + w1Radius);
         lines.add("Selection criterion=minimum mean OOS cost on market_1 only");
         lines.add("Market_2 grid=diagnostic sensitivity only; it does not retune the selected parameters");

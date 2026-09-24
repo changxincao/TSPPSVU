@@ -10,7 +10,7 @@ public final class OlistAlternativeTiming {
  static void solve(Data data,Config cfg,Path out,String method)throws Exception {
   double[] upper=new double[data.params.J],scale=new double[data.params.J];
   for(int j=0;j<scale.length;j++){
-   double mean=0;for(var s:data.samples){mean+=s.demand()[j]/data.samples.size();upper[j]=Math.max(upper[j],1.5*s.demand()[j]);}
+   double mean=0;for(var s:data.samples){mean+=s.demand()[j]/data.samples.size();upper[j]=Math.max(upper[j],s.demand()[j]);}
    double variance=0;for(var s:data.samples)variance+=Math.pow(s.demand()[j]-mean,2)/data.samples.size();
    scale[j]=Math.sqrt(variance);if(scale[j]<1e-8)scale[j]=1.0;
   }

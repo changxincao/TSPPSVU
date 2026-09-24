@@ -182,7 +182,7 @@ public final class TRBReviewerContextualWassersteinBoxPilot {
         double[] upper = new double[laneCount];
         for (int j = 0; j < upper.length; j++) {
             upper[j] = switch (rule) {
-                case "TRAIN_MAX_150" -> 1.5 * maximum[j];
+                case "TRAIN_MAX_100" -> maximum[j];
                 default -> throw new IllegalArgumentException("Unknown box rule " + rule);
             };
         }
@@ -310,12 +310,12 @@ public final class TRBReviewerContextualWassersteinBoxPilot {
 
     private static List<String> configuredBoxRules() {
         String raw = System.getProperty(
-                "trb.wasserstein.boxRules", "TRAIN_MAX_150");
+                "trb.wasserstein.boxRules", "TRAIN_MAX_100");
         List<String> rules = Arrays.stream(raw.split(","))
                 .map(String::trim).filter(value -> !value.isEmpty()).toList();
         if (rules.isEmpty()) throw new IllegalArgumentException("At least one box rule is required.");
         for (String rule : rules) {
-            if (!rule.equals("TRAIN_MAX_150")) {
+            if (!rule.equals("TRAIN_MAX_100")) {
                 throw new IllegalArgumentException("Unknown box rule " + rule);
             }
         }
