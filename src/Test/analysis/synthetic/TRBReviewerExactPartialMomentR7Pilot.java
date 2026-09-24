@@ -153,7 +153,7 @@ public final class TRBReviewerExactPartialMomentR7Pilot {
                 "ambiguityB=exact mean plus componentwise MAD; box support; "
                         + "Long-Qi-Zhang supermodular reduction",
                 "varianceInflation=1.0 (uncalibrated pilot)",
-                "supportUpper=1.5*trainingMaximum (at least the weighted mean)",
+                "supportUpper=trainingMaximum (contains the weighted mean)",
                 "recourse=unrestricted LP; no affine decision rule",
                 "threads=" + threads + ",separationTimeLimitSec=" + timeLimitSeconds,
                 "maxIterations=" + maxIterations,
@@ -201,7 +201,7 @@ public final class TRBReviewerExactPartialMomentR7Pilot {
         }
         double[] upper = new double[baseline.length];
         for (int j = 0; j < upper.length; j++) {
-            upper[j] = Math.max(mean[j], 1.5 * maximum[j]);
+            upper[j] = maximum[j];
         }
         return new MomentInput(mean, variance, mad, upper);
     }

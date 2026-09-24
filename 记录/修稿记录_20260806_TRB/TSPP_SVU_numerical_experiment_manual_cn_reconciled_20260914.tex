@@ -417,9 +417,9 @@ m_j=\max_{s\in\mathcal S_{\mathrm{tr}}}d_j^s>0,
 c(\boldsymbol d,\boldsymbol d')
 =\frac1{|\J|}\sum_{j\in\J}\frac{|d_j-d'_j|}{m_j},
 \qquad
-\mathcal U=\prod_{j\in\J}[0,1.5m_j].
+\mathcal U=\prod_{j\in\J}[0,m_j].
 \]
-因此 $c$ 是无量纲的逐 lane 标准化平均 $L_1$ 距离，$\mathcal U$ 的 ground-metric diameter 至多为 $1.5$。对参考分布 $\widehat P_\pi=\sum_{s\in\mathcal S_{\mathrm{tr}}}\pi_s\delta_{\boldsymbol d^s}$，歧义集为
+因此 $c$ 是无量纲的逐 lane 标准化平均 $L_1$ 距离，$\mathcal U$ 的 ground-metric diameter 至多为 $1$。该box同时用于Wasserstein和PCM，使连续支撑型基准均限制在逐lane训练经验范围内。对参考分布 $\widehat P_\pi=\sum_{s\in\mathcal S_{\mathrm{tr}}}\pi_s\delta_{\boldsymbol d^s}$，歧义集为
 \[
 \mathcal P_{\varepsilon}(\widehat P_\pi)
 =\{P:W_{1,c}(P,\widehat P_\pi)\le\varepsilon,
@@ -765,7 +765,7 @@ Tuned-SAA $\gamma$ & $\{.4,.6,.8,1\}$ & Exp.~1 / later retuning\\
 Kernel $B$ & $\{.1,.5,1,3,5,10,30,50,100\}$ & CSAA / Exp.~6A\\
 RF & 500 trees, all contextual features available at splits & secondary settings fixed ex ante\\
 Mean--SD / $\chi^2$ main $\lambda$ & $\{.01,.05,.1,.25,.5,1,2,5,10,50,100\}$ & Exp.~2 tuning\\
-Wasserstein geometry & training-max-scaled average-lane $L_1$; box $[0,1.5m_j]$ & exact definition in Exp.~2\\
+Wasserstein geometry & training-max-scaled average-lane $L_1$; box $[0,m_j]$ & exact definition in Exp.~2\\
 Wasserstein radius & $\{.005,.01,.025,.05,.1,.25,.5,1\}$ & absolute $\varepsilon$, validation-selected\\
 PCM $\kappa$ & $\{1,1.25,1.5,2\}$ & Exp.~2 only; marginal and total-demand bounds\\
 Exp.~3 DGP cells & Normal/Lognormal $\times$ Low/Medium/High & 10 paired reps/cell\\

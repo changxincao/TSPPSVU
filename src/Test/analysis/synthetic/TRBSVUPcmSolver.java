@@ -162,7 +162,6 @@ public final class TRBSVUPcmSolver {
         double inflation = kappa * kappa;
         for (int j = 0; j < lanes; j++) {
             variance[j] *= inflation;
-            upper[j] *= 1.5;
         }
         return new Moments(mean, variance, upper, inflation * totalVariance);
     }
