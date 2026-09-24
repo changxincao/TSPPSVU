@@ -98,7 +98,8 @@ public final class TRBSVUExperiment12Main {
                 + "|validationTrainingPeriods="
                 + TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS
                 + "|validationOrigins=" + origins + "|rfTrees=500|rfSeed=frozen"
-                 + "|rfScriptSha256=" + rfScriptSha256
+                + "|rfMinLeaf=" + Arrays.toString(TRBSVUExperiment1Runner.RF_MIN_LEAF)
+                + "|rfScriptSha256=" + rfScriptSha256
                 + "|javaSourceSha256=" + javaSourceSha256
                 + "|pythonEnvironment=" + pythonEnvironment
                  + "|chi2PositiveWeightFloor=1e-8|chi2StrictZeroWeightsPruned=true"
@@ -130,7 +131,9 @@ public final class TRBSVUExperiment12Main {
                 + "instanceSha256=" + instanceSha256 + "\n"
                 + "experiment1ProtocolFingerprint=" + experiment1Protocol + "\n"
                 + "experiment2ProtocolFingerprint=" + experiment2Protocol + "\n"
-                + "rfTrees=500\nrfPythonCommand=" + rfPython + "\n"
+                + "rfTrees=500\nrfMinLeafCandidates="
+                + Arrays.toString(TRBSVUExperiment1Runner.RF_MIN_LEAF)
+                + "\nrfPythonCommand=" + rfPython + "\n"
                 + "pythonEnvironment=" + pythonEnvironment + "\n"
                 + "rfScriptSha256=" + rfScriptSha256 + "\n"
                 + "javaSourceSha256=" + javaSourceSha256 + "\n"
@@ -166,7 +169,8 @@ public final class TRBSVUExperiment12Main {
             exp1BaseBandwidth.put(name, result1.bandwidth().get(family));
             exp1EffectiveBandwidth.put(name, result1.finalEffectiveBandwidth().get(family));
         }
-        exp1Parameters.put("RF-CSAA", Double.NaN);
+        exp1Parameters.put("RF-CSAA", (double) result1.rfMinLeaf());
+        exp1ParameterTypes.put("RF-CSAA", "MIN_SAMPLES_LEAF");
         exp1Families.put("RF-CSAA", "RANDOM_FOREST");
         TRBSVUResultWriter.writeContextualChoice(
                 validationDirectory.resolve("experiment1_selected_context.csv"),
@@ -185,6 +189,7 @@ public final class TRBSVUExperiment12Main {
             String selectedContextProtocol = sha256((experiment2Protocol
                     + "|selectedContext=" + result1.selectedContextual().family()
                     + "|selectedBandwidth=" + result1.selectedContextual().bandwidth()
+                    + "|selectedRfMinLeaf=" + result1.selectedContextual().rfMinLeaf()
                     + "|selectedValidationSd=" + result1.selectedContextual().validationSd()
                     + "|bandwidthOrder=" + result1.selectedContextual().bandwidthOrder())
                     .getBytes(StandardCharsets.UTF_8));

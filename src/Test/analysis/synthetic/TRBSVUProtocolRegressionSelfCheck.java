@@ -43,7 +43,8 @@ public final class TRBSVUProtocolRegressionSelfCheck {
                         && last.train().get(49).period.tIndex == 73
                         && last.realized().period.tIndex == 74,
                 "Formal rolling validation windows are not 1:50->51 through 25:74->75.");
-        ContextualChoice rf = new ContextualChoice("RF", Double.NaN, 1.0, 0.2, List.of());
+        ContextualChoice rf = new ContextualChoice("RF", Double.NaN, 1.0, 0.2,
+                List.of(1.0, 2.0, 5.0, 10.0), 5);
         require(TRBSVUExperiment4Main.usesRandomForest(rf),
                 "Experiment 4 does not recognize the stored RF family name.");
         require("UNRESOLVED".equals(TRBSVUExperiment4Main.certificateStatus(null))
@@ -83,11 +84,12 @@ public final class TRBSVUProtocolRegressionSelfCheck {
         writeCandidate(output, "CSAA-Tri", new ContextualChoice(
                 "TRIANGULAR", 1.0, 7.5, 1.0, List.of(1.0)));
         writeCandidate(output, "RF-CSAA", new ContextualChoice(
-                "RF", Double.NaN, 7.0, 1.0, List.of()));
+                "RF", Double.NaN, 7.0, 1.0, List.of(5.0, 10.0), 5));
         TRBSVUExperiment1IdeMain.aggregateContextualChoices(input, output, Set.of(0));
         ContextualChoice selected = TRBSVUExperiment4Main.loadChoice(output.resolve("rep_000")
                 .resolve("validation").resolve("experiment1_selected_context.csv"));
         require("RF".equals(selected.family()), "IDE aggregation did not select the global C*.");
+        require(selected.rfMinLeaf() == 5, "IDE aggregation lost the selected RF min leaf.");
         require(Files.mismatch(instance, output.resolve("rep_000").resolve("instance")
                 .resolve("instance.tsv")) == -1L, "IDE aggregation did not preserve the frozen instance.");
     }

@@ -60,6 +60,9 @@ public final class TRBSVURunnerSelfCheck {
         require(Arrays.equals(TRBSVUExperiment1Runner.RETENTION,
                         new double[]{0.4, 0.6, 0.8, 1.0}),
                 "Experiment 1 retention grid drifted.");
+        require(Arrays.equals(TRBSVUExperiment1Runner.RF_MIN_LEAF,
+                        new double[]{1, 2, 5, 10}),
+                "Experiment 1 RF min-leaf grid drifted.");
         List<Sample> equal = TRBSVUScenarioWeights.equal(history);
         List<Sample> recent = TRBSVUScenarioWeights.recent(history, 0.3);
         List<Sample> mean = TRBSVUScenarioWeights.arithmeticMean(history);
@@ -86,9 +89,12 @@ public final class TRBSVURunnerSelfCheck {
         }
         TRBSVUForestWeights forest = new TRBSVUForestWeights("python",
                 Path.of("analysis", "trb_svu", "rf_leaf_weights.py"), 8);
-        List<Sample> rf = forest.weights(history, instance.testContext, 41);
-        require(rf.size() == 100 && Math.abs(rf.stream().mapToDouble(s -> s.weight).sum() - 1) < 1e-10,
-                "RF weight construction failed.");
+        for (int minLeaf : new int[]{1, 10}) {
+            List<Sample> rf = forest.weights(history, instance.testContext, 41, minLeaf);
+            require(rf.size() == 100
+                            && Math.abs(rf.stream().mapToDouble(s -> s.weight).sum() - 1) < 1e-10,
+                    "RF weight construction failed for min leaf " + minLeaf + ".");
+        }
         Settings settings = new Settings(1, 60, 1e-4,
                 RCSAASolverVariant.LBBD_PRIMAL_SEARCH, true, false);
         Solution d = TRBSVUSolveMethods.solve(instance.params, instance.lanes, mean,

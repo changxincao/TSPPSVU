@@ -2,7 +2,7 @@ package Test.analysis.synthetic;
 
 /** Frozen dimensions and validation split for the formal synthetic experiments. */
 final class TRBSVUFormalProtocol {
-    static final String EXPERIMENT12_VERSION = "TRBSVU_EXP12_V5";
+    static final String EXPERIMENT12_VERSION = "TRBSVU_EXP12_V6";
     static final int CARRIERS = 15;
     static final int LANES = 50;
     static final int HISTORY_PERIODS = 75;

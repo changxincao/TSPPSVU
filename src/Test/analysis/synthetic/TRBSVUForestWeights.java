@@ -36,21 +36,24 @@ public final class TRBSVUForestWeights implements TRBSVUExperiment1Runner.Forest
 
     @Override
     public synchronized List<Sample> weights(List<Sample> training, CovariateVector query,
-                                              long seed) throws Exception {
+                                              long seed, int minSamplesLeaf) throws Exception {
         if (training.isEmpty()) throw new IllegalArgumentException("Empty RF training set.");
-        String key = cacheKey(training, query, seed);
+        if (minSamplesLeaf < 1) throw new IllegalArgumentException("RF min leaf must be positive.");
+        String key = cacheKey(training, query, seed, minSamplesLeaf);
         double[] values = cache.get(key);
         if (values == null) {
-            values = fit(training, query, seed);
+            values = fit(training, query, seed, minSamplesLeaf);
             cache.put(key, values);
         }
         return TRBSVUScenarioWeights.copyWithWeights(training, values, false);
     }
 
-    private String cacheKey(List<Sample> training, CovariateVector query, long seed) throws Exception {
+    private String cacheKey(List<Sample> training, CovariateVector query, long seed,
+                            int minSamplesLeaf) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         update(digest, seed);
         update(digest, trees);
+        update(digest, minSamplesLeaf);
         update(digest, training.size());
         for (Sample sample : training) {
             update(digest, sample.theta.values());
@@ -69,7 +72,8 @@ public final class TRBSVUForestWeights implements TRBSVUExperiment1Runner.Forest
         for (double value : values) update(digest, Double.doubleToLongBits(value));
     }
 
-    private double[] fit(List<Sample> training, CovariateVector query, long seed) throws Exception {
+    private double[] fit(List<Sample> training, CovariateVector query, long seed,
+                         int minSamplesLeaf) throws Exception {
         Path temporaryRoot = Path.of("tmp");
         Files.createDirectories(temporaryRoot);
         Path directory = Files.createTempDirectory(temporaryRoot, "trb_svu_rf_");
@@ -86,7 +90,8 @@ public final class TRBSVUForestWeights implements TRBSVUExperiment1Runner.Forest
                 writeRow(writer, query.values(), new double[0]);
             }
             Process process = new ProcessBuilder(python, script.toString(), input.toString(),
-                    output.toString(), Long.toString(seed & 0xffff_ffffL), Integer.toString(trees))
+                    output.toString(), Long.toString(seed & 0xffff_ffffL), Integer.toString(trees),
+                    Integer.toString(minSamplesLeaf))
                     .redirectErrorStream(true).start();
             boolean ended = process.waitFor(120, TimeUnit.SECONDS);
             if (!ended) {

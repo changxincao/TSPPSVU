@@ -166,14 +166,17 @@ public final class TRBSVUResultWriter {
             throws Exception {
         Files.createDirectories(file.getParent());
         try (BufferedWriter out = writer(file)) {
-            out.write("replication,family,validation_selected_B,validation_cost,validation_sd,"
-                    + "bandwidth_order");
+            out.write("replication,family,validation_selected_B,validation_selected_min_leaf,"
+                    + "validation_cost,validation_sd,bandwidth_order,min_leaf_order");
             out.newLine();
             String order = choice.bandwidthOrder().stream()
                     .map(String::valueOf).collect(java.util.stream.Collectors.joining(";"));
-            out.write(String.format(Locale.ROOT, "%d,%s,%.17g,%.17g,%.17g,%s%n",
-                    replication, choice.family(), choice.bandwidth(), choice.validationCost(),
-                    choice.validationSd(), csv(order)));
+            String bandwidthOrder = "RF".equals(choice.family()) ? "" : order;
+            String minLeafOrder = "RF".equals(choice.family()) ? order : "";
+            out.write(String.format(Locale.ROOT, "%d,%s,%.17g,%d,%.17g,%.17g,%s,%s%n",
+                    replication, choice.family(), choice.bandwidth(), choice.rfMinLeaf(),
+                    choice.validationCost(), choice.validationSd(), csv(bandwidthOrder),
+                    csv(minLeafOrder)));
         }
     }
 

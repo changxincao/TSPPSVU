@@ -139,12 +139,13 @@ public final class TRBSVUExperiment1IdeMain {
         String sourceHash = sourceFingerprint(Path.of("src"));
         String rfScriptHash = sha256(Files.readAllBytes(rfScript));
         String pythonEnvironment = "RF-CSAA".equals(method) ? pythonEnvironment(python) : "NOT_USED";
-        String protocol = sha256(("TRBSVU_EXP1_METHOD_V2|method=" + method + "|origins=" + origins
+        String protocol = sha256(("TRBSVU_EXP1_METHOD_V3|method=" + method + "|origins=" + origins
                 + "|validationTrainingPeriods="
                 + TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS
                 + "|threads=" + threads + "|limit=" + limit + "|instance=" + instanceHash
                 + "|retention=" + Arrays.toString(TRBSVUExperiment1Runner.RETENTION)
                 + "|bandwidth=" + Arrays.toString(TRBSVUExperiment1Runner.BANDWIDTH)
+                + "|rfMinLeaf=" + Arrays.toString(TRBSVUExperiment1Runner.RF_MIN_LEAF)
                 + "|source=" + sourceHash + "|rfScript=" + rfScriptHash
                 + "|pythonEnvironment=" + pythonEnvironment)
                 .getBytes(StandardCharsets.UTF_8));
@@ -190,7 +191,8 @@ public final class TRBSVUExperiment1IdeMain {
             baseBandwidth.put(method, result.bandwidth().get(kernel));
             effectiveBandwidth.put(method, result.finalEffectiveBandwidth().get(kernel));
         } else if ("RF-CSAA".equals(method)) {
-            parameters.put(method, Double.NaN);
+            parameters.put(method, (double) result.rfMinLeaf());
+            parameterTypes.put(method, "MIN_SAMPLES_LEAF");
             families.put(method, "RANDOM_FOREST");
         } else {
             parameters.put(method, Double.NaN);

@@ -163,12 +163,16 @@ public final class TRBSVUExperiment4Main {
         for (int i = 0; i < header.size(); i++) values.put(header.get(i), row.get(i));
         String family = required(values, "family");
         double bandwidth = Double.parseDouble(required(values, "validation_selected_B"));
+        int minLeaf = values.containsKey("validation_selected_min_leaf")
+                ? Integer.parseInt(values.get("validation_selected_min_leaf"))
+                : "RF".equals(family) ? 1 : 0;
         double cost = Double.parseDouble(required(values, "validation_cost"));
         double sd = Double.parseDouble(required(values, "validation_sd"));
         List<Double> order = new ArrayList<>();
-        String text = required(values, "bandwidth_order");
+        String text = "RF".equals(family) && values.containsKey("min_leaf_order")
+                ? values.get("min_leaf_order") : required(values, "bandwidth_order");
         if (!text.isBlank()) for (String item : text.split(";")) order.add(Double.parseDouble(item));
-        return new ContextualChoice(family, bandwidth, cost, sd, order);
+        return new ContextualChoice(family, bandwidth, cost, sd, order, minLeaf);
     }
 
     private static List<String> parseCsv(String line) {

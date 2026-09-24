@@ -19,28 +19,45 @@ import java.util.Set;
 /** Experiment 1: one pre-generated case, train-only rolling validation, shared OOS. */
 public final class TRBSVUExperiment1Runner {
     public static final double[] RETENTION = {0.4, 0.6, 0.8, 1.0};
-    public static final double[] BANDWIDTH = {0.1, 0.5, 1, 3, 5, 10, 30, 50, 100};
+    public static final double[] BANDWIDTH = {0.1, 0.25, 0.5, 1, 2, 3, 5, 10, 30, 50, 100};
+    public static final double[] RF_MIN_LEAF = {1, 2, 5, 10};
 
     /** A separately implemented forest may supply same-leaf normalized weights. */
     public interface ForestWeights {
-        List<Sample> weights(List<Sample> training, CovariateVector query, long seed) throws Exception;
+        List<Sample> weights(List<Sample> training, CovariateVector query, long seed,
+                             int minSamplesLeaf) throws Exception;
+
+        default List<Sample> weights(List<Sample> training, CovariateVector query,
+                                     long seed) throws Exception {
+            return weights(training, query, seed, 1);
+        }
     }
 
     public record ContextualChoice(String family, double bandwidth, double validationCost,
                                    double validationSd,
-                                   List<Double> bandwidthOrder) {
+                                   List<Double> bandwidthOrder, int rfMinLeaf) {
         public ContextualChoice {
             bandwidthOrder = List.copyOf(bandwidthOrder);
+            if ("RF".equals(family) && rfMinLeaf < 1)
+                throw new IllegalArgumentException("RF contextual choice needs a positive min leaf.");
         }
 
         public ContextualChoice(String family, double bandwidth, double validationCost) {
             this(family, bandwidth, validationCost, Double.NaN,
-                    Double.isFinite(bandwidth) ? List.of(bandwidth) : List.of());
+                    Double.isFinite(bandwidth) ? List.of(bandwidth) : List.of(),
+                    "RF".equals(family) ? 1 : 0);
         }
 
         public ContextualChoice(String family, double bandwidth, double validationCost,
                                 List<Double> bandwidthOrder) {
-            this(family, bandwidth, validationCost, Double.NaN, bandwidthOrder);
+            this(family, bandwidth, validationCost, Double.NaN, bandwidthOrder,
+                    "RF".equals(family) ? 1 : 0);
+        }
+
+        public ContextualChoice(String family, double bandwidth, double validationCost,
+                                 double validationSd, List<Double> bandwidthOrder) {
+            this(family, bandwidth, validationCost, validationSd, bandwidthOrder,
+                    "RF".equals(family) ? 1 : 0);
         }
     }
     public record WeightResult(List<Sample> weights, double effectiveBandwidth) { }
@@ -53,7 +70,7 @@ public final class TRBSVUExperiment1Runner {
                          List<TRBSVUValidationTrace> validationDetails,
                          double retention, Map<Kernel, Double> bandwidth,
                          Map<Kernel, Double> finalEffectiveBandwidth,
-                         ContextualChoice selectedContextual) { }
+                         int rfMinLeaf, ContextualChoice selectedContextual) { }
 
     private final Settings settings;
     private final ForestWeights forest;
@@ -149,15 +166,18 @@ public final class TRBSVUExperiment1Runner {
                         validation.get(methodName), contextualSd.get(family),
                         bandwidthOrder.get(family));
         }
+        int selectedRfMinLeaf = 0;
         if (requestedMethods.contains("RF-CSAA")) {
-            ValidationScore rfScore = validate(instance, 4, null, validationDetails);
-            validation.put("RF-CSAA", rfScore.mean());
-            curves.put("RF-CSAA", Map.of(Double.NaN, rfScore.mean()));
-            if (chosen == null || TRBSVUStatistics.better(rfScore.mean(), rfScore.sd(),
+            Tuning rfTuning = tune(RF_MIN_LEAF,
+                    candidate -> validate(instance, 4, candidate, validationDetails));
+            selectedRfMinLeaf = (int) rfTuning.parameter();
+            validation.put("RF-CSAA", rfTuning.cost());
+            curves.put("RF-CSAA", rfTuning.curve());
+            if (chosen == null || TRBSVUStatistics.better(rfTuning.cost(), rfTuning.sd(),
                     Double.POSITIVE_INFINITY, chosen.validationCost(),
                     selectedContextualSd(chosen, contextualSd), chosen.bandwidth()))
                 chosen = new ContextualChoice("RF", Double.NaN, validation.get("RF-CSAA"),
-                        rfScore.sd(), List.of());
+                        rfTuning.sd(), rfTuning.order(), selectedRfMinLeaf);
         }
 
         Map<String, List<Sample>> finalWeights = new LinkedHashMap<>();
@@ -177,7 +197,7 @@ public final class TRBSVUExperiment1Runner {
         }
         if (requestedMethods.contains("RF-CSAA"))
             finalWeights.put("RF-CSAA", forest.weights(instance.history,
-                    instance.testContext, forestSeed(instance, instance.history)));
+                    instance.testContext, forestSeed(instance, instance.history), selectedRfMinLeaf));
         System.out.println("Experiment 1 validation selected gamma=" + retention
                 + " contextual=" + chosen + " B=" + selectedBandwidth);
 
@@ -188,6 +208,8 @@ public final class TRBSVUExperiment1Runner {
         finalParameters.put("Tuned-SAA", retention);
         for (Kernel family : Kernel.values())
             finalParameters.put(name(family), selectedBandwidth.get(family));
+        if (requestedMethods.contains("RF-CSAA"))
+            finalParameters.put("RF-CSAA", (double) selectedRfMinLeaf);
         for (var method : finalWeights.entrySet()) {
             double selectedParameter = finalParameters.getOrDefault(method.getKey(), Double.NaN);
             Solution solved = finalCheckpoint == null ? null
@@ -216,7 +238,8 @@ public final class TRBSVUExperiment1Runner {
         return new Result(orderedCopy(solutions), orderedCopy(oos), orderedCopy(oosDetails),
                 orderedCopy(finalWeights), orderedCopy(validation), orderedCopy(curves),
                 List.copyOf(validationDetails),
-                retention, Map.copyOf(selectedBandwidth), Map.copyOf(finalBandwidth), chosen);
+                retention, Map.copyOf(selectedBandwidth), Map.copyOf(finalBandwidth),
+                selectedRfMinLeaf, chosen);
     }
 
     private static void requireUsableIncumbent(Solution solution, String method, int carriers) {
@@ -246,7 +269,7 @@ public final class TRBSVUExperiment1Runner {
                                                 ContextualChoice choice) throws Exception {
         if ("RF".equals(choice.family()))
             return new WeightResult(forest.weights(training, query,
-                    forestSeed(instance, training)), Double.NaN);
+                    forestSeed(instance, training), choice.rfMinLeaf()), Double.NaN);
         List<Double> order = choice.bandwidthOrder().isEmpty()
                 ? List.of(choice.bandwidth()) : choice.bandwidthOrder();
         return firstValidByValidationRank(training, query,
@@ -287,7 +310,8 @@ public final class TRBSVUExperiment1Runner {
                 case 3 -> TRBSVUScenarioWeights.kernel(training, query,
                         Kernel.valueOf(((ContextualChoice) parameter).family()),
                         ((ContextualChoice) parameter).bandwidth());
-                case 4 -> forest.weights(training, query, forestSeed(instance, training));
+                case 4 -> forest.weights(training, query, forestSeed(instance, training),
+                        (int) Math.round((double) parameter));
                 default -> throw new IllegalArgumentException("Unknown Experiment 1 method.");
             };
             if (weighted.isEmpty()) {
@@ -354,7 +378,7 @@ public final class TRBSVUExperiment1Runner {
     }
 
     private static double validationCandidate(int kind, Object parameter) {
-        return kind == 2 ? (double) parameter
+        return kind == 2 || kind == 4 ? (double) parameter
                 : kind == 3 ? ((ContextualChoice) parameter).bandwidth() : Double.NaN;
     }
 
@@ -392,7 +416,7 @@ public final class TRBSVUExperiment1Runner {
             case 4 -> "RF-CSAA";
             default -> throw new IllegalArgumentException("Unknown Experiment 1 method.");
         };
-        double candidate = kind == 2 ? (double) parameter
+        double candidate = kind == 2 || kind == 4 ? (double) parameter
                 : kind == 3 ? ((ContextualChoice) parameter).bandwidth() : Double.NaN;
         double effective = kind == 3 ? candidate : Double.NaN;
         return new TRBSVUValidationTrace(method, candidate, origin,

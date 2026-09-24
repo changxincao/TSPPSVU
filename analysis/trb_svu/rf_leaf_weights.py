@@ -12,7 +12,10 @@ from sklearn.ensemble import RandomForestRegressor
 
 
 def main():
-    input_path, output_path, seed, tree_count = sys.argv[1:5]
+    input_path, output_path, seed, tree_count, min_samples_leaf = sys.argv[1:6]
+    min_samples_leaf = int(min_samples_leaf)
+    if min_samples_leaf < 1:
+        raise ValueError("min_samples_leaf must be positive")
     with open(input_path, newline="", encoding="utf-8") as stream:
         reader = csv.reader(stream)
         n, dimension, lanes = map(int, next(reader))
@@ -28,7 +31,7 @@ def main():
         criterion="squared_error",
         max_depth=None,
         min_samples_split=2,
-        min_samples_leaf=1,
+        min_samples_leaf=min_samples_leaf,
         max_features=1.0,
         bootstrap=True,
         random_state=int(seed),
