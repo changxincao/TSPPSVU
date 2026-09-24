@@ -394,7 +394,7 @@ public class BrazilOlistAdaptiveCVSolveComparison {
         int thetaDim = train.isEmpty() ? thetaNow.values().length : train.get(0).theta.values().length;
 
         if (cfg.standardizeTheta && !train.isEmpty() && train.size() >= 2) {
-            StandardScaler scaler = new StandardScaler();
+            StandardScaler scaler = new StandardScaler(cfg.thetaScaling);
             scaler.fit(train, thetaDim);
             for (Sample s : train) {
                 s.theta = new CovariateVector(scaler.transform(s.theta.values()));
@@ -429,7 +429,7 @@ public class BrazilOlistAdaptiveCVSolveComparison {
         int thetaDim = train.isEmpty() ? thetaNow.values().length : train.get(0).theta.values().length;
 
         if (cfg.standardizeTheta && !train.isEmpty() && train.size() >= 2) {
-            StandardScaler scaler = new StandardScaler();
+            StandardScaler scaler = new StandardScaler(cfg.thetaScaling);
             scaler.fit(train, thetaDim);
             for (Sample s : train) {
                 s.theta = new CovariateVector(scaler.transform(s.theta.values()));
@@ -529,6 +529,7 @@ public class BrazilOlistAdaptiveCVSolveComparison {
         base.featureFlags.includeConsumptionIndex = false;
         base.featureFlags.includeWEIIndex = false;
         base.standardizeTheta = true;
+        base.thetaScaling = StandardScaler.Mode.TRAINING_MAX;
         // Reviewer-kernel ablation hook.  The normal/default path remains EXPONENTIAL.
         // TRBReviewerKernelAblation sets this JVM property before invoking this runner,
         // which lets both kernels use the identical 35/15 rolling-CV implementation.
@@ -561,7 +562,6 @@ public class BrazilOlistAdaptiveCVSolveComparison {
         c.featureFlags.includeConsumptionIndex = b.featureFlags.includeConsumptionIndex;
         c.featureFlags.includeWEIIndex = b.featureFlags.includeWEIIndex;
         c.standardizeTheta = b.standardizeTheta;
-        c.thetaScaling = b.thetaScaling;
         c.thetaScaling = b.thetaScaling;
         c.kernelType = b.kernelType;
         c.enforceDemandEquality = b.enforceDemandEquality;
@@ -727,7 +727,7 @@ public class BrazilOlistAdaptiveCVSolveComparison {
             bw.write(String.join(",",
                     "trialId", "actual_test_period", "method_name",
                     "selected_k", "selected_C_h", "selected_lambda",
-                    "solve_mode", "solver_variant", "fillMissingDates", "standardizeTheta", "k1Lag", "kernelType",
+                    "solve_mode", "solver_variant", "fillMissingDates", "standardizeTheta", "thetaScaling", "k1Lag", "kernelType",
                     "bandwidthH", "train_size",
                     "expected_obj", "realized_obj", "solve_time_sec", "selected_count",
                     "oos_transport_cost", "oos_spot_cost", "oos_penalty_cost",
@@ -782,7 +782,7 @@ public class BrazilOlistAdaptiveCVSolveComparison {
                 ? String.format(Locale.US, "%.10f", lambda)
                 : "";
         String line = String.format(Locale.US,
-                "%d,%d,%s,%d,%.10f,%s,%s,%s,%s,%s,%d,%s,%.10f,%d," +
+                "%d,%d,%s,%d,%.10f,%s,%s,%s,%s,%s,%s,%d,%s,%.10f,%d," +
                         "%.10f,%.10f,%.6f,%d," +
                         "%.10f,%.10f,%.10f," +
                         "%.10f,%.10f,%.10f,%.10f,%.10f,%.10f," +
@@ -791,6 +791,7 @@ public class BrazilOlistAdaptiveCVSolveComparison {
                         "%.10f,%.10f,%.10f,\"%s\",\"%s\"",
                 trialId, r.testPeriodIdx, methodName, k, cH, lambdaText,
                 r.cfg.solveMode.name(), solverVariant, String.valueOf(r.cfg.fillMissingDates), String.valueOf(r.cfg.standardizeTheta),
+                r.cfg.thetaScaling.name(),
                 r.cfg.k1LagPeriods, r.cfg.kernelType.name(), r.cfg.bandwidthH, r.trainSize,
                 r.expected, r.realized, r.solveTimeSec, r.selectedCount,
                 r.rec.transportTotalCost, r.rec.spotTotalCost, r.rec.penaltyTotalCost,
@@ -1261,7 +1262,7 @@ public class BrazilOlistAdaptiveCVSolveComparison {
             this.trialsCsv = outDir.resolve("trials_" + tag + ".csv");
             try (BufferedWriter bw = Files.newBufferedWriter(trialsCsv)) {
                 bw.write(String.join(",",
-                        "tag", "solveMode", "fillMissingDates", "standardizeTheta", "k1Lag", "kernelType", "bandwidthH",
+                        "tag", "solveMode", "fillMissingDates", "standardizeTheta", "thetaScaling", "k1Lag", "kernelType", "bandwidthH",
                         "C_h", "lambda",
                         "trialId", "testIdx", "trainSize",
                         "expectedObj", "realizedObj", "solveTimeSec", "selectedCount",
@@ -1296,7 +1297,7 @@ public class BrazilOlistAdaptiveCVSolveComparison {
 
             try (BufferedWriter bw = Files.newBufferedWriter(trialsCsv, java.nio.file.StandardOpenOption.APPEND)) {
                 bw.write(String.format(Locale.US,
-                        "%s,%s,%s,%s,%d,%s,%.6f,%.6f,%.6f," +
+                        "%s,%s,%s,%s,%s,%d,%s,%.6f,%.6f,%.6f," +
                                 "%d,%d,%d," +
                                 "%.10f,%.10f,%.6f,%d," +
                                 "%.10f,%.10f,%.10f," +
@@ -1309,6 +1310,7 @@ public class BrazilOlistAdaptiveCVSolveComparison {
                         r.cfg.solveMode.name(),
                         String.valueOf(r.cfg.fillMissingDates),
                         String.valueOf(r.cfg.standardizeTheta),
+                        r.cfg.thetaScaling.name(),
                         chosenK,
                         r.cfg.kernelType.name(),
                         r.cfg.bandwidthH,

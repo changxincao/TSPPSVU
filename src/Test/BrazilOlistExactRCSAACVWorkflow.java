@@ -246,6 +246,7 @@ public class BrazilOlistExactRCSAACVWorkflow {
         base.featureFlags.includeConsumptionIndex = false;
         base.featureFlags.includeWEIIndex = false;
         base.standardizeTheta = true;
+        base.thetaScaling = StandardScaler.Mode.TRAINING_MAX;
         base.kernelType = Helper.calculateHelper.KernelType.EXPONENTIAL;
         base.C_h = cH;
         base.threads = 4;
@@ -315,7 +316,7 @@ public class BrazilOlistExactRCSAACVWorkflow {
         int thetaDim = train.isEmpty() ? thetaNow.values().length : train.get(0).theta.values().length;
 
         if (cfg.standardizeTheta && !train.isEmpty() && train.size() >= 2) {
-            StandardScaler scaler = new StandardScaler();
+            StandardScaler scaler = new StandardScaler(cfg.thetaScaling);
             scaler.fit(train, thetaDim);
             for (Sample s : train) s.theta = new CovariateVector(scaler.transform(s.theta.values()));
             thetaNow = new CovariateVector(scaler.transform(thetaNow.values()));
@@ -351,7 +352,7 @@ public class BrazilOlistExactRCSAACVWorkflow {
         int thetaDim = train.isEmpty() ? thetaNow.values().length : train.get(0).theta.values().length;
 
         if (cfg.standardizeTheta && !train.isEmpty() && train.size() >= 2) {
-            StandardScaler scaler = new StandardScaler();
+            StandardScaler scaler = new StandardScaler(cfg.thetaScaling);
             scaler.fit(train, thetaDim);
             for (Sample s : train) s.theta = new CovariateVector(scaler.transform(s.theta.values()));
             thetaNow = new CovariateVector(scaler.transform(thetaNow.values()));
@@ -574,7 +575,7 @@ public class BrazilOlistExactRCSAACVWorkflow {
         String methodName = (r.cfg.solveMode == SolveMode.RCSAA) ? "RCSAA" : "CSAA";
         String lambdaText = (r.cfg.solveMode == SolveMode.RCSAA) ? String.format(Locale.US, "%.10f", lambda) : "";
         String raw = String.format(Locale.US,
-                "%d,%d,%s,%d,%.10f,%s,%s,%s,%s,%d,%s,%.10f,%d," +
+                "%d,%d,%s,%d,%.10f,%s,%s,%s,%s,%s,%d,%s,%.10f,%d," +
                         "%.10f,%.10f,%.6f,%d," +
                         "%.10f,%.10f,%.10f," +
                         "%.10f,%.10f,%.10f,%.10f,%.10f,%.10f," +
@@ -583,6 +584,7 @@ public class BrazilOlistExactRCSAACVWorkflow {
                         "%.10f,%.10f,%.10f,\"%s\",\"%s\"",
                 trialId, r.testPeriodIdx, methodName, k, cH, lambdaText,
                 r.cfg.solveMode.name(), String.valueOf(r.cfg.fillMissingDates), String.valueOf(r.cfg.standardizeTheta),
+                r.cfg.thetaScaling.name(),
                 r.cfg.k1LagPeriods, r.cfg.kernelType.name(), r.cfg.bandwidthH, r.trainSize,
                 r.expected, r.realized, r.solveTimeSec, r.selectedCount,
                 r.rec.transportTotalCost, r.rec.spotTotalCost, r.rec.penaltyTotalCost,
@@ -625,7 +627,7 @@ public class BrazilOlistExactRCSAACVWorkflow {
             bw.write(String.join(",",
                     "trialId", "actual_test_period", "method_name",
                     "selected_k", "selected_C_h", "selected_lambda",
-                    "solve_mode", "fillMissingDates", "standardizeTheta", "k1Lag", "kernelType",
+                    "solve_mode", "fillMissingDates", "standardizeTheta", "thetaScaling", "k1Lag", "kernelType",
                     "bandwidthH", "train_size",
                     "expected_obj", "realized_obj", "solve_time_sec", "selected_count",
                     "oos_transport_cost", "oos_spot_cost", "oos_penalty_cost",
@@ -793,7 +795,7 @@ public class BrazilOlistExactRCSAACVWorkflow {
     }
 
     private static GenericCsvRow parseSelectedActualAsFinal(String line) {
-        Map<String, Integer> h = headerMap(parseCsvLine("trialId,actual_test_period,method_name,selected_k,selected_C_h,selected_lambda,solve_mode,fillMissingDates,standardizeTheta,k1Lag,kernelType,bandwidthH,train_size,expected_obj,realized_obj,solve_time_sec,selected_count,oos_transport_cost,oos_spot_cost,oos_penalty_cost,sumW,sumW2,ESS,top1W,top5Wsum,maxW_over_meanW,thetaDist_mean,thetaDist_median,thetaDist_min,thetaDist_max,demandDist_mean,demandDist_median,demandDist_min,demandDist_max,corrW_thetaDist,corrW_demandDist,corrTheta_demandDist,yBinary,selectedCarriers"));
+        Map<String, Integer> h = headerMap(parseCsvLine("trialId,actual_test_period,method_name,selected_k,selected_C_h,selected_lambda,solve_mode,fillMissingDates,standardizeTheta,thetaScaling,k1Lag,kernelType,bandwidthH,train_size,expected_obj,realized_obj,solve_time_sec,selected_count,oos_transport_cost,oos_spot_cost,oos_penalty_cost,sumW,sumW2,ESS,top1W,top5Wsum,maxW_over_meanW,thetaDist_mean,thetaDist_median,thetaDist_min,thetaDist_max,demandDist_mean,demandDist_median,demandDist_min,demandDist_max,corrW_thetaDist,corrW_demandDist,corrTheta_demandDist,yBinary,selectedCarriers"));
         return new GenericCsvRow(h, parseCsvLine(line));
     }
 
