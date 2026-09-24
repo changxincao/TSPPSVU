@@ -50,10 +50,10 @@ public final class TRBSVUPcmSolver {
         try {
             writeInput(directory, params, moments, settings, adaptToLift, includeTotalVariance);
             System.out.printf(java.util.Locale.ROOT,
-                    "PCM_SOLVE_BEGIN scenarios=%d positiveWeights=%d ess=%.10f kappa=%.17g totalVariance=%s threads=%d limitSec=%d%n",
+                    "PCM_SOLVE_BEGIN scenarios=%d positiveWeights=%d ess=%.10f kappa=%.17g totalVariance=%s eligiblePairs=%d threads=%d limitSec=%d%n",
                     weighted.size(), TRBSVUExperiment1Runner.positiveCount(weighted),
                     TRBSVUExperiment1Runner.ess(weighted), kappa, includeTotalVariance,
-                    settings.threads(), settings.timeLimitSeconds());
+                    eligibleCount(params.eligible), settings.threads(), settings.timeLimitSeconds());
             ProcessBuilder builder = new ProcessBuilder(python.toString(), script.toString(), directory.toString())
                     .redirectErrorStream(true).inheritIO();
             builder.environment().put("PYTHONUNBUFFERED", "1");
@@ -84,7 +84,7 @@ public final class TRBSVUPcmSolver {
                 deleteTemporaryDirectory(directory);
             } catch (Exception cleanupFailure) {
                 if (primaryFailure != null) primaryFailure.addSuppressed(cleanupFailure);
-                else throw cleanupFailure;
+                else System.err.println("PCM temporary-directory cleanup warning: " + cleanupFailure);
             }
         }
     }
@@ -103,7 +103,7 @@ public final class TRBSVUPcmSolver {
         Exception last = null;
         for (int attempt = 0; attempt < 10; attempt++) {
             try {
-                for (String file : List.of("solution.json", "lane_capacity.csv", "rate.csv",
+                for (String file : List.of("solution.json", "eligibility.csv", "lane_capacity.csv", "rate.csv",
                         "carriers.json", "lanes.json", "meta.json"))
                     Files.deleteIfExists(directory.resolve(file));
                 Files.deleteIfExists(directory);
@@ -119,6 +119,13 @@ public final class TRBSVUPcmSolver {
     private static int selectedCount(double[] selection) {
         int count = 0;
         for (double value : selection) if (value > 0.5) count++;
+        return count;
+    }
+
+    private static int eligibleCount(boolean[][] eligible) {
+        int count = 0;
+        for (boolean[] row : eligible)
+            for (boolean value : row) if (value) count++;
         return count;
     }
 
@@ -182,6 +189,19 @@ public final class TRBSVUPcmSolver {
         // so both rate and capacity must be zeroed at this interface boundary.
         writeMatrix(root.resolve("lane_capacity.csv"), p.q, p.eligible, true);
         writeMatrix(root.resolve("rate.csv"), p.r, p.eligible, true);
+        writeEligibility(root.resolve("eligibility.csv"), p.eligible);
+    }
+
+    private static void writeEligibility(Path path, boolean[][] eligible) throws Exception {
+        try (BufferedWriter out = Files.newBufferedWriter(path, StandardCharsets.UTF_8)) {
+            for (boolean[] row : eligible) {
+                for (int j = 0; j < row.length; j++) {
+                    if (j > 0) out.write(',');
+                    out.write(row[j] ? "1" : "0");
+                }
+                out.newLine();
+            }
+        }
     }
 
     private static void writeMatrix(Path path, double[][] values, boolean[][] eligible,

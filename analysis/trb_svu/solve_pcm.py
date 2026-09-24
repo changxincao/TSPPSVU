@@ -34,11 +34,23 @@ def solve(root: Path) -> dict[str, object]:
     carriers = read_json(root / "carriers.json")
     rate = read_matrix(root / "rate.csv")
     lane_capacity = read_matrix(root / "lane_capacity.csv")
+    eligibility_values = read_matrix(root / "eligibility.csv")
 
     i_count = int(meta["carriers"])
     j_count = int(meta["lanes"])
-    if rate.shape != (i_count, j_count) or lane_capacity.shape != (i_count, j_count):
+    expected_shape = (i_count, j_count)
+    if (rate.shape != expected_shape or lane_capacity.shape != expected_shape
+            or eligibility_values.shape != expected_shape):
         raise ValueError("Carrier-lane matrix dimension mismatch")
+    if np.any((eligibility_values != 0.0) & (eligibility_values != 1.0)):
+        raise ValueError("Eligibility matrix must contain only zero or one")
+    eligible = eligibility_values.astype(bool)
+    pair_carrier, pair_lane = np.nonzero(eligible)
+    pair_count = pair_carrier.size
+    if pair_count == 0:
+        raise ValueError("PCM instance has no eligible carrier-lane pair")
+    if np.any(lane_capacity[~eligible] != 0.0) or np.any(rate[~eligible] != 0.0):
+        raise ValueError("Ineligible PCM pairs must have zero capacity and rate")
 
     mean = np.asarray(lanes["mean"], dtype=float)
     variance = np.asarray(lanes["variance_bound"], dtype=float)
@@ -70,7 +82,11 @@ def solve(root: Path) -> dict[str, object]:
     demand = model.rvar(j_count, name="demand")
     lift_dimension = j_count + (1 if include_total_variance else 0)
     lift = model.rvar(lift_dimension, name="second_moment_lift")
-    flow = model.dvar((i_count, j_count), name="flow")
+    # Create policies only for eligible carrier-lane pairs.  The previous
+    # dense I-by-J array was mathematically equivalent, but every ineligible
+    # zero flow still generated a full set of lifted-affine coefficients and
+    # robust-dual constraints.
+    flow = model.dvar(pair_count, name="eligible_flow")
     spot = model.dvar(j_count, name="spot")
     shortfall = model.dvar(i_count, name="shortfall")
 
@@ -95,12 +111,20 @@ def solve(root: Path) -> dict[str, object]:
         E(lift) <= moment_bounds,
     )
 
-    cost = (rate * flow).sum() + spot_cost @ spot + penalty @ shortfall
+    lane_incidence = np.zeros((j_count, pair_count))
+    lane_incidence[pair_lane, np.arange(pair_count)] = 1.0
+    carrier_incidence = np.zeros((i_count, pair_count))
+    carrier_incidence[pair_carrier, np.arange(pair_count)] = 1.0
+    pair_rate = rate[pair_carrier, pair_lane]
+    pair_capacity = lane_capacity[pair_carrier, pair_lane]
+
+    cost = pair_rate @ flow + spot_cost @ spot + penalty @ shortfall
     model.minsup(E(cost), ambiguity)
-    model.st(flow.sum(axis=0) + spot == demand)
-    model.st(flow.sum(axis=1) <= total_capacity * selected)
-    model.st(flow.sum(axis=1) >= mqc * selected - shortfall)
-    model.st(flow <= lane_capacity * selected.reshape((i_count, 1)))
+    carrier_flow = carrier_incidence @ flow
+    model.st(lane_incidence @ flow + spot == demand)
+    model.st(carrier_flow <= total_capacity * selected)
+    model.st(carrier_flow >= mqc * selected - shortfall)
+    model.st(flow <= pair_capacity * selected[pair_carrier])
     model.st(flow >= 0, spot >= 0, shortfall >= 0)
     model.st(selected.sum() >= int(meta["alpha"]), selected.sum() <= int(meta["beta"]))
 
@@ -133,6 +157,7 @@ def solve(root: Path) -> dict[str, object]:
         "model_and_solve_seconds": model_and_solve_seconds,
         "selected": np.rint(y).astype(int).tolist(),
         "selected_count": int(np.rint(y).sum()),
+        "eligible_pair_count": int(pair_count),
         "integrality_error": integrality_error,
         "policy": policy,
         "include_total_variance": include_total_variance,

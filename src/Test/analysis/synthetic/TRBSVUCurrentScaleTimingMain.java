@@ -22,7 +22,8 @@ public final class TRBSVUCurrentScaleTimingMain {
     private static final double LAMBDA = Double.parseDouble(
             System.getProperty("trb.timing.lambda", "0.5"));
     private static final double W1_RADIUS = 0.1;
-    private static final double PCM_KAPPA = 1.5;
+    private static final double PCM_KAPPA = Double.parseDouble(
+            System.getProperty("trb.timing.pcmKappa", "1.5"));
 
     private TRBSVUCurrentScaleTimingMain() { }
 
