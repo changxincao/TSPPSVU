@@ -237,17 +237,14 @@ public final class TRBSVURunnerSelfCheck {
                         "trb_svu_experiment2_final_checkpoint_check_");
                 TRBSVUExperiment2Runner.Result second = new TRBSVUExperiment2Runner(
                         settings, experiment1, 1, new double[]{0.1}, new double[]{0.05},
-                        new double[]{1}, new TRBSVUPcmSolver(
-                                Path.of(".venv-rsome", "Scripts", "python.exe"),
-                                Path.of("analysis", "trb_svu", "solve_pcm.py")),
                          new TRBSVUValidationCheckpoint(secondCheckpoints,
                                 "self-check-instance", "self-check-experiment2"),
                          new TRBSVUFinalCheckpoint(secondFinalCheckpoints.resolve("solve"),
                                  secondFinalCheckpoints.resolve("oos"), "self-check-instance",
                                  "self-check-experiment2", 0, "2"))
                         .run(instance, result.selectedContextual());
-                require(second.decisions().size() == 8 && second.oos().size() == 8,
-                        "Experiment 2 runner did not return six core and two PCM methods.");
+                require(second.decisions().size() == 6 && second.oos().size() == 6,
+                        "Experiment 2 runner did not return the six formal robust methods.");
                 try (var checkpoints = Files.list(secondCheckpoints)) {
                     require(checkpoints.filter(Files::isRegularFile).count()
                                     == second.validationDetails().size(),
@@ -262,15 +259,6 @@ public final class TRBSVURunnerSelfCheck {
                     require(checkpoints.filter(Files::isRegularFile).count()
                                     == 2L * second.oos().size(),
                             "Experiment 2 OOS results were not checkpointed one method at a time.");
-                }
-                Path pcmOutput = Files.createTempFile(Path.of("tmp"), "trb_svu_pcm_inputs_", ".csv");
-                try {
-                    TRBSVUResultWriter.writePcmMomentInputs(pcmOutput, 0, "2",
-                            instance.params.J, second.finalWeights(), second.selectedParameter());
-                    require(Files.readAllLines(pcmOutput).size() == 2 * instance.params.J + 1,
-                            "PCM moment audit output has the wrong number of rows.");
-                } finally {
-                    Files.deleteIfExists(pcmOutput);
                 }
                 try (var paths = Files.walk(secondFinalCheckpoints)) {
                     for (Path path : paths.sorted(Comparator.reverseOrder()).toList())

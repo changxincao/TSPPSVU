@@ -279,8 +279,8 @@ public final class TRBSVUResultWriter {
         }
     }
 
-    /** Exact empirical inputs passed to the lifted-affine PCM approximation. */
-    public static void writePcmMomentInputs(Path file, int replication, String experiment,
+    /** Exact empirical inputs passed to the lifted-affine marginal-moment diagnostic. */
+    public static void writeMarginalMomentInputs(Path file, int replication, String experiment,
                                             int lanes, Map<String, List<Sample>> weights,
                                             Map<String, Double> selectedParameters) throws Exception {
         Files.createDirectories(file.getParent());
@@ -290,10 +290,10 @@ public final class TRBSVUResultWriter {
             out.newLine();
             for (var entry : weights.entrySet()) {
                 String method = entry.getKey();
-                if (!method.endsWith("PCM")) continue;
+                if (!method.endsWith("MM")) continue;
                 double kappa = selectedParameters.getOrDefault(method, Double.NaN);
                 if (!Double.isFinite(kappa))
-                    throw new IllegalArgumentException("Missing selected PCM kappa for " + method);
+                    throw new IllegalArgumentException("Missing selected MM kappa for " + method);
                 TRBSVUPcmSolver.Moments moments = TRBSVUPcmSolver.moments(entry.getValue(), lanes, kappa);
                 for (int j = 0; j < lanes; j++) {
                     out.write(String.format(Locale.ROOT,
@@ -437,8 +437,8 @@ public final class TRBSVUResultWriter {
     }
 
     private static String proofScope(String method) {
-        return method.endsWith("PCM")
-                ? "OPTIMAL_FOR_LIFTED_AFFINE_PCM_APPROXIMATION"
+        return method.endsWith("MM")
+                ? "OPTIMAL_FOR_LIFTED_AFFINE_MARGINAL_MOMENT_APPROXIMATION"
                 : "OPTIMAL_FOR_STATED_METHOD_MODEL";
     }
 

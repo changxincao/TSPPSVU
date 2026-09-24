@@ -28,7 +28,7 @@ if ($LASTEXITCODE -ne 0) { throw "Timing runner compilation failed." }
 $classpath = "$classes;$(Join-Path $project 'bin');$libraries"
 $native = "D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\bin\x64_win64"
 $methods = @("D","SAA","TUNED_SAA","CSAA_EXP","RF_CSAA","U_CHI2","C_CHI2",
-    "RSAA","RCSAA","U_W1","C_W1","U_PCM","C_PCM")
+    "RSAA","RCSAA","U_W1","C_W1","U_MM","C_MM")
 $pending = [System.Collections.Generic.Queue[string]]::new()
 foreach ($method in $methods) { $pending.Enqueue($method) }
 $running = [System.Collections.Generic.List[object]]::new()

@@ -158,10 +158,10 @@ public final class TRBSVUCurrentScaleTimingMain {
             case "C_CHI2" -> robust(instance, contextual, Method.CHI_SQUARED, LAMBDA, settings);
             case "U_W1" -> robust(instance, unconditional, Method.WASSERSTEIN, W1_RADIUS, settings);
             case "C_W1" -> robust(instance, contextual, Method.WASSERSTEIN, W1_RADIUS, settings);
-            case "U_PCM" -> pcm(instance, unconditional, settings);
-            case "C_PCM" -> pcm(instance, contextual, settings);
-            case "U_PCM_MARGINAL" -> pcm(instance, unconditional, settings, true, false);
-            case "C_PCM_MARGINAL" -> pcm(instance, contextual, settings, true, false);
+            case "U_MM" -> pcm(instance, unconditional, settings, true, false);
+            case "C_MM" -> pcm(instance, contextual, settings, true, false);
+            case "U_PCM" -> pcm(instance, unconditional, settings, true, true);
+            case "C_PCM" -> pcm(instance, contextual, settings, true, true);
             case "U_PCM_DEMAND_ONLY" -> pcm(instance, unconditional, settings, false);
             default -> throw new IllegalArgumentException("Unknown timing method: " + name);
         };
@@ -205,8 +205,9 @@ public final class TRBSVUCurrentScaleTimingMain {
                     ? "kernel=EXPONENTIAL;B=" + BANDWIDTH : "trees=500";
             case "RSAA", "RCSAA", "U_CHI2", "C_CHI2" -> "lambda=" + LAMBDA;
             case "U_W1", "C_W1" -> "epsilon=" + W1_RADIUS;
-            case "U_PCM", "C_PCM" -> "kappa=" + PCM_KAPPA + ";policy=lifted_affine";
-            case "U_PCM_MARGINAL", "C_PCM_MARGINAL" ->
+            case "U_PCM", "C_PCM" ->
+                    "kappa=" + PCM_KAPPA + ";policy=lifted_affine;partial_cross_moment";
+            case "U_MM", "C_MM" ->
                     "kappa=" + PCM_KAPPA + ";policy=lifted_affine;marginal_variance_only";
             case "U_PCM_DEMAND_ONLY" -> "kappa=" + PCM_KAPPA + ";policy=demand_affine";
             default -> "none";

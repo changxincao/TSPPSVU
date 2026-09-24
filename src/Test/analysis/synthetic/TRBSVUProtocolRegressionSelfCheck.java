@@ -20,8 +20,8 @@ public final class TRBSVUProtocolRegressionSelfCheck {
 
     public static void main(String[] args) throws Exception {
         require(Arrays.equals(TRBSVUExperiment2Runner.LAMBDA,
-                        new double[]{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10}),
-                "Experiment 2 lambda grid is not the locked 9-point tuning grid.");
+                        new double[]{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 50, 100}),
+                "Experiment 2 lambda grid is not the locked 11-point tuning grid.");
         require(TRBSVUFormalProtocol.CARRIERS == 15
                         && TRBSVUFormalProtocol.LANES == 50
                         && TRBSVUFormalProtocol.HISTORY_PERIODS == 75

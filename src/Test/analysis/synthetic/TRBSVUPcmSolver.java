@@ -13,13 +13,14 @@ import java.util.List;
 import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
 
-/** RSOME/MOSEK adapter for the documented lifted-affine PCM-DRO benchmark. */
+/** RSOME/MOSEK adapter for marginal-moment and optional full PCM diagnostics. */
 public final class TRBSVUPcmSolver {
     private final Path python;
     private final Path script;
 
     public TRBSVUPcmSolver(Path python, Path script) {
-        if (python == null || script == null) throw new IllegalArgumentException("PCM paths are required.");
+        if (python == null || script == null)
+            throw new IllegalArgumentException("Moment-DRO adapter paths are required.");
         this.python = python.toAbsolutePath();
         this.script = script.toAbsolutePath();
     }
@@ -31,9 +32,9 @@ public final class TRBSVUPcmSolver {
 
     public Solution solve(ProcurementParams params, List<Sample> weighted,
                           double kappa, Settings settings, boolean adaptToLift) throws Exception {
-        // Formal PCM benchmark: lane-wise marginal second moments only.
-        // The aggregate total-demand variance remains available through the
-        // explicit overload below for diagnostics, but is not a default model input.
+        // Default diagnostic: lane-wise marginal second moments (MM), not PCM.
+        // The aggregate total-demand variance remains available only through
+        // the explicit overload below for full-PCM diagnostics.
         return solve(params, weighted, kappa, settings, adaptToLift, false);
     }
 
@@ -41,7 +42,7 @@ public final class TRBSVUPcmSolver {
                           double kappa, Settings settings, boolean adaptToLift,
                           boolean includeTotalVariance) throws Exception {
         if (weighted.isEmpty() || !(kappa >= 1.0) || !Double.isFinite(kappa))
-            throw new IllegalArgumentException("Invalid PCM samples or kappa.");
+            throw new IllegalArgumentException("Invalid moment-DRO samples or kappa.");
         Moments moments = moments(weighted, params.J, kappa);
         Path temporaryRoot = Path.of("tmp");
         Files.createDirectories(temporaryRoot);
@@ -49,9 +50,10 @@ public final class TRBSVUPcmSolver {
         Throwable primaryFailure = null;
         try {
             writeInput(directory, params, moments, settings, adaptToLift, includeTotalVariance);
+            String modelLabel = includeTotalVariance ? "PCM" : "MM";
             System.out.printf(java.util.Locale.ROOT,
-                    "PCM_SOLVE_BEGIN scenarios=%d positiveWeights=%d ess=%.10f kappa=%.17g totalVariance=%s eligiblePairs=%d threads=%d limitSec=%d%n",
-                    weighted.size(), TRBSVUExperiment1Runner.positiveCount(weighted),
+                    "%s_SOLVE_BEGIN scenarios=%d positiveWeights=%d ess=%.10f kappa=%.17g totalVariance=%s eligiblePairs=%d threads=%d limitSec=%d%n",
+                    modelLabel, weighted.size(), TRBSVUExperiment1Runner.positiveCount(weighted),
                     TRBSVUExperiment1Runner.ess(weighted), kappa, includeTotalVariance,
                     eligibleCount(params.eligible), settings.threads(), settings.timeLimitSeconds());
             ProcessBuilder builder = new ProcessBuilder(python.toString(), script.toString(), directory.toString())
@@ -65,15 +67,15 @@ public final class TRBSVUPcmSolver {
             boolean ended = process.waitFor(settings.timeLimitSeconds() + 3600L, TimeUnit.SECONDS);
             if (!ended) {
                 destroyProcessTree(process);
-                throw new IllegalStateException("PCM process exceeded solver limit plus 3600 seconds build grace.");
+                throw new IllegalStateException("Moment-DRO process exceeded solver limit plus 3600 seconds build grace.");
             }
             if (process.exitValue() != 0)
-                throw new IllegalStateException("PCM solve failed with exit code " + process.exitValue()
+                throw new IllegalStateException("Moment-DRO solve failed with exit code " + process.exitValue()
                         + "; inspect the run log above this marker.");
             Solution solution = readSolution(directory.resolve("solution.json"), params.I);
             System.out.printf(java.util.Locale.ROOT,
-                    "PCM_SOLVE_END status=%s certified=%s objective=%.17g solveSec=%.6f selected=%d%n",
-                    solution.solverStatus, solution.certifiedOptimal, solution.objValue,
+                    "%s_SOLVE_END status=%s certified=%s objective=%.17g solveSec=%.6f selected=%d%n",
+                    modelLabel, solution.solverStatus, solution.certifiedOptimal, solution.objValue,
                     solution.solveTimeSec, selectedCount(solution.y));
             return solution;
         } catch (Exception | Error failure) {

@@ -59,7 +59,7 @@ final class RCSAALBBDPrimalExactSolver {
                     if (bestY == null) throw ex;
                     if (Double.isFinite(ex.bestBound)) globalLowerBound = Math.max(globalLowerBound, ex.bestBound);
                     if (ex.nodeCount >= 0) totalNodes += ex.nodeCount;
-                    return incompleteSolution(bestUpperBound, bestY, Math.min(bestUpperBound, globalLowerBound),
+                    return incompleteSolution(bestUpperBound, bestY, globalLowerBound,
                             secondsBetween(t0, System.nanoTime()), iter,
                             totalCuts, totalNodes, ex.solverStatus);
                 }
@@ -125,6 +125,13 @@ final class RCSAALBBDPrimalExactSolver {
 
                 if (allExact) {
                     long t1 = System.nanoTime();
+                    if (!boundsConsistent(mr.bestBound, bestUpperBound, cfg.tol)) {
+                        return incompleteSolution(bestUpperBound, bestY, mr.bestBound,
+                                secondsBetween(t0, t1), iter, totalCuts, totalNodes,
+                                String.format(java.util.Locale.ROOT,
+                                        "BOUND_INCONSISTENT:LB=%.17g:UB=%.17g",
+                                        mr.bestBound, bestUpperBound));
+                    }
                     double reportedBound = Double.isFinite(mr.bestBound)
                             ? Math.min(bestUpperBound, mr.bestBound) : Double.NaN;
                     double reportedGap = relativeGap(reportedBound, bestUpperBound);
@@ -139,7 +146,8 @@ final class RCSAALBBDPrimalExactSolver {
                             secondsBetween(afterMaster, afterScenario),
                             secondsBetween(t0, t1)));
                     Solution solution = new Solution(bestUpperBound, bestY, secondsBetween(t0, t1));
-                    solution.solverStatus = "OPTIMAL";
+                    solution.solverStatus = cfg.rcsaaCompactDual
+                            ? "OPTIMAL_RCSAA_PRODUCT_COMPACT" : "OPTIMAL_RCSAA_REPAIR";
                     solution.bestBound = reportedBound;
                     solution.relativeGap = reportedGap;
                     solution.nodeCount = totalNodes;
@@ -196,7 +204,15 @@ final class RCSAALBBDPrimalExactSolver {
 
     private static double relativeGap(double lowerBound, double upperBound) {
         if (!Double.isFinite(lowerBound) || !Double.isFinite(upperBound)) return Double.NaN;
+        if (lowerBound > upperBound) return Double.NaN;
         return Math.max(0.0, upperBound - lowerBound) / Math.max(1e-12, Math.abs(upperBound));
+    }
+
+    static boolean boundsConsistent(double lowerBound, double upperBound, double tolerance) {
+        if (!Double.isFinite(lowerBound) || !Double.isFinite(upperBound)) return false;
+        double absoluteTolerance = Math.max(tolerance,
+                1e-8 * Math.max(1.0, Math.abs(upperBound)));
+        return lowerBound <= upperBound + absoluteTolerance;
     }
 
     private static int countSelected(double[] y) {

@@ -19,7 +19,7 @@ import java.util.Map;
 import java.util.SplittableRandom;
 import java.util.concurrent.TimeUnit;
 
-/** One executable, paired Experiment 1/2 case at a time, including U/C PCM-DRO. */
+/** One executable for paired Experiment 1/2 nominal, RCSAA, chi-square, and W1 methods. */
 public final class TRBSVUExperiment12Main {
     private TRBSVUExperiment12Main() { }
 
@@ -87,12 +87,8 @@ public final class TRBSVUExperiment12Main {
         }
         Path rfPython = Path.of(".venv-rsome", "Scripts", "python.exe").toAbsolutePath();
         Path rfScript = Path.of("analysis", "trb_svu", "rf_leaf_weights.py").toAbsolutePath();
-        Path pcmScript = Path.of("analysis", "trb_svu", "solve_pcm.py").toAbsolutePath();
-        Path pcmMosekAdapter = Path.of("analysis", "trb_svu", "msk_feasible_solver.py").toAbsolutePath();
         String pythonEnvironment = pythonEnvironment(rfPython);
         String rfScriptSha256 = sha256(Files.readAllBytes(rfScript));
-        String pcmScriptSha256 = sha256(Files.readAllBytes(pcmScript));
-        String pcmMosekAdapterSha256 = sha256(Files.readAllBytes(pcmMosekAdapter));
         String javaSourceSha256 = javaSourceFingerprint(Path.of("src"));
         TRBSVUForestWeights forest = new TRBSVUForestWeights(rfPython.toString(), rfScript);
         String instanceSha256 = sha256(Files.readAllBytes(caseFile));
@@ -102,19 +98,18 @@ public final class TRBSVUExperiment12Main {
                 + "|validationTrainingPeriods="
                 + TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS
                 + "|validationOrigins=" + origins + "|rfTrees=500|rfSeed=frozen"
-                + "|rfScriptSha256=" + rfScriptSha256 + "|pcmScriptSha256=" + pcmScriptSha256
-                + "|pcmMosekAdapterSha256=" + pcmMosekAdapterSha256
+                 + "|rfScriptSha256=" + rfScriptSha256
                 + "|javaSourceSha256=" + javaSourceSha256
                 + "|pythonEnvironment=" + pythonEnvironment
-                + "|positiveWeightFloor=1e-8|strictZeroWeightsPruned=true";
+                 + "|chi2PositiveWeightFloor=1e-8|chi2StrictZeroWeightsPruned=true"
+                 + "|w1ZeroWeightsRetainedForSharedSupport=true";
         String experiment1Protocol = sha256((commonProtocol
                 + "|experiment=1|retention=" + Arrays.toString(TRBSVUExperiment1Runner.RETENTION)
                 + "|bandwidth=" + Arrays.toString(TRBSVUExperiment1Runner.BANDWIDTH))
                 .getBytes(StandardCharsets.UTF_8));
         String experiment2Protocol = sha256((commonProtocol
                 + "|experiment=2|lambda=" + Arrays.toString(TRBSVUExperiment2Runner.LAMBDA)
-                + "|w1=" + Arrays.toString(TRBSVUExperiment2Runner.W1_RADIUS)
-                + "|pcm=" + Arrays.toString(TRBSVUExperiment2Runner.PCM_KAPPA))
+                 + "|w1=" + Arrays.toString(TRBSVUExperiment2Runner.W1_RADIUS))
                 .getBytes(StandardCharsets.UTF_8));
         Path seedFile = instanceDirectory.resolve("manifest.txt");
         String runManifest = "baseline=Normal-Low\nI=" + TRBSVUFormalProtocol.CARRIERS
@@ -137,10 +132,12 @@ public final class TRBSVUExperiment12Main {
                 + "rfTrees=500\nrfPythonCommand=" + rfPython + "\n"
                 + "pythonEnvironment=" + pythonEnvironment + "\n"
                 + "rfScriptSha256=" + rfScriptSha256 + "\n"
-                + "pcmScriptSha256=" + pcmScriptSha256 + "\n"
-                + "pcmMosekAdapterSha256=" + pcmMosekAdapterSha256 + "\n"
                 + "javaSourceSha256=" + javaSourceSha256 + "\n"
-                + "positiveWeightFloor=1e-8\nstrictZeroWeightsPruned=true\n";
+                 + "chi2PositiveWeightFloor=1e-8\n"
+                 + "chi2StrictZeroWeightsPruned=true\n"
+                 + "w1ZeroWeightsRetainedForSharedSupport=true\n"
+                 + "rcsaaCompactFormulation="
+                 + (algorithm.equals("compact") ? "PRODUCT_MCCORMICK_COMPACT" : "REPAIR_CUT") + "\n";
         Path completionMarker = replication.resolve("experiment12_complete.txt");
         if (mode.equals("both")) Files.deleteIfExists(completionMarker);
         TRBSVUExperiment1Runner exp1 = new TRBSVUExperiment1Runner(settings, forest, origins,
@@ -230,8 +227,6 @@ public final class TRBSVUExperiment12Main {
                             + "instanceSha256=" + instanceSha256 + "\n"
                             + "javaSourceSha256=" + javaSourceSha256 + "\n"
                             + "rfScriptSha256=" + rfScriptSha256 + "\n"
-                            + "pcmScriptSha256=" + pcmScriptSha256 + "\n"
-                            + "pcmMosekAdapterSha256=" + pcmMosekAdapterSha256 + "\n"
                             + "pythonEnvironment=" + pythonEnvironment + "\n"
                             + "experiment1ProtocolFingerprint=" + experiment1Protocol + "\n"
                             + "experiment2SelectedContextFingerprint=" + selectedContextProtocol + "\n");
@@ -284,11 +279,6 @@ public final class TRBSVUExperiment12Main {
                 parameterTypes, contextFamilies, baseBandwidth, effectiveBandwidth, finalWeights);
         TRBSVUResultWriter.writeFinalWeights(solveDirectory.resolve(prefix + "_final_weights.csv"),
                 index, experiment, finalWeights);
-        if ("2".equals(experiment)) {
-            TRBSVUResultWriter.writePcmMomentInputs(
-                    solveDirectory.resolve(prefix + "_pcm_moment_inputs.csv"),
-                    index, experiment, instance.params.J, finalWeights, parameters);
-        }
         TRBSVUResultWriter.writeOosSummary(oosDirectory.resolve(prefix + "_summary.csv"),
                 index, experiment, oos, decisions);
         TRBSVUResultWriter.writeOosDetails(oosDirectory.resolve(prefix + "_draws.csv"),
@@ -310,7 +300,6 @@ public final class TRBSVUExperiment12Main {
 
     private static String parameterType(String method) {
         if (method.endsWith("W1")) return "W1_RADIUS";
-        if (method.endsWith("PCM")) return "PCM_KAPPA";
         return "LAMBDA";
     }
 

@@ -393,10 +393,10 @@ Contextual robust methods 使用同一批 observations，但采用 Experiment 1 
 
 \subsection{候选方法与“依赖 Experiment 1 的条件性冻结规则”}
 
-代码层面应先支持以下 broad candidate set：RSAA、RCSAA、$U/C$ modified-$\chi^2$ DRO、$U/C$ $W_1$-DRO 以及 $U/C$ PCM-DRO，并保留 selected nominal CSAA 作为 contextual nominal reference。最终论文主表\textbf{不在 Experiment 1 结果出来之前强行剪枝}：
+Experiment 2 的正式候选集为 RSAA、RCSAA、$U/C$ modified-$\chi^2$ DRO 与 $U/C$ $W_1$-DRO，并保留 selected nominal CSAA 作为 contextual nominal reference。矩模型不进入该正式主调度，只保留为附录计算诊断：
 \begin{itemize}
-\item 若 Experiment 1 显示 contextual weighting 相对 SAA-All / Tuned-SAA 有清晰且稳定的优势，则主文可简化为 selected CSAA、RCSAA、$C$-$\chi^2$、$C$-$W_1$ 与 $C$-PCM，必要时仅保留 $U$-$W_1$ 作为一项 supplementary robustness benchmark；
-\item 若 contextual gain 较弱、mixed 或不稳定，则保留 RSAA、$U$-$\chi^2$、$U$-$W_1$、$U$-PCM 等 stronger unconditional robust baselines，避免主文预设“contextualization 必然更好”。
+\item 若 Experiment 1 显示 contextual weighting 相对 SAA-All / Tuned-SAA 有清晰且稳定的优势，则主文可简化为 selected CSAA、RCSAA、$C$-$\chi^2$ 与 $C$-$W_1$，必要时仅保留 $U$-$W_1$ 作为一项 supplementary robustness benchmark；
+\item 若 contextual gain 较弱、mixed 或不稳定，则保留 RSAA、$U$-$\chi^2$ 与 $U$-$W_1$ 等 unconditional robust baselines，避免主文预设“contextualization 必然更好”。
 \end{itemize}
 这是一项前置声明的 conditional design dependency，而非 post-hoc 挑结果。
 
@@ -419,7 +419,7 @@ c(\boldsymbol d,\boldsymbol d')
 \qquad
 \mathcal U=\prod_{j\in\J}[0,m_j].
 \]
-因此 $c$ 是无量纲的逐 lane 标准化平均 $L_1$ 距离，$\mathcal U$ 的 ground-metric diameter 至多为 $1$。该box同时用于Wasserstein和PCM，使连续支撑型基准均限制在逐lane训练经验范围内。对参考分布 $\widehat P_\pi=\sum_{s\in\mathcal S_{\mathrm{tr}}}\pi_s\delta_{\boldsymbol d^s}$，歧义集为
+因此 $c$ 是无量纲的逐 lane 标准化平均 $L_1$ 距离，$\mathcal U$ 的 ground-metric diameter 至多为 $1$。对参考分布 $\widehat P_\pi=\sum_{s\in\mathcal S_{\mathrm{tr}}}\pi_s\delta_{\boldsymbol d^s}$，歧义集为
 \[
 \mathcal P_{\varepsilon}(\widehat P_\pi)
 =\{P:W_{1,c}(P,\widehat P_\pi)\le\varepsilon,
@@ -433,30 +433,27 @@ c(\boldsymbol d,\boldsymbol d')
 
 若某 retained lane 在某一训练窗口内有 $m_j=0$，该 origin 的 Wasserstein 输入无定义，必须在建模前按事先声明的 lane/scale 预处理规则处理，不能在 solver 内临时加任意 positive floor。上述 max scaling 和 $1/|\J|$ 是本文为跨 lane 与跨 network 量级可比而采用的建模选择，并非 Wasserstein 理论强制的唯一标准化。
 
-\subsection{PCM-DRO benchmark}
+\subsection{Moment-DRO附录诊断（不进入Experiment 2主调度）}
 
-Moment 基准只保留 partial cross-moment (PCM)，不使用 Mean--MAD。对于参考权重 $\pi_s$，先计算
+当前可计算的默认诊断只保留逐lane边际均值--方差信息，记为 marginal-moment (MM)，不称为PCM。对于参考权重 $\pi_s$，先计算
 \[
 \widehat\mu_j=\sum_s\pi_s d_j^s,\qquad
-\widehat v_j=\sum_s\pi_s(d_j^s-\widehat\mu_j)^2,\qquad
-\widehat v_{\Sigma}=\sum_s\pi_s\left(\sum_j(d_j^s-\widehat\mu_j)\right)^2.
+\widehat v_j=\sum_s\pi_s(d_j^s-\widehat\mu_j)^2.
 \]
-歧义集只保留逐 lane 的边际方差和一条总需求方差约束，而非 $60\times60$ full covariance：
+其歧义集为
 \[
-\mathcal P_{\mathrm{PCM}}(\kappa)
+\mathcal P_{\mathrm{MM}}(\kappa)
 =\left\{
 P:\ P(\boldsymbol d\in\mathcal U)=1,\ 
 \mathbb E_P[d_j]=\widehat\mu_j,\ 
-\mathbb E_P[(d_j-\widehat\mu_j)^2]\le \kappa^2\widehat v_j,\ \forall j,\quad
-\mathbb E_P\left[\left(\sum_j(d_j-\widehat\mu_j)\right)^2\right]
-\le\kappa^2\widehat v_{\Sigma}
+\mathbb E_P[(d_j-\widehat\mu_j)^2]\le \kappa^2\widehat v_j,\ \forall j
 \right\}.
 \]
-其中 unconditional reference 使用 equal-weight estimates，contextual reference 使用 $\pi_s$-weighted estimates；两者只改变参考权重，不改变歧义集结构。总需求方差含跨 lane 协方差信息，但只约束其总和，不估计完整协方差矩阵。沿用本说明书的一个 global inflation factor，同时放大边际和总量方差上界：
+其中 unconditional reference 使用 equal-weight estimates，contextual reference 使用 $\pi_s$-weighted estimates。附录诊断可使用
 \[
 \kappa\in\{1,1.25,1.5,2\},
 \]
-并通过相同 rolling validation criterion 选择 $\kappa^\star$。正式求解采用 RSOME lifted affine decision rules，须明确标为策略近似，不能称为完全自适应二阶段 PCM-DRO 的精确解。当前适配器只接受 RSOME/MOSEK 的 Optimal 状态；在该状态下沿用现有输出约定 $\texttt{bestBound}=\texttt{objective}$、$\texttt{gap}=0$，其证书仅针对该 lifted-affine MISOCP 近似。Experiment 2 runner 已实现上述网格、U/C 两种矩估计和统一 OOS 评价；正式规模尚待运行。
+该模型采用 RSOME lifted affine decision rules，须明确标为策略近似，不能称为完全自适应二阶段矩DRO的精确解。加入总需求二阶矩约束的 full PCM 仅作为计算困难诊断保留，不进入正式Experiment 2。超时但存在整数incumbent时保留其目标、bound和gap并标记未认证；只有MOSEK证明最优时，证书才针对所声明的lifted-affine MISOCP近似成立。
 
 \subsection{输出与 operational table}
 
@@ -767,7 +764,7 @@ RF & 500 trees, all contextual features available at splits & secondary settings
 Mean--SD / $\chi^2$ main $\lambda$ & $\{.01,.05,.1,.25,.5,1,2,5,10,50,100\}$ & Exp.~2 tuning\\
 Wasserstein geometry & training-max-scaled average-lane $L_1$; box $[0,m_j]$ & exact definition in Exp.~2\\
 Wasserstein radius & $\{.005,.01,.025,.05,.1,.25,.5,1\}$ & absolute $\varepsilon$, validation-selected\\
-PCM $\kappa$ & $\{1,1.25,1.5,2\}$ & Exp.~2 only; marginal and total-demand bounds\\
+MM/PCM $\kappa$ & $\{1,1.25,1.5,2\}$ & appendix diagnostic only; not in Exp.~2 main runner\\
 Exp.~3 DGP cells & Normal/Lognormal $\times$ Low/Medium/High & 10 paired reps/cell\\
 Exp.~3 methods & Tuned-SAA, CSAA, RSAA, RCSAA, U/C-$\chi^2$, U/C-$W_1$ & no Moment, no SAA-All\\
 Exp.~4 & RCSAA vs C-$\chi^2$, same $\lambda$ & gap + certificate + OOS + time\\

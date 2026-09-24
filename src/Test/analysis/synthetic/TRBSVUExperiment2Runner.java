@@ -16,9 +16,8 @@ import java.util.Map;
 
 /** Experiment 2: robust alternatives on the same frozen case and validation origins. */
 public final class TRBSVUExperiment2Runner {
-    public static final double[] LAMBDA = {0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10};
+    public static final double[] LAMBDA = {0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 50, 100};
     public static final double[] W1_RADIUS = {0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1};
-    public static final double[] PCM_KAPPA = {1, 1.25, 1.5, 2};
 
     public record Result(Map<String, Solution> decisions,
                          Map<String, TRBSVUSolveMethods.Oos> oos,
@@ -35,75 +34,47 @@ public final class TRBSVUExperiment2Runner {
     private final int validationOrigins;
     private final double[] lambdaGrid;
     private final double[] w1Grid;
-    private final double[] pcmGrid;
-    private final TRBSVUPcmSolver pcmSolver;
     private final TRBSVUValidationCheckpoint checkpoint;
     private final TRBSVUFinalCheckpoint finalCheckpoint;
 
     public TRBSVUExperiment2Runner(Settings settings, TRBSVUExperiment1Runner contextual,
                                     int validationOrigins) {
-        this(settings, contextual, validationOrigins, LAMBDA, W1_RADIUS, PCM_KAPPA,
-                new TRBSVUPcmSolver(java.nio.file.Path.of(".venv-rsome", "Scripts", "python.exe"),
-                        java.nio.file.Path.of("analysis", "trb_svu", "solve_pcm.py")), null, null);
+        this(settings, contextual, validationOrigins, LAMBDA, W1_RADIUS, null, null);
     }
 
     public TRBSVUExperiment2Runner(Settings settings, TRBSVUExperiment1Runner contextual,
                                     int validationOrigins,
                                     TRBSVUValidationCheckpoint checkpoint) {
-        this(settings, contextual, validationOrigins, LAMBDA, W1_RADIUS, PCM_KAPPA,
-                new TRBSVUPcmSolver(java.nio.file.Path.of(".venv-rsome", "Scripts", "python.exe"),
-                        java.nio.file.Path.of("analysis", "trb_svu", "solve_pcm.py")), checkpoint, null);
+        this(settings, contextual, validationOrigins, LAMBDA, W1_RADIUS, checkpoint, null);
     }
 
     public TRBSVUExperiment2Runner(Settings settings, TRBSVUExperiment1Runner contextual,
                                     int validationOrigins,
                                     TRBSVUValidationCheckpoint checkpoint,
                                     TRBSVUFinalCheckpoint finalCheckpoint) {
-        this(settings, contextual, validationOrigins, LAMBDA, W1_RADIUS, PCM_KAPPA,
-                new TRBSVUPcmSolver(java.nio.file.Path.of(".venv-rsome", "Scripts", "python.exe"),
-                        java.nio.file.Path.of("analysis", "trb_svu", "solve_pcm.py")),
+        this(settings, contextual, validationOrigins, LAMBDA, W1_RADIUS,
                 checkpoint, finalCheckpoint);
     }
 
     /** Package-local grid injection is for the isolated small self-check only. */
     TRBSVUExperiment2Runner(Settings settings, TRBSVUExperiment1Runner contextual,
                             int validationOrigins, double[] lambdaGrid, double[] w1Grid) {
-        this(settings, contextual, validationOrigins, lambdaGrid, w1Grid, new double[]{1},
-                new TRBSVUPcmSolver(java.nio.file.Path.of(".venv-rsome", "Scripts", "python.exe"),
-                        java.nio.file.Path.of("analysis", "trb_svu", "solve_pcm.py")), null, null);
+        this(settings, contextual, validationOrigins, lambdaGrid, w1Grid, null, null);
     }
 
     TRBSVUExperiment2Runner(Settings settings, TRBSVUExperiment1Runner contextual,
                             int validationOrigins, double[] lambdaGrid, double[] w1Grid,
-                            double[] pcmGrid, TRBSVUPcmSolver pcmSolver) {
-        this(settings, contextual, validationOrigins, lambdaGrid, w1Grid, pcmGrid, pcmSolver,
-                null, null);
-    }
-
-    TRBSVUExperiment2Runner(Settings settings, TRBSVUExperiment1Runner contextual,
-                            int validationOrigins, double[] lambdaGrid, double[] w1Grid,
-                            double[] pcmGrid, TRBSVUPcmSolver pcmSolver,
-                            TRBSVUValidationCheckpoint checkpoint) {
-        this(settings, contextual, validationOrigins, lambdaGrid, w1Grid, pcmGrid, pcmSolver,
-                checkpoint, null);
-    }
-
-    TRBSVUExperiment2Runner(Settings settings, TRBSVUExperiment1Runner contextual,
-                            int validationOrigins, double[] lambdaGrid, double[] w1Grid,
-                            double[] pcmGrid, TRBSVUPcmSolver pcmSolver,
                             TRBSVUValidationCheckpoint checkpoint,
                             TRBSVUFinalCheckpoint finalCheckpoint) {
         if (settings == null || contextual == null || validationOrigins < 1)
             throw new IllegalArgumentException("Invalid Experiment 2 settings.");
-        if (lambdaGrid.length == 0 || w1Grid.length == 0 || pcmGrid.length == 0 || pcmSolver == null)
+        if (lambdaGrid.length == 0 || w1Grid.length == 0)
             throw new IllegalArgumentException("Empty robustness grid.");
         this.settings = settings;
         this.contextual = contextual;
         this.validationOrigins = validationOrigins;
         this.lambdaGrid = lambdaGrid.clone();
         this.w1Grid = w1Grid.clone();
-        this.pcmGrid = pcmGrid.clone();
-        this.pcmSolver = pcmSolver;
         this.checkpoint = checkpoint;
         this.finalCheckpoint = finalCheckpoint;
     }
@@ -187,102 +158,10 @@ public final class TRBSVUExperiment2Runner {
             if (finalCheckpoint != null)
                 finalCheckpoint.saveOos(name, evaluation.summary(), evaluation.draws(), solution);
         }
-        for (String name : List.of("U-PCM", "C-PCM")) {
-            boolean isContextual = name.startsWith("C-");
-            double bestParameter = Double.NaN, bestCost = Double.POSITIVE_INFINITY;
-            double bestSd = Double.POSITIVE_INFINITY;
-            Map<Double, Double> curve = new LinkedHashMap<>();
-            for (double kappa : pcmGrid) {
-                ValidationScore score = validatePcm(instance, selected, isContextual, kappa,
-                        name, validationDetails);
-                curve.put(kappa, score.mean());
-                System.out.println("Experiment 2 validated method=" + name + " kappa="
-                        + kappa + " origins=" + validationOrigins + " cost=" + score.mean()
-                        + " sd=" + score.sd());
-                if (better(score, kappa, bestCost, bestSd, bestParameter)) {
-                    bestCost = score.mean();
-                    bestSd = score.sd();
-                    bestParameter = kappa;
-                }
-            }
-            if (!Double.isFinite(bestParameter))
-                throw new IllegalStateException("All PCM validation values invalid for " + name);
-            WeightResult weightResult = isContextual
-                    ? contextual.contextualWeightResult(instance, instance.history,
-                            instance.testContext, selected)
-                    : new WeightResult(TRBSVUScenarioWeights.equal(instance.history), Double.NaN);
-            List<Sample> weighted = weightResult.weights();
-            Solution solution = finalCheckpoint == null ? null
-                    : finalCheckpoint.load(name, bestParameter).orElse(null);
-            if (solution == null) {
-                System.out.printf(java.util.Locale.ROOT,
-                        "RUN_CONTEXT experiment=2 stage=final method=%s candidate=%.17g%n",
-                        name, bestParameter);
-                solution = pcmSolver.solve(instance.params, weighted, bestParameter, settings);
-                requireUsableIncumbent(solution, name, instance.params.I);
-                if (finalCheckpoint != null) finalCheckpoint.save(name, bestParameter, solution);
-            }
-            requireUsableIncumbent(solution, name, instance.params.I);
-            chosen.put(name, bestParameter);
-            validation.put(name, bestCost);
-            curves.put(name, Collections.unmodifiableMap(new LinkedHashMap<>(curve)));
-            solutions.put(name, solution);
-            finalWeights.put(name, weighted);
-            effectiveContextBandwidth.put(name, weightResult.effectiveBandwidth());
-            TRBSVUSolveMethods.OosEvaluation evaluation = TRBSVUSolveMethods.evaluateDetailed(
-                    instance.params, solution.y, instance.oos);
-            oos.put(name, evaluation.summary());
-            oosDetails.put(name, evaluation.draws());
-            if (finalCheckpoint != null)
-                finalCheckpoint.saveOos(name, evaluation.summary(), evaluation.draws(), solution);
-        }
         return new Result(orderedCopy(solutions), orderedCopy(oos), orderedCopy(oosDetails),
                 orderedCopy(finalWeights), orderedCopy(effectiveContextBandwidth),
                 orderedCopy(chosen), orderedCopy(validation), orderedCopy(curves),
                 List.copyOf(validationDetails));
-    }
-
-    private ValidationScore validatePcm(TRBSVUSyntheticCase instance, ContextualChoice selected,
-                                        boolean isContextual, double kappa, String methodName,
-                                        List<TRBSVUValidationTrace> details) throws Exception {
-        double[] realizedCosts = new double[validationOrigins];
-        int firstOrigin = TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS;
-        for (int t = firstOrigin; t < firstOrigin + validationOrigins; t++) {
-            if (checkpoint != null) {
-                var restored = checkpoint.load(methodName, kappa, t);
-                if (restored.isPresent()) {
-                    TRBSVUValidationTrace trace = restored.get();
-                    verifyCheckpointWindow(instance, trace, t);
-                    if (!Double.isFinite(trace.realizedValidationCost()))
-                        throw new IllegalStateException("Invalid PCM validation checkpoint cost: " + methodName);
-                    details.add(trace);
-                    realizedCosts[t - firstOrigin] = trace.realizedValidationCost();
-                    continue;
-                }
-            }
-            TRBSVUSyntheticCase.ValidationWindow window = instance.validationWindow(t,
-                    TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS);
-            WeightResult weightResult = isContextual
-                    ? contextual.contextualWeightResult(instance, window.train(),
-                            window.realized().theta, selected)
-                    : new WeightResult(TRBSVUScenarioWeights.equal(window.train()), Double.NaN);
-            List<Sample> weighted = weightResult.weights();
-            if (weighted.isEmpty()) return ValidationScore.invalid();
-            System.out.printf(java.util.Locale.ROOT,
-                    "RUN_CONTEXT experiment=2 stage=validation method=%s candidate=%.17g origin=%d trainingStart=%d trainingEnd=%d%n",
-                    methodName, kappa, t, window.train().get(0).period.tIndex,
-                    window.train().get(window.train().size() - 1).period.tIndex);
-            Solution solution = pcmSolver.solve(instance.params, weighted, kappa, settings);
-            requireUsableIncumbent(solution, methodName, instance.params.I);
-            double realized = TRBSVUSolveMethods.realizedCost(instance.params, solution.y,
-                    window.realized().demand());
-            realizedCosts[t - firstOrigin] = realized;
-            TRBSVUValidationTrace trace = trace(methodName, kappa, t, window.train(), weighted,
-                    weightResult.effectiveBandwidth(), solution, realized);
-            details.add(trace);
-            saveCheckpoint(trace);
-        }
-        return ValidationScore.from(realizedCosts);
     }
 
     private static void requireUsableIncumbent(Solution solution, String method, int carriers) {

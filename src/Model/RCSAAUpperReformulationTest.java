@@ -18,6 +18,10 @@ import java.util.*;
 public final class RCSAAUpperReformulationTest {
     public static void main(String[] args) throws Exception {
         Locale.setDefault(Locale.US);
+        if (RCSAALBBDPrimalExactSolver.boundsConsistent(101.0, 100.0, 1e-4))
+            throw new IllegalStateException("RCSAA certificate accepted LB > UB.");
+        if (!RCSAALBBDPrimalExactSolver.boundsConsistent(100.00001, 100.0, 1e-4))
+            throw new IllegalStateException("RCSAA certificate rejected numerical tolerance.");
         Path out = Path.of(args[1]);
         Files.createDirectories(out);
         Config cfg = new Config();
