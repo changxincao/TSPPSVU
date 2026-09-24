@@ -286,7 +286,7 @@ public final class TRBSVUResultWriter {
         Files.createDirectories(file.getParent());
         try (BufferedWriter out = writer(file)) {
             out.write("replication,experiment,method,kappa,row_type,lane_index,mean_demand,"
-                    + "marginal_variance_bound,support_upper,total_demand_variance_bound");
+                    + "marginal_variance_bound,support_upper");
             out.newLine();
             for (var entry : weights.entrySet()) {
                 String method = entry.getKey();
@@ -297,13 +297,10 @@ public final class TRBSVUResultWriter {
                 TRBSVUPcmSolver.Moments moments = TRBSVUPcmSolver.moments(entry.getValue(), lanes, kappa);
                 for (int j = 0; j < lanes; j++) {
                     out.write(String.format(Locale.ROOT,
-                            "%d,%s,%s,%.17g,LANE,%d,%.17g,%.17g,%.17g,NA%n",
+                            "%d,%s,%s,%.17g,LANE,%d,%.17g,%.17g,%.17g%n",
                             replication, experiment, method, kappa, j, moments.mean()[j],
                             moments.variance()[j], moments.upper()[j]));
                 }
-                out.write(String.format(Locale.ROOT,
-                        "%d,%s,%s,%.17g,AGGREGATE,NA,NA,NA,NA,%.17g%n",
-                        replication, experiment, method, kappa, moments.totalVariance()));
             }
         }
     }

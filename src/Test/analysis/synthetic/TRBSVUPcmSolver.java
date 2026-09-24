@@ -31,7 +31,10 @@ public final class TRBSVUPcmSolver {
 
     public Solution solve(ProcurementParams params, List<Sample> weighted,
                           double kappa, Settings settings, boolean adaptToLift) throws Exception {
-        return solve(params, weighted, kappa, settings, adaptToLift, true);
+        // Formal PCM benchmark: lane-wise marginal second moments only.
+        // The aggregate total-demand variance remains available through the
+        // explicit overload below for diagnostics, but is not a default model input.
+        return solve(params, weighted, kappa, settings, adaptToLift, false);
     }
 
     public Solution solve(ProcurementParams params, List<Sample> weighted,

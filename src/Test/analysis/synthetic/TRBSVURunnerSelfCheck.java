@@ -267,7 +267,7 @@ public final class TRBSVURunnerSelfCheck {
                 try {
                     TRBSVUResultWriter.writePcmMomentInputs(pcmOutput, 0, "2",
                             instance.params.J, second.finalWeights(), second.selectedParameter());
-                    require(Files.readAllLines(pcmOutput).size() == 2 * (instance.params.J + 1) + 1,
+                    require(Files.readAllLines(pcmOutput).size() == 2 * instance.params.J + 1,
                             "PCM moment audit output has the wrong number of rows.");
                 } finally {
                     Files.deleteIfExists(pcmOutput);
