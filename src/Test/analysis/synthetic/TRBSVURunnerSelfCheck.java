@@ -188,9 +188,9 @@ public final class TRBSVURunnerSelfCheck {
                 TRBSVUResultWriter.writeFinalWeights(output.resolve("final_weights.csv"),
                         0, "1", result.finalWeights());
                 TRBSVUResultWriter.writeOosSummary(output.resolve("oos_summary.csv"),
-                        0, "1", result.oos());
+                        0, "1", result.oos(), result.decisions());
                 TRBSVUResultWriter.writeOosDetails(output.resolve("oos_draws.csv"),
-                        0, "1", result.oosDetails());
+                        0, "1", result.oosDetails(), result.decisions());
                 require(Files.size(output.resolve("validation_details.csv")) > 0
                                 && Files.size(output.resolve("selected_context.csv")) > 0
                                 && Files.size(output.resolve("final_solves.csv")) > 0
@@ -208,6 +208,11 @@ public final class TRBSVURunnerSelfCheck {
                 require(Files.readAllLines(output.resolve("oos_summary.csv")).size()
                                 == result.oos().size() + 1,
                         "OOS summary CSV row count is wrong.");
+                String oosHeader = Files.readAllLines(output.resolve("oos_summary.csv")).get(0);
+                require(oosHeader.contains("solve_status")
+                                && oosHeader.contains("certified_optimal")
+                                && oosHeader.contains("solve_gap"),
+                        "OOS summary is missing solve-certificate metadata.");
                 verifyOosAggregation(result);
             } finally {
                 try (var paths = Files.walk(output)) {

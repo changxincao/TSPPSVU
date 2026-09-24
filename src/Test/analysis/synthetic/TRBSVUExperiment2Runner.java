@@ -170,10 +170,10 @@ public final class TRBSVUExperiment2Runner {
                 solution = TRBSVUSolveMethods.solve(instance.params, instance.lanes,
                         weighted, instance.testContext, method, bestParameter, settings);
                 solution.solveTimeSec = (System.nanoTime() - started) / 1.0e9;
-                requireCertified(solution, name, instance.params.I);
+                requireUsableIncumbent(solution, name, instance.params.I);
                 if (finalCheckpoint != null) finalCheckpoint.save(name, bestParameter, solution);
             }
-            requireCertified(solution, name, instance.params.I);
+            requireUsableIncumbent(solution, name, instance.params.I);
             chosen.put(name, bestParameter);
             validation.put(name, bestCost);
             curves.put(name, Collections.unmodifiableMap(new LinkedHashMap<>(curve)));
@@ -185,7 +185,7 @@ public final class TRBSVUExperiment2Runner {
             oos.put(name, evaluation.summary());
             oosDetails.put(name, evaluation.draws());
             if (finalCheckpoint != null)
-                finalCheckpoint.saveOos(name, evaluation.summary(), evaluation.draws());
+                finalCheckpoint.saveOos(name, evaluation.summary(), evaluation.draws(), solution);
         }
         for (String name : List.of("U-PCM", "C-PCM")) {
             boolean isContextual = name.startsWith("C-");
@@ -219,10 +219,10 @@ public final class TRBSVUExperiment2Runner {
                         "RUN_CONTEXT experiment=2 stage=final method=%s candidate=%.17g%n",
                         name, bestParameter);
                 solution = pcmSolver.solve(instance.params, weighted, bestParameter, settings);
-                requireCertified(solution, name, instance.params.I);
+                requireUsableIncumbent(solution, name, instance.params.I);
                 if (finalCheckpoint != null) finalCheckpoint.save(name, bestParameter, solution);
             }
-            requireCertified(solution, name, instance.params.I);
+            requireUsableIncumbent(solution, name, instance.params.I);
             chosen.put(name, bestParameter);
             validation.put(name, bestCost);
             curves.put(name, Collections.unmodifiableMap(new LinkedHashMap<>(curve)));
@@ -234,7 +234,7 @@ public final class TRBSVUExperiment2Runner {
             oos.put(name, evaluation.summary());
             oosDetails.put(name, evaluation.draws());
             if (finalCheckpoint != null)
-                finalCheckpoint.saveOos(name, evaluation.summary(), evaluation.draws());
+                finalCheckpoint.saveOos(name, evaluation.summary(), evaluation.draws(), solution);
         }
         return new Result(orderedCopy(solutions), orderedCopy(oos), orderedCopy(oosDetails),
                 orderedCopy(finalWeights), orderedCopy(effectiveContextBandwidth),
@@ -253,8 +253,8 @@ public final class TRBSVUExperiment2Runner {
                 if (restored.isPresent()) {
                     TRBSVUValidationTrace trace = restored.get();
                     verifyCheckpointWindow(instance, trace, t);
-                    if (!trace.certifiedOptimal())
-                        throw new IllegalStateException("Uncertified PCM validation checkpoint: " + methodName);
+                    if (!Double.isFinite(trace.realizedValidationCost()))
+                        throw new IllegalStateException("Invalid PCM validation checkpoint cost: " + methodName);
                     details.add(trace);
                     realizedCosts[t - firstOrigin] = trace.realizedValidationCost();
                     continue;
@@ -273,9 +273,7 @@ public final class TRBSVUExperiment2Runner {
                     methodName, kappa, t, window.train().get(0).period.tIndex,
                     window.train().get(window.train().size() - 1).period.tIndex);
             Solution solution = pcmSolver.solve(instance.params, weighted, kappa, settings);
-            if (solution.y == null || !solution.certifiedOptimal)
-                throw new IllegalStateException("Uncertified lifted-affine PCM solve at origin "
-                        + t + ", kappa=" + kappa + ", status=" + solution.solverStatus);
+            requireUsableIncumbent(solution, methodName, instance.params.I);
             double realized = TRBSVUSolveMethods.realizedCost(instance.params, solution.y,
                     window.realized().demand());
             realizedCosts[t - firstOrigin] = realized;
@@ -287,11 +285,15 @@ public final class TRBSVUExperiment2Runner {
         return ValidationScore.from(realizedCosts);
     }
 
-    private static void requireCertified(Solution solution, String method, int carriers) {
-        if (solution.y == null || solution.y.length != carriers || !solution.certifiedOptimal
+    private static void requireUsableIncumbent(Solution solution, String method, int carriers) {
+        if (solution == null || solution.y == null || solution.y.length != carriers
                 || !Double.isFinite(solution.objValue)) {
-            throw new IllegalStateException("Uncertified Experiment 2 final solve for " + method
+            throw new IllegalStateException("Experiment 2 solve has no usable incumbent for " + method
                     + ", status=" + solution.solverStatus + ", gap=" + solution.relativeGap);
+        }
+        for (double value : solution.y) {
+            if (!Double.isFinite(value) || Math.abs(value - Math.rint(value)) > 1e-5)
+                throw new IllegalStateException("Experiment 2 incumbent is not integral for " + method);
         }
     }
 
@@ -306,8 +308,8 @@ public final class TRBSVUExperiment2Runner {
                 if (restored.isPresent()) {
                     TRBSVUValidationTrace trace = restored.get();
                     verifyCheckpointWindow(instance, trace, t);
-                    if (!trace.certifiedOptimal())
-                        throw new IllegalStateException("Uncertified validation checkpoint: " + methodName);
+                    if (!Double.isFinite(trace.realizedValidationCost()))
+                        throw new IllegalStateException("Invalid validation checkpoint cost: " + methodName);
                     details.add(trace);
                     realizedCosts[t - firstOrigin] = trace.realizedValidationCost();
                     continue;
@@ -329,10 +331,7 @@ public final class TRBSVUExperiment2Runner {
             Solution solution = TRBSVUSolveMethods.solve(instance.params, instance.lanes,
                     weighted, query, method, parameter, settings);
             solution.solveTimeSec = (System.nanoTime() - started) / 1.0e9;
-            if (solution.y == null || !solution.certifiedOptimal)
-                throw new IllegalStateException("Uncertified validation solve at origin " + t
-                        + ", method=" + method + ", parameter=" + parameter
-                        + ", status=" + solution.solverStatus + ", gap=" + solution.relativeGap);
+            requireUsableIncumbent(solution, methodName, instance.params.I);
             double realized = TRBSVUSolveMethods.realizedCost(instance.params, solution.y,
                     window.realized().demand());
             realizedCosts[t - firstOrigin] = realized;

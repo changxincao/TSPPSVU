@@ -31,6 +31,12 @@ public final class TRBSVUPcmSolver {
 
     public Solution solve(ProcurementParams params, List<Sample> weighted,
                           double kappa, Settings settings, boolean adaptToLift) throws Exception {
+        return solve(params, weighted, kappa, settings, adaptToLift, true);
+    }
+
+    public Solution solve(ProcurementParams params, List<Sample> weighted,
+                          double kappa, Settings settings, boolean adaptToLift,
+                          boolean includeTotalVariance) throws Exception {
         if (weighted.isEmpty() || !(kappa >= 1.0) || !Double.isFinite(kappa))
             throw new IllegalArgumentException("Invalid PCM samples or kappa.");
         Moments moments = moments(weighted, params.J, kappa);
@@ -39,11 +45,11 @@ public final class TRBSVUPcmSolver {
         Path directory = Files.createTempDirectory(temporaryRoot, "trb_svu_pcm_");
         Throwable primaryFailure = null;
         try {
-            writeInput(directory, params, moments, settings, adaptToLift);
+            writeInput(directory, params, moments, settings, adaptToLift, includeTotalVariance);
             System.out.printf(java.util.Locale.ROOT,
-                    "PCM_SOLVE_BEGIN scenarios=%d positiveWeights=%d ess=%.10f kappa=%.17g threads=%d limitSec=%d%n",
+                    "PCM_SOLVE_BEGIN scenarios=%d positiveWeights=%d ess=%.10f kappa=%.17g totalVariance=%s threads=%d limitSec=%d%n",
                     weighted.size(), TRBSVUExperiment1Runner.positiveCount(weighted),
-                    TRBSVUExperiment1Runner.ess(weighted), kappa,
+                    TRBSVUExperiment1Runner.ess(weighted), kappa, includeTotalVariance,
                     settings.threads(), settings.timeLimitSeconds());
             ProcessBuilder builder = new ProcessBuilder(python.toString(), script.toString(), directory.toString())
                     .redirectErrorStream(true).inheritIO();
@@ -152,10 +158,12 @@ public final class TRBSVUPcmSolver {
     }
 
     private static void writeInput(Path root, ProcurementParams p, Moments m,
-                                   Settings settings, boolean adaptToLift) throws Exception {
+                                   Settings settings, boolean adaptToLift,
+                                   boolean includeTotalVariance) throws Exception {
         Files.writeString(root.resolve("meta.json"), "{\"carriers\":" + p.I
                 + ",\"lanes\":" + p.J + ",\"alpha\":" + p.alpha + ",\"beta\":" + p.beta
                 + ",\"total_variance_bound\":" + m.totalVariance
+                + ",\"include_total_variance\":" + includeTotalVariance
                 + ",\"policy\":\"" + (adaptToLift
                 ? "demand_and_second_moment_lift_affine" : "demand_affine") + "\""
                 + ",\"threads\":" + settings.threads() + ",\"time_limit_seconds\":"
@@ -199,9 +207,9 @@ public final class TRBSVUPcmSolver {
         for (int i = 0; i < carriers; i++) y[i] = Double.parseDouble(fields[i].trim());
         Solution solution = new Solution(objective, y, seconds);
         solution.solverStatus = status;
-        solution.bestBound = objective;
-        solution.relativeGap = 0.0;
-        solution.certifiedOptimal = true; // For the stated PCM decision-rule approximation only.
+        solution.bestBound = number(json, "best_bound");
+        solution.relativeGap = number(json, "relative_gap");
+        solution.certifiedOptimal = bool(json, "certified_optimal");
         return solution;
     }
 
@@ -217,6 +225,14 @@ public final class TRBSVUPcmSolver {
         int colon = json.indexOf(':', json.indexOf("\"" + key + "\""));
         int start = json.indexOf('"', colon) + 1;
         return json.substring(start, json.indexOf('"', start));
+    }
+
+    private static boolean bool(String json, String key) {
+        int start = json.indexOf(':', json.indexOf("\"" + key + "\"")) + 1;
+        while (start < json.length() && Character.isWhitespace(json.charAt(start))) start++;
+        if (json.startsWith("true", start)) return true;
+        if (json.startsWith("false", start)) return false;
+        throw new IllegalStateException("Invalid JSON boolean for " + key);
     }
 
     private static String json(double[] values) {

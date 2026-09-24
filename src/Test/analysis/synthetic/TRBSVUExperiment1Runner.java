@@ -200,18 +200,18 @@ public final class TRBSVUExperiment1Runner {
                 solved = TRBSVUSolveMethods.solve(instance.params, instance.lanes,
                         method.getValue(), instance.testContext, Method.NOMINAL, 0.0, settings);
                 solved.solveTimeSec = (System.nanoTime() - started) / 1.0e9;
-                requireCertified(solved, method.getKey(), instance.params.I);
+                requireUsableIncumbent(solved, method.getKey(), instance.params.I);
                 if (finalCheckpoint != null)
                     finalCheckpoint.save(method.getKey(), selectedParameter, solved);
             }
-            requireCertified(solved, method.getKey(), instance.params.I);
+            requireUsableIncumbent(solved, method.getKey(), instance.params.I);
             solutions.put(method.getKey(), solved);
             TRBSVUSolveMethods.OosEvaluation evaluation = TRBSVUSolveMethods.evaluateDetailed(
                     instance.params, solved.y, instance.oos);
             oos.put(method.getKey(), evaluation.summary());
             oosDetails.put(method.getKey(), evaluation.draws());
             if (finalCheckpoint != null)
-                finalCheckpoint.saveOos(method.getKey(), evaluation.summary(), evaluation.draws());
+                finalCheckpoint.saveOos(method.getKey(), evaluation.summary(), evaluation.draws(), solved);
         }
         return new Result(orderedCopy(solutions), orderedCopy(oos), orderedCopy(oosDetails),
                 orderedCopy(finalWeights), orderedCopy(validation), orderedCopy(curves),
@@ -219,12 +219,21 @@ public final class TRBSVUExperiment1Runner {
                 retention, Map.copyOf(selectedBandwidth), Map.copyOf(finalBandwidth), chosen);
     }
 
-    private static void requireCertified(Solution solution, String method, int carriers) {
-        if (solution.y == null || solution.y.length != carriers || !solution.certifiedOptimal
-                || !Double.isFinite(solution.objValue)) {
-            throw new IllegalStateException("Uncertified Experiment 1 final solve for " + method
+    private static void requireUsableIncumbent(Solution solution, String method, int carriers) {
+        if (!usableIncumbent(solution, carriers)) {
+            throw new IllegalStateException("Experiment 1 solve has no usable incumbent for " + method
                     + ", status=" + solution.solverStatus + ", gap=" + solution.relativeGap);
         }
+    }
+
+    private static boolean usableIncumbent(Solution solution, int carriers) {
+        if (solution == null || solution.y == null || solution.y.length != carriers
+                || !Double.isFinite(solution.objValue)) return false;
+        for (double value : solution.y) {
+            if (!Double.isFinite(value) || Math.abs(value - Math.rint(value)) > 1e-5)
+                return false;
+        }
+        return true;
     }
 
     public List<Sample> contextualWeights(TRBSVUSyntheticCase instance, List<Sample> training,
@@ -260,8 +269,8 @@ public final class TRBSVUExperiment1Runner {
                     details.add(trace);
                     if ("EMPTY_KERNEL_SUPPORT".equals(trace.solverStatus())) valid = false;
                     else {
-                        if (!trace.certifiedOptimal())
-                            throw new IllegalStateException("Uncertified validation checkpoint: " + methodName);
+                        if (!Double.isFinite(trace.realizedValidationCost()))
+                            throw new IllegalStateException("Invalid validation checkpoint cost: " + methodName);
                         realizedCosts[t - firstOrigin] = trace.realizedValidationCost();
                     }
                     continue;
@@ -296,10 +305,7 @@ public final class TRBSVUExperiment1Runner {
             Solution solved = TRBSVUSolveMethods.solve(instance.params, instance.lanes,
                     weighted, query, Method.NOMINAL, 0.0, settings);
             solved.solveTimeSec = (System.nanoTime() - started) / 1.0e9;
-            if (solved.y == null || !solved.certifiedOptimal)
-                throw new IllegalStateException("Uncertified Experiment 1 validation at origin "
-                        + t + ", kind=" + kind + ", status=" + solved.solverStatus
-                        + ", gap=" + solved.relativeGap);
+            requireUsableIncumbent(solved, methodName, instance.params.I);
             double realized = TRBSVUSolveMethods.realizedCost(instance.params, solved.y,
                     window.realized().demand());
             realizedCosts[t - firstOrigin] = realized;

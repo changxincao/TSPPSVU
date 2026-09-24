@@ -310,9 +310,16 @@ public final class TRBSVUResultWriter {
 
     public static void writeOosSummary(Path file, int replication, String experiment,
                                        Map<String, Oos> performance) throws Exception {
+        writeOosSummary(file, replication, experiment, performance, Map.of());
+    }
+
+    public static void writeOosSummary(Path file, int replication, String experiment,
+                                       Map<String, Oos> performance,
+                                       Map<String, Solution> decisions) throws Exception {
         Files.createDirectories(file.getParent());
         try (BufferedWriter out = writer(file)) {
-            out.write("replication,experiment,method,mean,sd,q95,cvar95,maximum,"
+            out.write("replication,experiment,method,solve_status,certified_optimal,"
+                    + "solve_best_bound,solve_gap,mean,sd,q95,cvar95,maximum,"
                     + "mean_transport_cost,mean_spot_cost,mean_mqc_penalty,"
                     + "mean_contracted_quantity,mean_spot_quantity,mean_mqc_shortfall_quantity,"
                     + "spot_share_total,mean_draw_spot_share,capacity_utilization_total,"
@@ -320,10 +327,16 @@ public final class TRBSVUResultWriter {
             out.newLine();
             for (var entry : performance.entrySet()) {
                 Oos value = entry.getValue();
+                Solution solution = decisions.get(entry.getKey());
                 out.write(String.format(Locale.ROOT,
-                        "%d,%s,%s,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,"
+                        "%d,%s,%s,%s,%s,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,"
                                 + "%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g%n",
-                        replication, experiment, entry.getKey(), value.mean(),
+                        replication, experiment, entry.getKey(),
+                        csv(solution == null ? "UNKNOWN" : solution.solverStatus),
+                        solution != null && solution.certifiedOptimal,
+                        solution == null ? Double.NaN : solution.bestBound,
+                        solution == null ? Double.NaN : solution.relativeGap,
+                        value.mean(),
                         value.standardDeviation(), value.q95(), value.cvar95(), value.maximum(),
                         value.meanTransportCost(), value.meanSpotCost(), value.meanPenalty(),
                         value.meanContractedQuantity(), value.meanSpotQuantity(),
@@ -336,19 +349,31 @@ public final class TRBSVUResultWriter {
 
     public static void writeOosDetails(Path file, int replication, String experiment,
                                        Map<String, List<OosDraw>> details) throws Exception {
+        writeOosDetails(file, replication, experiment, details, Map.of());
+    }
+
+    public static void writeOosDetails(Path file, int replication, String experiment,
+                                       Map<String, List<OosDraw>> details,
+                                       Map<String, Solution> decisions) throws Exception {
         Files.createDirectories(file.getParent());
         try (BufferedWriter out = writer(file)) {
-            out.write("replication,experiment,method,draw_index,sample_id,total_demand,total_cost,"
+            out.write("replication,experiment,method,solve_status,certified_optimal,solve_gap,"
+                    + "draw_index,sample_id,total_demand,total_cost,"
                     + "transport_cost,spot_cost,mqc_penalty,contracted_quantity,spot_quantity,"
                     + "mqc_shortfall_quantity,spot_share,capacity_utilization,"
                     + "mean_lane_capacity_utilization");
             out.newLine();
             for (var method : details.entrySet()) {
+                Solution solution = decisions.get(method.getKey());
                 for (OosDraw draw : method.getValue()) {
                     out.write(String.format(Locale.ROOT,
-                            "%d,%s,%s,%d,%d,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,"
+                            "%d,%s,%s,%s,%s,%.17g,%d,%d,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,"
                                     + "%.17g,%.17g,%.17g,%.17g%n",
-                            replication, experiment, method.getKey(), draw.drawIndex(),
+                            replication, experiment, method.getKey(),
+                            csv(solution == null ? "UNKNOWN" : solution.solverStatus),
+                            solution != null && solution.certifiedOptimal,
+                            solution == null ? Double.NaN : solution.relativeGap,
+                            draw.drawIndex(),
                             draw.sampleId(), draw.totalDemand(), draw.totalCost(),
                             draw.transportCost(), draw.spotCost(), draw.mqcPenalty(),
                             draw.contractedQuantity(), draw.spotQuantity(),

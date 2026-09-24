@@ -88,9 +88,11 @@ public final class TRBSVUExperiment12Main {
         Path rfPython = Path.of(".venv-rsome", "Scripts", "python.exe").toAbsolutePath();
         Path rfScript = Path.of("analysis", "trb_svu", "rf_leaf_weights.py").toAbsolutePath();
         Path pcmScript = Path.of("analysis", "trb_svu", "solve_pcm.py").toAbsolutePath();
+        Path pcmMosekAdapter = Path.of("analysis", "trb_svu", "msk_feasible_solver.py").toAbsolutePath();
         String pythonEnvironment = pythonEnvironment(rfPython);
         String rfScriptSha256 = sha256(Files.readAllBytes(rfScript));
         String pcmScriptSha256 = sha256(Files.readAllBytes(pcmScript));
+        String pcmMosekAdapterSha256 = sha256(Files.readAllBytes(pcmMosekAdapter));
         String javaSourceSha256 = javaSourceFingerprint(Path.of("src"));
         TRBSVUForestWeights forest = new TRBSVUForestWeights(rfPython.toString(), rfScript);
         String instanceSha256 = sha256(Files.readAllBytes(caseFile));
@@ -101,6 +103,7 @@ public final class TRBSVUExperiment12Main {
                 + TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS
                 + "|validationOrigins=" + origins + "|rfTrees=500|rfSeed=frozen"
                 + "|rfScriptSha256=" + rfScriptSha256 + "|pcmScriptSha256=" + pcmScriptSha256
+                + "|pcmMosekAdapterSha256=" + pcmMosekAdapterSha256
                 + "|javaSourceSha256=" + javaSourceSha256
                 + "|pythonEnvironment=" + pythonEnvironment
                 + "|positiveWeightFloor=1e-8|strictZeroWeightsPruned=true";
@@ -135,6 +138,7 @@ public final class TRBSVUExperiment12Main {
                 + "pythonEnvironment=" + pythonEnvironment + "\n"
                 + "rfScriptSha256=" + rfScriptSha256 + "\n"
                 + "pcmScriptSha256=" + pcmScriptSha256 + "\n"
+                + "pcmMosekAdapterSha256=" + pcmMosekAdapterSha256 + "\n"
                 + "javaSourceSha256=" + javaSourceSha256 + "\n"
                 + "positiveWeightFloor=1e-8\nstrictZeroWeightsPruned=true\n";
         Path completionMarker = replication.resolve("experiment12_complete.txt");
@@ -227,6 +231,7 @@ public final class TRBSVUExperiment12Main {
                             + "javaSourceSha256=" + javaSourceSha256 + "\n"
                             + "rfScriptSha256=" + rfScriptSha256 + "\n"
                             + "pcmScriptSha256=" + pcmScriptSha256 + "\n"
+                            + "pcmMosekAdapterSha256=" + pcmMosekAdapterSha256 + "\n"
                             + "pythonEnvironment=" + pythonEnvironment + "\n"
                             + "experiment1ProtocolFingerprint=" + experiment1Protocol + "\n"
                             + "experiment2SelectedContextFingerprint=" + selectedContextProtocol + "\n");
@@ -285,9 +290,9 @@ public final class TRBSVUExperiment12Main {
                     index, experiment, instance.params.J, finalWeights, parameters);
         }
         TRBSVUResultWriter.writeOosSummary(oosDirectory.resolve(prefix + "_summary.csv"),
-                index, experiment, oos);
+                index, experiment, oos, decisions);
         TRBSVUResultWriter.writeOosDetails(oosDirectory.resolve(prefix + "_draws.csv"),
-                index, experiment, oosDetails);
+                index, experiment, oosDetails, decisions);
     }
 
     private static String kernelName(Kernel family) {

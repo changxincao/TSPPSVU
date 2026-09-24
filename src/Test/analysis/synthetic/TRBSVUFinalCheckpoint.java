@@ -104,16 +104,23 @@ public final class TRBSVUFinalCheckpoint {
     }
 
     public void saveOos(String method, Oos summary, List<OosDraw> draws) throws Exception {
+        saveOos(method, summary, draws, null);
+    }
+
+    public void saveOos(String method, Oos summary, List<OosDraw> draws,
+                        Solution solution) throws Exception {
         String safe = safe(method);
         Path summaryTarget = oosDirectory.resolve(safe + "_summary.csv");
         Path drawsTarget = oosDirectory.resolve(safe + "_draws.csv");
         Path summaryTemporary = Files.createTempFile(oosDirectory, "pending_summary_", ".csv");
         Path drawsTemporary = Files.createTempFile(oosDirectory, "pending_draws_", ".csv");
         try {
+            Map<String, Solution> solveMetadata = solution == null
+                    ? Map.of() : Map.of(method, solution);
             TRBSVUResultWriter.writeOosSummary(summaryTemporary, replication, experiment,
-                    Map.of(method, summary));
+                    Map.of(method, summary), solveMetadata);
             TRBSVUResultWriter.writeOosDetails(drawsTemporary, replication, experiment,
-                    Map.of(method, draws));
+                    Map.of(method, draws), solveMetadata);
             replace(summaryTemporary, summaryTarget);
             replace(drawsTemporary, drawsTarget);
         } finally {

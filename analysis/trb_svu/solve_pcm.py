@@ -1,8 +1,8 @@
 """Solve one PCM-DRO procurement model with RSOME/MOSEK.
 
-The ambiguity set fixes lane means, bounds lane variances, and bounds the
-variance of total demand. Recourse uses RSOME's lifted affine decision rules;
-this is not unrestricted fully adaptive two-stage recourse.
+The ambiguity set fixes lane means and bounds lane variances.  The aggregate
+total-demand variance bound is optional.  Recourse uses RSOME's lifted affine
+decision rules; this is not unrestricted fully adaptive two-stage recourse.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 from rsome import E, dro, square
-from rsome import msk_solver as msk
+import msk_feasible_solver as msk
 
 
 def read_json(path: Path):
@@ -44,6 +44,7 @@ def solve(root: Path) -> dict[str, object]:
     variance = np.asarray(lanes["variance_bound"], dtype=float)
     upper = np.asarray(lanes["support_upper"], dtype=float)
     spot_cost = np.asarray(lanes["spot_cost"], dtype=float)
+    include_total_variance = bool(meta.get("include_total_variance", True))
     total_variance = float(meta["total_variance_bound"])
     total_capacity = np.asarray(carriers["total_capacity"], dtype=float)
     mqc = np.asarray(carriers["mqc"], dtype=float)
@@ -67,7 +68,8 @@ def solve(root: Path) -> dict[str, object]:
         raise ValueError(f"Unsupported PCM policy: {policy}")
     selected = model.dvar(i_count, vtype="B", name="carrier_selected")
     demand = model.rvar(j_count, name="demand")
-    lift = model.rvar(j_count + 1, name="second_moment_lift")
+    lift_dimension = j_count + (1 if include_total_variance else 0)
+    lift = model.rvar(lift_dimension, name="second_moment_lift")
     flow = model.dvar((i_count, j_count), name="flow")
     spot = model.dvar(j_count, name="spot")
     shortfall = model.dvar(i_count, name="shortfall")
@@ -78,15 +80,19 @@ def solve(root: Path) -> dict[str, object]:
             decision.adapt(lift)
 
     ambiguity = model.ambiguity()
-    ambiguity.suppset(
+    support_constraints = [
         demand >= 0,
         demand <= upper,
         square(demand - mean) <= lift[:j_count],
-        square((demand - mean).sum()) <= lift[j_count],
-    )
+    ]
+    moment_bounds = variance
+    if include_total_variance:
+        support_constraints.append(square((demand - mean).sum()) <= lift[j_count])
+        moment_bounds = np.r_[variance, total_variance]
+    ambiguity.suppset(*support_constraints)
     ambiguity.exptset(
         E(demand) == mean,
-        E(lift) <= np.r_[variance, total_variance],
+        E(lift) <= moment_bounds,
     )
 
     cost = (rate * flow).sum() + spot_cost @ spot + penalty @ shortfall
@@ -109,21 +115,27 @@ def solve(root: Path) -> dict[str, object]:
     )
     model_and_solve_seconds = time.perf_counter() - started
     status = str(model.solution.status)
-    if status != "Optimal":
-        raise RuntimeError(f"PCM solve did not finish optimally: {status}")
+    if status not in {"Optimal", "Feasible"}:
+        raise RuntimeError(f"PCM solve returned no usable incumbent: {status}")
     y = np.asarray(selected.get(), dtype=float)
     integrality_error = float(np.max(np.abs(y - np.rint(y))))
     if integrality_error > 1e-5:
         raise RuntimeError(f"PCM binary integrality error: {integrality_error}")
     result = {
-        "status": "OPTIMAL_PCM_LIFTED_AFFINE_APPROXIMATION",
+        "status": ("OPTIMAL_PCM_LIFTED_AFFINE_APPROXIMATION"
+                   if status == "Optimal"
+                   else "TIME_LIMIT_FEASIBLE_PCM_LIFTED_AFFINE_APPROXIMATION"),
         "objective": float(model.get()),
+        "best_bound": float(model.solution.best_bound),
+        "relative_gap": float(model.solution.relative_gap),
+        "certified_optimal": status == "Optimal",
         "solver_seconds": float(model.solution.time),
         "model_and_solve_seconds": model_and_solve_seconds,
         "selected": np.rint(y).astype(int).tolist(),
         "selected_count": int(np.rint(y).sum()),
         "integrality_error": integrality_error,
         "policy": policy,
+        "include_total_variance": include_total_variance,
         "exactness": ("optimal_for_lifted_affine_approximation_not_unrestricted_recourse"
                       if policy == "demand_and_second_moment_lift_affine"
                       else "optimal_for_demand_affine_approximation_not_unrestricted_recourse"),

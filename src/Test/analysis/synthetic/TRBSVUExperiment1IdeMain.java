@@ -213,9 +213,10 @@ public final class TRBSVUExperiment1IdeMain {
                 parameterTypes, families, baseBandwidth, effectiveBandwidth, result.finalWeights());
         TRBSVUResultWriter.writeFinalWeights(solve.resolve("final_weights.csv"), replication,
                 "1", result.finalWeights());
-        TRBSVUResultWriter.writeOosSummary(oos.resolve("summary.csv"), replication, "1", result.oos());
+        TRBSVUResultWriter.writeOosSummary(oos.resolve("summary.csv"), replication, "1",
+                result.oos(), result.decisions());
         TRBSVUResultWriter.writeOosDetails(oos.resolve("draws.csv"), replication, "1",
-                result.oosDetails());
+                result.oosDetails(), result.decisions());
     }
 
     private static List<Task> buildTasks(Config config) throws Exception {
