@@ -4,6 +4,8 @@ public  class Solution {
     public double objValue;
     public double[] y;
     public double solveTimeSec;
+    /** Wall time spent inside native optimizer solve calls, excluding Java model construction. */
+    public double optimizerTimeSec;
     public String solverStatus;
     public double bestBound;
     public double relativeGap;
@@ -12,6 +14,13 @@ public  class Solution {
     public int cutCount;
     public long candidateCount;
     public boolean certifiedOptimal;
+    public double wassersteinRadius;
+    public double wassersteinEta;
+    public int wassersteinInitialPointCount;
+    public int wassersteinGeneratedCutCount;
+    public int wassersteinTotalPointCount;
+    public double[] wassersteinBoxUpper;
+    public double[] wassersteinDistanceScale;
     
     public Solution() {
 		this.objValue = 0;
@@ -36,5 +45,13 @@ public  class Solution {
         this.cutCount = -1;
         this.candidateCount = -1L;
         this.certifiedOptimal = false;
+        this.optimizerTimeSec = Double.NaN;
+        this.wassersteinRadius = Double.NaN;
+        this.wassersteinEta = Double.NaN;
+        this.wassersteinInitialPointCount = -1;
+        this.wassersteinGeneratedCutCount = -1;
+        this.wassersteinTotalPointCount = -1;
+        this.wassersteinBoxUpper = null;
+        this.wassersteinDistanceScale = null;
     }
 }

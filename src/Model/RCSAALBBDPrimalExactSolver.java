@@ -35,6 +35,7 @@ final class RCSAALBBDPrimalExactSolver {
         double globalLowerBound = Double.NEGATIVE_INFINITY;
         long totalNodes = 0L;
         int totalCuts = 0;
+        double totalOptimizerTimeSec = 0.0;
 
         long t0 = System.nanoTime();
         try (Master master = new Master(p, samples, pi, cfg)) {
@@ -44,7 +45,7 @@ final class RCSAALBBDPrimalExactSolver {
                 if (remainingSeconds <= 0.0) {
                     return incompleteSolution(bestUpperBound, bestY, globalLowerBound,
                             secondsBetween(t0, System.nanoTime()), iter - 1,
-                            totalCuts, totalNodes, "TIME_LIMIT");
+                            totalCuts, totalNodes, totalOptimizerTimeSec, "TIME_LIMIT");
                 }
                 long iterStart = System.nanoTime();
                 System.out.println(String.format(
@@ -61,8 +62,9 @@ final class RCSAALBBDPrimalExactSolver {
                     if (ex.nodeCount >= 0) totalNodes += ex.nodeCount;
                     return incompleteSolution(bestUpperBound, bestY, globalLowerBound,
                             secondsBetween(t0, System.nanoTime()), iter,
-                            totalCuts, totalNodes, ex.solverStatus);
+                            totalCuts, totalNodes, totalOptimizerTimeSec, ex.solverStatus);
                 }
+                totalOptimizerTimeSec += mr.optimizerTimeSec;
                 if (mr.nodeCount >= 0L) totalNodes += mr.nodeCount;
                 double iterationLowerBound = mr.bestBound;
                 if (Double.isFinite(iterationLowerBound)) {
@@ -113,7 +115,7 @@ final class RCSAALBBDPrimalExactSolver {
                         || secondsBetween(t0, System.nanoTime()) >= cfg.timeLimitSeconds) {
                     return incompleteSolution(bestUpperBound, bestY, globalLowerBound,
                             secondsBetween(t0, System.nanoTime()), iter,
-                            totalCuts, totalNodes, mr.status);
+                            totalCuts, totalNodes, totalOptimizerTimeSec, mr.status);
                 }
 
                 // Compact is a single solve, never fall back to no-good cuts.
@@ -128,6 +130,7 @@ final class RCSAALBBDPrimalExactSolver {
                     if (!boundsConsistent(mr.bestBound, bestUpperBound, cfg.tol)) {
                         return incompleteSolution(bestUpperBound, bestY, mr.bestBound,
                                 secondsBetween(t0, t1), iter, totalCuts, totalNodes,
+                                totalOptimizerTimeSec,
                                 String.format(java.util.Locale.ROOT,
                                         "BOUND_INCONSISTENT:LB=%.17g:UB=%.17g",
                                         mr.bestBound, bestUpperBound));
@@ -152,6 +155,7 @@ final class RCSAALBBDPrimalExactSolver {
                     solution.nodeCount = totalNodes;
                     solution.iterationCount = iter;
                     solution.cutCount = totalCuts;
+                    solution.optimizerTimeSec = totalOptimizerTimeSec;
                     solution.candidateCount = iter;
                     solution.certifiedOptimal = Double.isFinite(reportedGap)
                             && reportedGap <= cfg.tol + 1e-12;
@@ -184,6 +188,7 @@ final class RCSAALBBDPrimalExactSolver {
                                                int iterations,
                                                int cuts,
                                                long nodes,
+                                               double optimizerTimeSec,
                                                String status) {
         if (bestY == null || !Double.isFinite(upperBound)) {
             throw new IllegalStateException(
@@ -196,6 +201,7 @@ final class RCSAALBBDPrimalExactSolver {
         solution.nodeCount = nodes;
         solution.iterationCount = iterations;
         solution.cutCount = cuts;
+        solution.optimizerTimeSec = optimizerTimeSec;
         solution.candidateCount = iterations;
         solution.certifiedOptimal = false;
         return solution;
@@ -378,7 +384,9 @@ final class RCSAALBBDPrimalExactSolver {
 
         Result solve(double maxTimeSeconds) throws SolutionError {
             model.setSolverParam("mioMaxTime", Math.max(1e-3, maxTimeSeconds));
+            long optimizerStart = System.nanoTime();
             model.solve();
+            double optimizerTimeSec = secondsBetween(optimizerStart, System.nanoTime());
             double relativeGap = solverDoubleInfo("mioObjRelGap");
             double bestBound = solverDoubleInfo("mioObjBound");
             if (solverIntInfo("mioObjBoundDefined") <= 0L) bestBound = Double.NaN;
@@ -393,7 +401,8 @@ final class RCSAALBBDPrimalExactSolver {
             }
             boolean certifiedOptimal = Double.isFinite(relativeGap) && relativeGap <= tolerance;
             return new Result(levels(y), levels(z), model.primalObjValue(),
-                    status, bestBound, relativeGap, nodeCount, certifiedOptimal);
+                    status, bestBound, relativeGap, nodeCount, certifiedOptimal,
+                    optimizerTimeSec);
         }
 
         private double solverDoubleInfo(String key) {
@@ -485,10 +494,11 @@ final class RCSAALBBDPrimalExactSolver {
             final double relativeGap;
             final long nodeCount;
             final boolean certifiedOptimal;
+            final double optimizerTimeSec;
 
             Result(double[] y, double[] z, double obj,
                    String status, double bestBound, double relativeGap,
-                   long nodeCount, boolean certifiedOptimal) {
+                   long nodeCount, boolean certifiedOptimal, double optimizerTimeSec) {
                 this.y = y;
                 this.z = z;
                 this.obj = obj;
@@ -497,6 +507,7 @@ final class RCSAALBBDPrimalExactSolver {
                 this.relativeGap = relativeGap;
                 this.nodeCount = nodeCount;
                 this.certifiedOptimal = certifiedOptimal;
+                this.optimizerTimeSec = optimizerTimeSec;
             }
         }
     }

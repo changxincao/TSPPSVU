@@ -17,7 +17,7 @@ public final class TRBSVUValidationCheckpointSelfCheck {
             TRBSVUValidationTrace expected = new TRBSVUValidationTrace(
                     "CSAA-Epa", 0.5, 73, 3, 72, 0.5,
                     70, 18, 7.25, 123.5, "Optimal", 123.5,
-                    0.0, 1.75, true, new double[]{1.0, 0.0, 1.0}, 130.25);
+                    0.0, 1.75, 1.25, true, new double[]{1.0, 0.0, 1.0}, 130.25);
             checkpoint.save(expected);
             TRBSVUValidationTrace actual = checkpoint.load("CSAA-Epa", 0.5, 73)
                     .orElseThrow(() -> new AssertionError("Checkpoint was not restored."));
@@ -42,6 +42,8 @@ public final class TRBSVUValidationCheckpointSelfCheck {
                         != Double.doubleToLongBits(actual.relativeGap())
                 || Double.doubleToLongBits(expected.solveTimeSec())
                         != Double.doubleToLongBits(actual.solveTimeSec())
+                || Double.doubleToLongBits(expected.optimizerTimeSec())
+                        != Double.doubleToLongBits(actual.optimizerTimeSec())
                 || expected.certifiedOptimal() != actual.certifiedOptimal()
                 || !Arrays.equals(expected.decision(), actual.decision())
                 || Double.doubleToLongBits(expected.realizedValidationCost())

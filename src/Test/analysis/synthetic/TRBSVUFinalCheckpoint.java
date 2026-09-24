@@ -19,7 +19,7 @@ import java.util.Optional;
 
 /** Atomic, human-readable recovery files for one completed final method solve and OOS evaluation. */
 public final class TRBSVUFinalCheckpoint {
-    private static final String FORMAT = "TRBSVU_FINAL_CHECKPOINT_V1";
+    private static final String FORMAT = "TRBSVU_FINAL_CHECKPOINT_V2";
     private final Path solveDirectory;
     private final Path oosDirectory;
     private final String instanceSha256;
@@ -58,6 +58,7 @@ public final class TRBSVUFinalCheckpoint {
         solution.objValue = number(values, "objective");
         solution.y = decision(required(values, "decision"));
         solution.solveTimeSec = number(values, "solveTimeSec");
+        solution.optimizerTimeSec = number(values, "optimizerTimeSec");
         solution.solverStatus = required(values, "solverStatus");
         solution.bestBound = number(values, "bestBound");
         solution.relativeGap = number(values, "relativeGap");
@@ -69,6 +70,13 @@ public final class TRBSVUFinalCheckpoint {
         if (!"true".equals(certified) && !"false".equals(certified))
             throw new IllegalStateException("Invalid certifiedOptimal in " + file);
         solution.certifiedOptimal = Boolean.parseBoolean(certified);
+        solution.wassersteinRadius = number(values, "wassersteinRadius");
+        solution.wassersteinEta = number(values, "wassersteinEta");
+        solution.wassersteinInitialPointCount = integer(values, "wassersteinInitialPointCount");
+        solution.wassersteinGeneratedCutCount = integer(values, "wassersteinGeneratedCutCount");
+        solution.wassersteinTotalPointCount = integer(values, "wassersteinTotalPointCount");
+        solution.wassersteinBoxUpper = decision(required(values, "wassersteinBoxUpper"));
+        solution.wassersteinDistanceScale = decision(required(values, "wassersteinDistanceScale"));
         return Optional.of(solution);
     }
 
@@ -87,6 +95,7 @@ public final class TRBSVUFinalCheckpoint {
                 write(out, "selectedParameter", parameter);
                 write(out, "objective", solution.objValue);
                 write(out, "solveTimeSec", solution.solveTimeSec);
+                write(out, "optimizerTimeSec", solution.optimizerTimeSec);
                 write(out, "solverStatus", solution.solverStatus);
                 write(out, "bestBound", solution.bestBound);
                 write(out, "relativeGap", solution.relativeGap);
@@ -95,6 +104,13 @@ public final class TRBSVUFinalCheckpoint {
                 write(out, "cutCount", solution.cutCount);
                 write(out, "candidateCount", solution.candidateCount);
                 write(out, "certifiedOptimal", solution.certifiedOptimal);
+                write(out, "wassersteinRadius", solution.wassersteinRadius);
+                write(out, "wassersteinEta", solution.wassersteinEta);
+                write(out, "wassersteinInitialPointCount", solution.wassersteinInitialPointCount);
+                write(out, "wassersteinGeneratedCutCount", solution.wassersteinGeneratedCutCount);
+                write(out, "wassersteinTotalPointCount", solution.wassersteinTotalPointCount);
+                write(out, "wassersteinBoxUpper", decision(solution.wassersteinBoxUpper));
+                write(out, "wassersteinDistanceScale", decision(solution.wassersteinDistanceScale));
                 write(out, "decision", decision(solution.y));
             }
             replace(temporary, target);

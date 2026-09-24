@@ -366,7 +366,7 @@ public final class TRBSVUExperiment1Runner {
                 training.get(0).period.tIndex,
                 training.get(training.size() - 1).period.tIndex,
                 candidate, training.size(), 0, Double.NaN, Double.NaN,
-                "EMPTY_KERNEL_SUPPORT", Double.NaN, Double.NaN, 0.0,
+                "EMPTY_KERNEL_SUPPORT", Double.NaN, Double.NaN, 0.0, Double.NaN,
                 false, null, Double.NaN);
     }
 
@@ -400,7 +400,8 @@ public final class TRBSVUExperiment1Runner {
                 training.get(training.size() - 1).period.tIndex,
                 effective, weighted.size(), positiveCount(weighted), ess(weighted),
                 solution.objValue, solution.solverStatus, solution.bestBound,
-                solution.relativeGap, solution.solveTimeSec, solution.certifiedOptimal,
+                solution.relativeGap, solution.solveTimeSec, solution.optimizerTimeSec,
+                solution.certifiedOptimal,
                 solution.y, realizedCost);
     }
 

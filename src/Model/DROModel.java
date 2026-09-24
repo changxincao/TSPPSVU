@@ -95,6 +95,14 @@ public class DROModel {
 		int W = samples.size();
 		int I = P.I;
 		int J = P.J;
+		int[][] edgeIndex = new int[I][J];
+		int edgeCount = 0;
+		for (int i = 0; i < I; i++) {
+			java.util.Arrays.fill(edgeIndex[i], -1);
+			for (int j = 0; j < J; j++) {
+				if (P.eligible[i][j]) edgeIndex[i][j] = edgeCount++;
+			}
+		}
 
 		if (cfg.lambda <= 0.0) {
 			throw new IllegalArgumentException("DRO 模型需要 lambda>0 才能保证有界（否则目标可能无界）。");
@@ -145,24 +153,10 @@ public class DROModel {
 			Variable psi = M.variable("psi", W, Domain.unbounded());
 			Variable nu = M.variable("nu", 1, Domain.greaterThan(0.0));
 
-			// second-stage variables per scenario
-			// x[i,j,w] only if eligible: for simplicity we create full and fix ineligible
-			// to 0 via bounds
-			// If you worry about size, you can store only eligible indices.
-			Variable x = M.variable("x", new int[] { I, J, W }, Domain.greaterThan(0.0));
+			// Only eligible carrier-lane pairs receive recourse variables.
+			Variable x = M.variable("x", new int[] { edgeCount, W }, Domain.greaterThan(0.0));
 			Variable s = M.variable("s", new int[] { J, W }, Domain.greaterThan(0.0));
 			Variable u = M.variable("u", new int[] { I, W }, Domain.greaterThan(0.0));
-
-			// enforce ineligible x = 0
-			for (int i = 0; i < I; i++) {
-				for (int j = 0; j < J; j++) {
-					if (P.eligible[i][j])
-						continue;
-					for (int w = 0; w < W; w++) {
-						M.constraint("inelig_" + i + "_" + j + "_" + w, x.index(i, j, w), Domain.equalsTo(0.0));
-					}
-				}
-			}
 
 			// alpha <= sum y <= beta
 			Expression sumY = Expr.sum(y);
@@ -181,18 +175,23 @@ public class DROModel {
 
 				// demand: sum_i x_ijw + s_jw >= d_j
 				for (int j = 0; j < J; j++) {
-					Expression lhs = Expr.add(Expr.sum(x.slice(new int[] { 0, j, w }, new int[] { I, j + 1, w + 1 })),
-							s.index(j, w));
+					List<Expression> laneFlow = new ArrayList<>();
+					for (int i = 0; i < I; i++) {
+						if (edgeIndex[i][j] >= 0) laneFlow.add(x.index(edgeIndex[i][j], w));
+					}
+					Expression lhs = Expr.add(sumOrZero(laneFlow), s.index(j, w));
 					LinearDomain demandDomain = cfg.enforceDemandEquality
 							? Domain.equalsTo(d[j])
 							: Domain.greaterThan(d[j]);
 					M.constraint("dem_" + j + "_" + w, lhs, demandDomain);
 				}
-				// x.slice({0,j,w}, {I, j+1, w+1}) 取的是一个子块：固定第 2 维为 j、第 3 维为w，第 1 维从 0到 I−1
-
 				// carrier MQC and total cap: p_i y_i - u_iw <= sum_j x_ijw <= M_i y_i
 				for (int i = 0; i < I; i++) {
-					Expression sumX = Expr.sum(x.slice(new int[] { i, 0, w }, new int[] { i + 1, J, w + 1 }));
+					List<Expression> carrierFlow = new ArrayList<>();
+					for (int j = 0; j < J; j++) {
+						if (edgeIndex[i][j] >= 0) carrierFlow.add(x.index(edgeIndex[i][j], w));
+					}
+					Expression sumX = sumOrZero(carrierFlow);
 
 					// lower: sumX >= p_i y_i - u_iw
 					Expression rhsLow = Expr.sub(Expr.mul(P.p[i], y.index(i)), u.index(i, w));
@@ -207,7 +206,8 @@ public class DROModel {
 						if (!P.eligible[i][j])
 							continue;
 						Expression capRhs = Expr.mul(P.q[i][j], y.index(i));
-						M.constraint("capLane_" + i + "_" + j + "_" + w, Expr.sub(x.index(i, j, w), capRhs),
+						M.constraint("capLane_" + i + "_" + j + "_" + w,
+								Expr.sub(x.index(edgeIndex[i][j], w), capRhs),
 								Domain.lessThan(0.0));
 					}
 				}
@@ -221,7 +221,7 @@ public class DROModel {
 					for (int j = 0; j < J; j++) {
 						if (!P.eligible[i][j])
 							continue;
-						exprs.add(Expr.mul(P.r[i][j], x.index(i, j, w)));
+						exprs.add(Expr.mul(P.r[i][j], x.index(edgeIndex[i][j], w)));
 
 					}
 				}
@@ -259,7 +259,9 @@ public class DROModel {
 //			}
 		
 			
+			long optimizerStart = System.nanoTime();
 			M.solve();
+			double optimizerTimeSec = (System.nanoTime() - optimizerStart) / 1e9;
 
 			String solverStatus = String.valueOf(M.getProblemStatus());
 			double bestBound = trySolverDoubleInfo(M, "mioObjBound");
@@ -285,11 +287,17 @@ public class DROModel {
 			solution.relativeGap = relativeGap;
 			solution.nodeCount = nodeCount;
 			solution.cutCount = selectedCuts;
+			solution.optimizerTimeSec = optimizerTimeSec;
 			solution.certifiedOptimal = Double.isFinite(bestBound)
 					&& Double.isFinite(relativeGap) && relativeGap <= cfg.tol;
 			M.dispose();
 			return solution;
 		}
+	}
+
+	private static Expression sumOrZero(List<Expression> terms) {
+		return terms.isEmpty() ? Expr.constTerm(0.0)
+				: Expr.add(terms.toArray(new Expression[0]));
 	}
 
 	private static double trySolverDoubleInfo(Model model, String key) {

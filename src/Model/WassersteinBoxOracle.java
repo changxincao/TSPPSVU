@@ -102,7 +102,10 @@ final class WassersteinBoxOracle {
                 }
             }
             cplex.addMaximize(objective);
-            if (!cplex.solve() || cplex.getStatus() != IloCplex.Status.Optimal) {
+            long optimizerStart = System.nanoTime();
+            boolean solved = cplex.solve();
+            double optimizerTimeSec = (System.nanoTime() - optimizerStart) / 1e9;
+            if (!solved || cplex.getStatus() != IloCplex.Status.Optimal) {
                 throw new IllegalStateException(
                         "Wasserstein separation failed: " + cplex.getStatus());
             }
@@ -136,7 +139,8 @@ final class WassersteinBoxOracle {
                 affineConstant += alphaValue[j] * worstDemand[j];
             }
             return new Result(cplex.getObjValue(), alphaValue, yCoefficient,
-                    constant, worstDemand, affineConstant, etaCoefficient);
+                    constant, worstDemand, affineConstant, etaCoefficient,
+                    optimizerTimeSec);
         } finally {
             cplex.end();
         }
@@ -171,7 +175,8 @@ final class WassersteinBoxOracle {
                   double dualConstant,
                   double[] worstDemand,
                   double affineConstant,
-                  double etaCoefficient) {
+                  double etaCoefficient,
+                  double optimizerTimeSec) {
         Result {
             alpha = alpha.clone();
             yCoefficient = yCoefficient.clone();

@@ -186,13 +186,14 @@ public final class TRBSVUResultWriter {
             out.write("replication,experiment,method,candidate,origin,training_start,training_end,"
                     + "effective_context_bandwidth,scenario_count,positive_weight_count,ess,"
                     + "training_objective,status,best_bound,bound_available,gap,gap_available,"
-                    + "solve_time_sec,time_scope,certified_optimal,proof_scope,"
+                    + "model_build_and_solve_wall_sec,wall_time_scope,optimizer_call_wall_sec,"
+                    + "optimizer_time_scope,certified_optimal,proof_scope,"
                     + "selected_count,decision_vector,selected_carriers,realized_validation_cost");
             out.newLine();
             for (TRBSVUValidationTrace trace : details) {
                 out.write(String.format(Locale.ROOT,
                         "%d,%s,%s,%.17g,%d,%d,%d,%.17g,%d,%d,%.17g,%.17g,%s,%.17g,%s,%.17g,%s,"
-                                + "%.9f,%s,%s,%s,%d,%s,%s,%.17g%n",
+                                + "%.9f,%s,%.9f,%s,%s,%s,%d,%s,%s,%.17g%n",
                         replication, experiment, trace.method(), trace.candidateParameter(),
                         trace.origin(), trace.trainingStart(), trace.trainingEnd(),
                         trace.effectiveContextBandwidth(), trace.scenarioCount(),
@@ -200,7 +201,8 @@ public final class TRBSVUResultWriter {
                         trace.trainingObjective(), csv(trace.solverStatus()), trace.bestBound(),
                         Double.isFinite(trace.bestBound()), trace.relativeGap(),
                         Double.isFinite(trace.relativeGap()), trace.solveTimeSec(),
-                        "MODEL_BUILD_AND_SOLVE", trace.certifiedOptimal(),
+                        "MODEL_BUILD_AND_SOLVE_WALL", trace.optimizerTimeSec(),
+                        "NATIVE_OPTIMIZER_CALL_WALL", trace.certifiedOptimal(),
                         csv(trace.certifiedOptimal() ? proofScope(trace.method())
                                 : "NO_OPTIMALITY_CERTIFICATE"),
                         selectedCount(trace.decision()), csv(decisionVector(trace.decision())),
@@ -224,10 +226,13 @@ public final class TRBSVUResultWriter {
             out.write("replication,experiment,method,parameter_type,selected_parameter,"
                     + "context_family,validation_selected_B,final_effective_B,"
                     + "validation_cost,scenario_count,positive_weight_count,ess,training_objective,"
-                    + "status,best_bound,bound_available,gap,gap_available,solve_time_sec,time_scope,"
+                    + "status,best_bound,bound_available,gap,gap_available,"
+                    + "model_build_and_solve_wall_sec,wall_time_scope,optimizer_call_wall_sec,"
+                    + "optimizer_time_scope,"
                     + "certified_optimal,proof_scope,nodes,iterations,cuts,"
                     + "candidates,selected_count,selected_total_capacity,selected_total_mqc,"
-                    + "decision_vector,selected_carriers");
+                    + "decision_vector,selected_carriers,w1_radius,w1_eta,w1_initial_points,"
+                    + "w1_generated_cuts,w1_total_points,w1_box_upper,w1_distance_scale");
             out.newLine();
             for (var entry : decisions.entrySet()) {
                 String method = entry.getKey();
@@ -235,7 +240,8 @@ public final class TRBSVUResultWriter {
                 List<Sample> weights = finalWeights.get(method);
                 out.write(String.format(Locale.ROOT,
                         "%d,%s,%s,%s,%.17g,%s,%.17g,%.17g,%.17g,%d,%d,%.17g,%.17g,%s,"
-                                + "%.17g,%s,%.17g,%s,%.9f,%s,%s,%s,%d,%d,%d,%d,%d,%.17g,%.17g,%s,%s%n",
+                                + "%.17g,%s,%.17g,%s,%.9f,%s,%.9f,%s,%s,%s,%d,%d,%d,%d,%d,%.17g,%.17g,%s,%s,"
+                                + "%.17g,%.17g,%d,%d,%d,%s,%s%n",
                         replication, experiment, method,
                         parameterTypes.getOrDefault(method, "NONE"),
                         selectedParameters.getOrDefault(method, Double.NaN),
@@ -249,13 +255,20 @@ public final class TRBSVUResultWriter {
                         solution.objValue, csv(solution.solverStatus), solution.bestBound,
                         Double.isFinite(solution.bestBound), solution.relativeGap,
                         Double.isFinite(solution.relativeGap), solution.solveTimeSec,
-                        "MODEL_BUILD_AND_SOLVE", solution.certifiedOptimal,
+                        "MODEL_BUILD_AND_SOLVE_WALL", solution.optimizerTimeSec,
+                        "NATIVE_OPTIMIZER_CALL_WALL", solution.certifiedOptimal,
                         csv(solution.certifiedOptimal ? proofScope(method)
                                 : "NO_OPTIMALITY_CERTIFICATE"),
                         solution.nodeCount, solution.iterationCount, solution.cutCount,
                         solution.candidateCount, selectedCount(solution.y),
                         selectedTotal(params.M, solution.y), selectedTotal(params.p, solution.y),
-                        csv(decisionVector(solution.y)), csv(selectedCarriers(params, solution.y))));
+                        csv(decisionVector(solution.y)), csv(selectedCarriers(params, solution.y)),
+                        solution.wassersteinRadius, solution.wassersteinEta,
+                        solution.wassersteinInitialPointCount,
+                        solution.wassersteinGeneratedCutCount,
+                        solution.wassersteinTotalPointCount,
+                        csv(vector(solution.wassersteinBoxUpper)),
+                        csv(vector(solution.wassersteinDistanceScale))));
             }
         }
     }
@@ -440,6 +453,16 @@ public final class TRBSVUResultWriter {
         return method.endsWith("MM")
                 ? "OPTIMAL_FOR_LIFTED_AFFINE_MARGINAL_MOMENT_APPROXIMATION"
                 : "OPTIMAL_FOR_STATED_METHOD_MODEL";
+    }
+
+    private static String vector(double[] values) {
+        if (values == null) return "NA";
+        StringBuilder text = new StringBuilder();
+        for (int i = 0; i < values.length; i++) {
+            if (i > 0) text.append(';');
+            text.append(Double.toString(values[i]));
+        }
+        return text.toString();
     }
 
     private static String csv(String value) {

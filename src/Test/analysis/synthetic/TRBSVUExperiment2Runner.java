@@ -252,7 +252,8 @@ public final class TRBSVUExperiment2Runner {
                 TRBSVUExperiment1Runner.positiveCount(weighted),
                 TRBSVUExperiment1Runner.ess(weighted), solution.objValue,
                 solution.solverStatus, solution.bestBound, solution.relativeGap,
-                solution.solveTimeSec, solution.certifiedOptimal, solution.y, realizedCost);
+                solution.solveTimeSec, solution.optimizerTimeSec,
+                solution.certifiedOptimal, solution.y, realizedCost);
     }
 
     private static <K, V> Map<K, V> orderedCopy(Map<K, V> source) {

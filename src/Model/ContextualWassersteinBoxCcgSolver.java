@@ -29,6 +29,8 @@ public final class ContextualWassersteinBoxCcgSolver {
         double bestEta = Double.NaN;
         MasterResult master = null;
         int oracleSolves = 0;
+        int generatedCuts = 0;
+        double optimizerTimeSec = 0.0;
         int iterations = 0;
         boolean converged = false;
         boolean timedOut = false;
@@ -57,6 +59,7 @@ public final class ContextualWassersteinBoxCcgSolver {
                 throw ex;
             }
             double masterSeconds = (System.nanoTime() - masterStart) / 1.0e9;
+            optimizerTimeSec += master.optimizerTimeSec;
             System.out.printf(java.util.Locale.ROOT,
                     "W1-CCG iter=%d masterSolved LB=%.6f eta=%.6f selected=%d masterSec=%.3f totalSec=%.3f%n",
                     iterations, master.objective, master.eta, selectedCount(master.y),
@@ -90,6 +93,7 @@ public final class ContextualWassersteinBoxCcgSolver {
                     throw ex;
                 }
                 oracleSolves++;
+                optimizerTimeSec += oracle.optimizerTimeSec();
                 exact += input.probability[s] * oracle.value();
                 double violationTolerance = tolerance * Math.max(1.0, Math.abs(oracle.value()));
                 if (oracle.value() > master.t[s] + violationTolerance) {
@@ -100,6 +104,7 @@ public final class ContextualWassersteinBoxCcgSolver {
                     points.get(s).add(oracle.worstDemand());
                     added = true;
                     addedThisIteration++;
+                    generatedCuts++;
                 }
                 positiveProcessed++;
                 if (positiveProcessed % 10 == 0 || positiveProcessed == positiveTotal) {
@@ -137,18 +142,33 @@ public final class ContextualWassersteinBoxCcgSolver {
         }
         double relativeGap = Math.max(0.0, bestUpper - master.objective)
                 / Math.max(1.0, Math.abs(bestUpper));
-        int pointCount = points.stream().mapToInt(List::size).sum();
+        int initialPointCount = input.sampleCount();
+        int totalPointCount = points.stream().mapToInt(List::size).sum();
         Solution solution = new Solution(bestUpper, bestY,
                 (System.nanoTime() - start) / 1.0e9);
         solution.bestBound = master.objective;
         solution.relativeGap = relativeGap;
         solution.iterationCount = iterations;
-        solution.cutCount = pointCount;
+        solution.cutCount = generatedCuts;
         solution.candidateCount = oracleSolves;
+        solution.optimizerTimeSec = optimizerTimeSec;
+        solution.wassersteinRadius = input.radius;
+        solution.wassersteinEta = bestEta;
+        solution.wassersteinInitialPointCount = initialPointCount;
+        solution.wassersteinGeneratedCutCount = generatedCuts;
+        solution.wassersteinTotalPointCount = totalPointCount;
+        solution.wassersteinBoxUpper = input.upper.clone();
+        solution.wassersteinDistanceScale = input.scale.clone();
         solution.certifiedOptimal = converged && relativeGap <= config.tol;
         solution.solverStatus = solution.certifiedOptimal ? "OPTIMAL_W1_CCG"
                 : timedOut ? "TIME_LIMIT_W1_CCG" : "ITERATION_LIMIT_W1_CCG";
-        return new Result(solution, bestEta, iterations, pointCount, oracleSolves);
+        System.out.printf(java.util.Locale.ROOT,
+                "W1-CCG summary radius=%.17g eta=%.17g initialPoints=%d generatedCuts=%d totalPoints=%d oracleSolves=%d optimizerSec=%.6f boxUpper=%s distanceScale=%s%n",
+                input.radius, bestEta, initialPointCount, generatedCuts, totalPointCount,
+                oracleSolves, optimizerTimeSec, java.util.Arrays.toString(input.upper),
+                java.util.Arrays.toString(input.scale));
+        return new Result(solution, bestEta, iterations, initialPointCount,
+                generatedCuts, totalPointCount, oracleSolves);
     }
 
     private static int positiveSampleCount(WassersteinBoxInput input) {
@@ -214,7 +234,10 @@ public final class ContextualWassersteinBoxCcgSolver {
                 objective.addTerm(input.probability[s], t[s]);
             }
             cplex.addMinimize(objective);
-            if (!cplex.solve() || cplex.getStatus() != IloCplex.Status.Optimal) {
+            long optimizerStart = System.nanoTime();
+            boolean solved = cplex.solve();
+            double optimizerTimeSec = (System.nanoTime() - optimizerStart) / 1e9;
+            if (!solved || cplex.getStatus() != IloCplex.Status.Optimal) {
                 throw new IllegalStateException("Wasserstein CCG master failed: " + cplex.getStatus());
             }
             double[] yValue = new double[params.I];
@@ -222,7 +245,7 @@ public final class ContextualWassersteinBoxCcgSolver {
                 yValue[i] = cplex.getValue(y[i]) > 0.5 ? 1.0 : 0.0;
             }
             return new MasterResult(cplex.getObjValue(), cplex.getValue(eta),
-                    yValue, cplex.getValues(t));
+                    yValue, cplex.getValues(t), optimizerTimeSec);
         } finally {
             cplex.end();
         }
@@ -303,7 +326,8 @@ public final class ContextualWassersteinBoxCcgSolver {
         }
     }
 
-    private record MasterResult(double objective, double eta, double[] y, double[] t) {
+    private record MasterResult(double objective, double eta, double[] y, double[] t,
+                                double optimizerTimeSec) {
         private MasterResult {
             y = y.clone();
             t = t.clone();
@@ -313,7 +337,9 @@ public final class ContextualWassersteinBoxCcgSolver {
     public record Result(Solution solution,
                          double eta,
                          int iterations,
-                         int generatedPoints,
+                         int initialPoints,
+                         int generatedCuts,
+                         int totalPoints,
                          int oracleSolves) {
     }
 }

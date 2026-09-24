@@ -54,7 +54,8 @@ public final class TRBSVUSolveMethods {
         // The original Sample objects and weights belong to the case, not to any method.
         List<Sample> samples = TRBSVUScenarioWeights.copyWithWeights(weighted,
                 weighted.stream().mapToDouble(s -> s.weight).toArray(),
-                method == Method.CHI_SQUARED || method == Method.RCSAA);
+                method == Method.CHI_SQUARED || method == Method.RCSAA
+                        || method == Method.WASSERSTEIN);
         Data data = new Data(lanes, samples, query.copy(), params);
         Config config = config(settings);
         System.out.printf(Locale.ROOT,
@@ -92,14 +93,17 @@ public final class TRBSVUSolveMethods {
                 }
                 WassersteinBoxInput input = WassersteinBoxInput.fromData(data,
                         upper, distanceScale, robustness);
-                yield new ContextualWassersteinBoxCcgSolver().solve(input, config).solution();
+                ContextualWassersteinBoxCcgSolver.Result result =
+                        new ContextualWassersteinBoxCcgSolver().solve(input, config);
+                yield result.solution();
             }
         };
         System.out.printf(Locale.ROOT,
-                "SOLVE_END method=%s robustness=%.17g status=%s certified=%s objective=%.17g bestBound=%.17g gap=%.17g solveSec=%.6f selected=%d%n",
+                "SOLVE_END method=%s robustness=%.17g status=%s certified=%s objective=%.17g bestBound=%.17g gap=%.17g modelBuildAndSolveSec=%.6f optimizerSec=%.6f selected=%d cuts=%d candidates=%d%n",
                 method, robustness, solution.solverStatus, solution.certifiedOptimal,
                 solution.objValue, solution.bestBound, solution.relativeGap, solution.solveTimeSec,
-                selectedCount(solution.y));
+                solution.optimizerTimeSec, selectedCount(solution.y), solution.cutCount,
+                solution.candidateCount);
         return solution;
         } catch (Exception ex) {
             System.out.printf(Locale.ROOT,

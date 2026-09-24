@@ -181,6 +181,7 @@ public class SAAModel {
         cplex.end();
 
         Solution solution = new Solution(objVal, yVal, timeSec);
+        solution.optimizerTimeSec = timeSec;
         solution.solverStatus = solverStatus;
         solution.bestBound = bestBound;
         solution.relativeGap = mipGap;

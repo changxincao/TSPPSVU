@@ -14,7 +14,7 @@ import java.util.Optional;
 
 /** Atomic, human-readable checkpoint for one method/candidate/validation-origin solve. */
 public final class TRBSVUValidationCheckpoint {
-    private static final String FORMAT = "TRBSVU_VALIDATION_CHECKPOINT_V2";
+    private static final String FORMAT = "TRBSVU_VALIDATION_CHECKPOINT_V3";
     private final Path directory;
     private final String instanceSha256;
     private final String protocolFingerprint;
@@ -60,6 +60,7 @@ public final class TRBSVUValidationCheckpoint {
             double bound = number(values, "bestBound");
             double gap = number(values, "relativeGap");
             double seconds = number(values, "solveTimeSec");
+            double optimizerSeconds = number(values, "optimizerTimeSec");
             String certifiedText = required(values, "certifiedOptimal");
             if (!"true".equals(certifiedText) && !"false".equals(certifiedText))
                 throw new IllegalStateException("Invalid certifiedOptimal value: " + certifiedText);
@@ -68,7 +69,8 @@ public final class TRBSVUValidationCheckpoint {
             double realized = number(values, "realizedValidationCost");
             return Optional.of(new TRBSVUValidationTrace(storedMethod, storedCandidate,
                     storedOrigin, trainingStart, trainingEnd, effectiveB, scenarios, positive,
-                    ess, objective, status, bound, gap, seconds, certified, decision, realized));
+                    ess, objective, status, bound, gap, seconds, optimizerSeconds,
+                    certified, decision, realized));
         } catch (RuntimeException ex) {
             throw new IllegalStateException("Invalid validation checkpoint: " + file, ex);
         }
@@ -97,6 +99,7 @@ public final class TRBSVUValidationCheckpoint {
                 write(out, "bestBound", trace.bestBound());
                 write(out, "relativeGap", trace.relativeGap());
                 write(out, "solveTimeSec", trace.solveTimeSec());
+                write(out, "optimizerTimeSec", trace.optimizerTimeSec());
                 write(out, "certifiedOptimal", trace.certifiedOptimal());
                 write(out, "decision", decision(trace.decision()));
                 write(out, "realizedValidationCost", trace.realizedValidationCost());

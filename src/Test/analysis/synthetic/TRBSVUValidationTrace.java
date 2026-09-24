@@ -16,6 +16,7 @@ public record TRBSVUValidationTrace(
         double bestBound,
         double relativeGap,
         double solveTimeSec,
+        double optimizerTimeSec,
         boolean certifiedOptimal,
         double[] decision,
         double realizedValidationCost) {

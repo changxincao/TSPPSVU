@@ -73,7 +73,7 @@ public final class TRBReviewerWassersteinExactAlgorithmsVerification {
                     new ContextualWassersteinBoxCcgSolver().solve(input, config);
             check("CCG", input, config, reference, ccg.solution(), ccg.eta());
             rows.add(row(test, "CCG", ccg.solution(), ccg.eta(),
-                    ccg.iterations(), ccg.generatedPoints(), ccg.oracleSolves(),
+                    ccg.iterations(), ccg.generatedCuts(), ccg.oracleSolves(),
                     fixedObjective(input, config, ccg.solution().y)));
 
             ContextualWassersteinBoxCallbackMultiCutSolver.Result callback =

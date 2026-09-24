@@ -11,7 +11,8 @@ import java.util.List;
  *
  * <p>The center distribution is {@code sum_s probability[s] delta_demand[s]}.
  * Probabilities may be equal (SAA) or supplied by any contextual estimator.
- * They are normalized once here; zero-probability samples remain exactly zero.</p>
+ * Zero-probability samples are removed before model construction; positive
+ * probabilities are normalized once here.</p>
  */
 public final class WassersteinBoxInput {
     public final ProcurementParams params;
@@ -42,22 +43,31 @@ public final class WassersteinBoxInput {
             throw new IllegalArgumentException("Invalid Wasserstein radius " + radius);
         }
 
+        int positiveCount = 0;
+        for (double value : probability) {
+            if (!Double.isFinite(value) || value < 0.0)
+                throw new IllegalArgumentException("Invalid probability " + value);
+            if (value > 0.0) positiveCount++;
+        }
+        if (positiveCount == 0)
+            throw new IllegalArgumentException("Probabilities must have positive support.");
+
         this.params = params;
-        this.demand = new double[demand.length][params.J];
-        this.probability = probability.clone();
+        this.demand = new double[positiveCount][params.J];
+        this.probability = new double[positiveCount];
         this.upper = upper.clone();
         this.scale = scale.clone();
         this.radius = radius;
 
         double probabilitySum = 0.0;
+        int retained = 0;
         for (int s = 0; s < demand.length; s++) {
             if (demand[s] == null || demand[s].length != params.J) {
                 throw new IllegalArgumentException("Demand dimension mismatch at sample " + s);
             }
-            if (!Double.isFinite(this.probability[s]) || this.probability[s] < 0.0) {
-                throw new IllegalArgumentException("Invalid probability at sample " + s);
-            }
-            probabilitySum += this.probability[s];
+            if (probability[s] == 0.0) continue;
+            this.probability[retained] = probability[s];
+            probabilitySum += probability[s];
             for (int j = 0; j < params.J; j++) {
                 double value = demand[s][j];
                 if (!Double.isFinite(value) || value < -1e-9
@@ -65,8 +75,9 @@ public final class WassersteinBoxInput {
                     throw new IllegalArgumentException(
                             "Demand outside box at sample/lane " + s + "/" + j);
                 }
-                this.demand[s][j] = Math.max(0.0, value);
+                this.demand[retained][j] = Math.max(0.0, value);
             }
+            retained++;
         }
         if (!(probabilitySum > 0.0) || !Double.isFinite(probabilitySum)) {
             throw new IllegalArgumentException("Probabilities must have a positive finite sum.");
