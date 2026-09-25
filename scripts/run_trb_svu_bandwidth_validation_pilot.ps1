@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory=$true)][string]$Deploy,
     [Parameter(Mandatory=$true)][string]$InputRoot,
     [Parameter(Mandatory=$true)][string]$OutputRoot,
-    [int[]]$Replications = @(0,1,2),
+    [int[]]$Replications = @(0,1,2,3,4,5,6,7,8,9),
     [string]$Candidates = '0.6,0.7,0.8,0.9',
     [int]$SolverThreads = 4,
     [int]$LimitSeconds = 14400
