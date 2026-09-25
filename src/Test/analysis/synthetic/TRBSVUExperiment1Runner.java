@@ -61,6 +61,12 @@ public final class TRBSVUExperiment1Runner {
         }
     }
     public record WeightResult(List<Sample> weights, double effectiveBandwidth) { }
+    public record KernelValidation(double mean, double sampleStandardDeviation,
+                                   boolean valid, List<TRBSVUValidationTrace> details) {
+        public KernelValidation {
+            details = List.copyOf(details);
+        }
+    }
     public record Result(Map<String, Solution> decisions,
                          Map<String, TRBSVUSolveMethods.Oos> oos,
                          Map<String, List<TRBSVUSolveMethods.OosDraw>> oosDetails,
@@ -275,6 +281,19 @@ public final class TRBSVUExperiment1Runner {
                 ? List.of(choice.bandwidth()) : choice.bandwidthOrder();
         return firstValidByValidationRank(training, query,
                 Kernel.valueOf(choice.family()), order);
+    }
+
+    /** Validation-only entry used to audit a proposed bandwidth without running final/OOS stages. */
+    public KernelValidation validateKernelBandwidth(TRBSVUSyntheticCase instance, Kernel family,
+                                                     double bandwidth) throws Exception {
+        requireFormalValidationHistory(instance);
+        if (family == null || !(bandwidth > 0.0) || !Double.isFinite(bandwidth))
+            throw new IllegalArgumentException("Invalid kernel bandwidth audit input.");
+        List<TRBSVUValidationTrace> details = new ArrayList<>();
+        ValidationScore score = validate(instance, 3,
+                new ContextualChoice(family.name(), bandwidth, 0.0), details);
+        boolean valid = Double.isFinite(score.mean()) && Double.isFinite(score.sd());
+        return new KernelValidation(score.mean(), score.sd(), valid, details);
     }
 
     private ValidationScore validate(TRBSVUSyntheticCase instance, int kind, Object parameter,
