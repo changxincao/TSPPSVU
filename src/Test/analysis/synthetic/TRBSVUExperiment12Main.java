@@ -58,6 +58,11 @@ public final class TRBSVUExperiment12Main {
                 random.nextLong(), random.nextLong(), random.nextLong(),
                 random.nextLong(), random.nextLong());
         Path replication = outputDirectory.resolve(String.format("rep_%03d", index));
+        Path formalQueryManifest = replication.resolve("queries").resolve("queries.tsv");
+        if (Files.isRegularFile(formalQueryManifest))
+            throw new IllegalStateException("This legacy combined entry point solves one query only. "
+                    + "Use TRBSVUExperiment1IdeMain and TRBSVUExperiment2IdeMain for the formal "
+                    + "40-query protocol: " + formalQueryManifest.toAbsolutePath());
         Path instanceDirectory = replication.resolve("instance");
         Path validationDirectory = replication.resolve("validation");
         Path solveDirectory = replication.resolve("solve");
@@ -67,24 +72,16 @@ public final class TRBSVUExperiment12Main {
         Path legacyBinary = instanceDirectory.resolve("instance.bin");
         TRBSVUSyntheticCase instance;
         if (Files.exists(caseFile)) {
+            verifyProtocolManifest(instanceDirectory.resolve("manifest.txt"));
             instance = TRBSVUSyntheticCaseIO.loadText(caseFile);
             verifyFrozenBaseline(instance, seeds);
         } else if (Files.exists(legacyBinary)) {
+            verifyProtocolManifest(instanceDirectory.resolve("manifest.txt"));
             instance = TRBSVUSyntheticCaseIO.load(legacyBinary);
             verifyFrozenBaseline(instance, seeds);
             TRBSVUSyntheticCaseIO.saveText(instance, caseFile);
-        } else {
-            // Baseline cell only. The remaining paired DGP cells belong to Experiment 3.
-            TRBSVUSyntheticCase.Generated generated = TRBSVUSyntheticCase.generateDetailed(
-                    TRBSVUFormalProtocol.CARRIERS, TRBSVUFormalProtocol.LANES,
-                    TRBSVUFormalProtocol.HISTORY_PERIODS, TRBSVUFormalProtocol.OOS_DRAWS,
-                    Distribution.NORMAL, Volatility.LOW, seeds);
-            instance = generated.instance();
-            TRBSVUSyntheticCaseIO.saveText(instance, caseFile);
-            TRBSVUResultWriter.writeInstance(instanceDirectory, instance);
-            TRBSVUResultWriter.writeDgpParameters(instanceDirectory,
-                    generated.demandParameters(), Distribution.NORMAL, Volatility.LOW);
-        }
+        } else throw new IllegalStateException("Missing frozen instance. Generate the formal "
+                + "query pool with TRBSVUGenerateBaselineCasesMain before solving: " + caseFile);
         Path rfPython = Path.of(".venv-rsome", "Scripts", "python.exe").toAbsolutePath();
         Path rfScript = Path.of("analysis", "trb_svu", "rf_leaf_weights.py").toAbsolutePath();
         String pythonEnvironment = pythonEnvironment(rfPython);
@@ -111,10 +108,17 @@ public final class TRBSVUExperiment12Main {
                 .getBytes(StandardCharsets.UTF_8));
         String experiment2Protocol = sha256((commonProtocol
                 + "|experiment=2|lambda=" + Arrays.toString(TRBSVUExperiment2Runner.LAMBDA)
-                 + "|w1=" + Arrays.toString(TRBSVUExperiment2Runner.W1_RADIUS))
+                 + "|w1=" + Arrays.toString(TRBSVUExperiment2Runner.W1_RADIUS)
+                 + "|momentKappa=" + Arrays.toString(TRBSVUExperiment2Runner.MOMENT_KAPPA)
+                 + "|momentValidationLimit="
+                 + TRBSVUExperiment2Runner.MOMENT_VALIDATION_LIMIT_SECONDS
+                 + "|momentQueryLimit=" + TRBSVUExperiment2Runner.MOMENT_QUERY_LIMIT_SECONDS
+                 + "|momentPolicy=lifted_affine|mm=marginal_variance"
+                 + "|pcm=marginal_plus_total_variance")
                 .getBytes(StandardCharsets.UTF_8));
         Path seedFile = instanceDirectory.resolve("manifest.txt");
-        String runManifest = "baseline=Normal-Low\nI=" + TRBSVUFormalProtocol.CARRIERS
+        String runManifest = "protocolVersion=" + TRBSVUFormalProtocol.EXPERIMENT12_VERSION
+                + "\nbaseline=Normal-Low\nI=" + TRBSVUFormalProtocol.CARRIERS
                 + "\nJ=" + TRBSVUFormalProtocol.LANES
                 + "\nH=" + TRBSVUFormalProtocol.HISTORY_PERIODS
                 + "\nOOS=" + TRBSVUFormalProtocol.OOS_DRAWS + "\n"
@@ -159,8 +163,6 @@ public final class TRBSVUExperiment12Main {
         Map<String, Double> exp1EffectiveBandwidth = new LinkedHashMap<>();
         exp1Parameters.put("D", Double.NaN);
         exp1Parameters.put("SAA-All", Double.NaN);
-        exp1Parameters.put("Tuned-SAA", result1.retention());
-        exp1ParameterTypes.put("Tuned-SAA", "RETENTION");
         for (Kernel family : Kernel.values()) {
             String name = kernelName(family);
             exp1Parameters.put(name, result1.bandwidth().get(family));
@@ -260,7 +262,18 @@ public final class TRBSVUExperiment12Main {
         }
     }
 
-    private static void writeExperiment(int index, String experiment,
+    private static void verifyProtocolManifest(Path manifest) throws Exception {
+        if (!Files.isRegularFile(manifest))
+            throw new IllegalStateException("Missing frozen-instance manifest: " + manifest);
+        String expected = "protocolVersion=" + TRBSVUFormalProtocol.EXPERIMENT12_VERSION;
+        boolean found = Files.readAllLines(manifest, StandardCharsets.UTF_8).stream()
+                .anyMatch(expected::equals);
+        if (!found)
+            throw new IllegalStateException("Frozen instance was not generated by "
+                    + TRBSVUFormalProtocol.EXPERIMENT12_VERSION + ": " + manifest);
+    }
+
+    static void writeExperiment(int index, String experiment,
                                         TRBSVUSyntheticCase instance,
                                         Path validationDirectory, Path solveDirectory,
                                         Path oosDirectory,
@@ -286,6 +299,12 @@ public final class TRBSVUExperiment12Main {
                 parameterTypes, contextFamilies, baseBandwidth, effectiveBandwidth, finalWeights);
         TRBSVUResultWriter.writeFinalWeights(solveDirectory.resolve(prefix + "_final_weights.csv"),
                 index, experiment, finalWeights);
+        if (finalWeights.keySet().stream().anyMatch(method ->
+                method.endsWith("MM") || method.endsWith("PCM"))) {
+            TRBSVUResultWriter.writeMarginalMomentInputs(
+                    solveDirectory.resolve(prefix + "_moment_inputs.csv"), index, experiment,
+                    instance.params.J, finalWeights, parameters);
+        }
         TRBSVUResultWriter.writeOosSummary(oosDirectory.resolve(prefix + "_summary.csv"),
                 index, experiment, oos, decisions);
         TRBSVUResultWriter.writeOosDetails(oosDirectory.resolve(prefix + "_draws.csv"),
@@ -301,12 +320,13 @@ public final class TRBSVUExperiment12Main {
         };
     }
 
-    private static String contextFamily(TRBSVUExperiment1Runner.ContextualChoice choice) {
+    static String contextFamily(TRBSVUExperiment1Runner.ContextualChoice choice) {
         return "RF".equals(choice.family()) ? "RANDOM_FOREST" : choice.family();
     }
 
-    private static String parameterType(String method) {
+    static String parameterType(String method) {
         if (method.endsWith("W1")) return "W1_RADIUS";
+        if (method.endsWith("MM") || method.endsWith("PCM")) return "MOMENT_KAPPA";
         return "LAMBDA";
     }
 

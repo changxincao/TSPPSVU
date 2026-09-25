@@ -39,7 +39,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
     private TRBSVUPersistentRateMqcMethodProbe() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1 || args.length > 38) {
+        if (args.length < 1 || args.length > 39) {
             throw new IllegalArgumentException(
                     "Usage: <output-directory> [replications] [queries] [mqc-scale]"
                             + " [volatility] [context-scale] [bandwidth] [spot-scale]"
@@ -62,7 +62,8 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                             + " [context-shift; 0 means unchanged]"
                             + " [context-window: LOW_HIGH|LOW_LOW|HIGH_HIGH]"
                             + " [recalibrate-high-market: true|false]"
-                             + " [linear-trend: true|false] [oracle-only: true|false]");
+                            + " [linear-trend: true|false] [oracle-only: true|false]"
+                            + " [base-structure: THREE_LEVEL_WIDE|THREE_LEVEL_10_30_50_70]");
         }
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
         int replications = args.length >= 2 ? Integer.parseInt(args[1]) : 3;
@@ -125,6 +126,14 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
         boolean recalibrateHighMarket = args.length >= 36 && Boolean.parseBoolean(args[35]);
         boolean linearTrend = args.length >= 37 && Boolean.parseBoolean(args[36]);
         boolean oracleOnly = args.length >= 38 && Boolean.parseBoolean(args[37]);
+        BaseStructure baseStructure = args.length >= 39
+                ? BaseStructure.valueOf(args[38].trim().toUpperCase(Locale.ROOT))
+                : contextStructure == ContextStructure.DENSE_INDEPENDENT_UNIFORM_POSITIVE
+                        || contextStructure == ContextStructure.DENSE_INDEPENDENT_UNIFORM_02_CENTERED
+                        || (oracleOnly && contextStructure
+                                == ContextStructure.WIDE_RANDOM_POSITIVE_CENTERED)
+                        ? BaseStructure.THREE_LEVEL_10_30_50_70
+                        : BaseStructure.THREE_LEVEL_WIDE;
         if (oracleOnly && oracleSamples <= 0)
             throw new IllegalArgumentException("Oracle-only mode requires oracle samples.");
         if (!List.of("LOW_HIGH", "LOW_LOW", "HIGH_HIGH").contains(contextWindow)
@@ -174,7 +183,9 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
         }
         Files.createDirectories(output);
 
-        Settings settings = new Settings(1, 600, 1e-4,
+        int solveThreads = Integer.getInteger("trb.probe.threads", 1);
+        int solveLimitSeconds = Integer.getInteger("trb.probe.limitSeconds", 600);
+        Settings settings = new Settings(solveThreads, solveLimitSeconds, 1e-4,
                 RCSAASolverVariant.LBBD_PRIMAL_EXACT, false, true);
         List<String> rows = new ArrayList<>();
         rows.add("market\treplication\tquery\tmethod\tstatus\tcertified\tobjective\tgap"
@@ -205,12 +216,7 @@ public final class TRBSVUPersistentRateMqcMethodProbe {
                             sampled.contexts(), sampled.historicalNoise(), sampled.oosNoise());
             Parameters parameters = TRBSVUSyntheticDemandGenerator.sampleParameters(
                     laneCount, historySize, paired.demandParameters(), contextScale,
-                    contextStructure,
-                    contextStructure == ContextStructure.DENSE_INDEPENDENT_UNIFORM_POSITIVE
-                            || (oracleOnly && contextStructure
-                                    == ContextStructure.WIDE_RANDOM_POSITIVE_CENTERED)
-                            ? BaseStructure.THREE_LEVEL_10_30_50_70
-                            : BaseStructure.THREE_LEVEL_WIDE,
+                    contextStructure, baseStructure,
                     commonLoadingLower, commonLoadingUpper);
             MultiQueryReplication demand;
             if (regionalGroups > 1) {

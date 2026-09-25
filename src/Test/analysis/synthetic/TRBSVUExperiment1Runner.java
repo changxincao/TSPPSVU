@@ -103,7 +103,7 @@ public final class TRBSVUExperiment1Runner {
     }
 
     public Result run(TRBSVUSyntheticCase instance) throws Exception {
-        return run(instance, Set.of("D", "SAA-All", "Tuned-SAA", "CSAA-Exp",
+        return run(instance, Set.of("D", "SAA-All", "CSAA-Exp",
                 "CSAA-Gau", "CSAA-Epa", "CSAA-Tri", "RF-CSAA"));
     }
 
@@ -245,7 +245,8 @@ public final class TRBSVUExperiment1Runner {
     private static void requireUsableIncumbent(Solution solution, String method, int carriers) {
         if (!usableIncumbent(solution, carriers)) {
             throw new IllegalStateException("Experiment 1 solve has no usable incumbent for " + method
-                    + ", status=" + solution.solverStatus + ", gap=" + solution.relativeGap);
+                    + ", status=" + (solution == null ? "NULL" : solution.solverStatus)
+                    + ", gap=" + (solution == null ? Double.NaN : solution.relativeGap));
         }
     }
 

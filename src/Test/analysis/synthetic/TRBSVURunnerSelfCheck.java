@@ -157,9 +157,9 @@ public final class TRBSVURunnerSelfCheck {
                             finalCheckpointDirectory.resolve("oos"), "self-check-instance",
                             "self-check-experiment1", 0, "1"));
             TRBSVUExperiment1Runner.Result result = experiment1.run(instance);
-            require(result.decisions().size() == 8 && result.oos().size() == 8
+            require(result.decisions().size() == 7 && result.oos().size() == 7
                     && result.selectedContextual() != null,
-                    "Experiment 1 runner did not return all eight methods.");
+                    "Experiment 1 runner did not return all seven formal methods.");
             try (var checkpoints = Files.list(checkpointDirectory)) {
                 require(checkpoints.filter(Files::isRegularFile).count()
                                 == result.validationDetails().size(),
@@ -224,19 +224,10 @@ public final class TRBSVURunnerSelfCheck {
                         "OOS summary is missing solve-certificate metadata.");
                 verifyOosAggregation(result);
             } finally {
-                try (var paths = Files.walk(output)) {
-                    for (Path path : paths.sorted(Comparator.reverseOrder()).toList())
-                        Files.deleteIfExists(path);
-                }
+                deleteTree(output);
             }
-            try (var paths = Files.walk(checkpointDirectory)) {
-                for (Path path : paths.sorted(Comparator.reverseOrder()).toList())
-                    Files.deleteIfExists(path);
-            }
-            try (var paths = Files.walk(finalCheckpointDirectory)) {
-                for (Path path : paths.sorted(Comparator.reverseOrder()).toList())
-                    Files.deleteIfExists(path);
-            }
+            deleteTree(checkpointDirectory);
+            deleteTree(finalCheckpointDirectory);
             System.out.println("Experiment 1 mini-run methods=" + result.decisions().keySet()
                     + " chosen=" + result.selectedContextual());
             if ("experiment2".equals(args[0])) {
@@ -244,20 +235,40 @@ public final class TRBSVURunnerSelfCheck {
                         "trb_svu_experiment2_checkpoint_check_");
                 Path secondFinalCheckpoints = Files.createTempDirectory(Path.of("tmp"),
                         "trb_svu_experiment2_final_checkpoint_check_");
-                TRBSVUExperiment2Runner.Result second = new TRBSVUExperiment2Runner(
+                TRBSVUExperiment2Runner secondRunner = new TRBSVUExperiment2Runner(
                         settings, experiment1, 1, new double[]{0.1}, new double[]{0.05},
                          new TRBSVUValidationCheckpoint(secondCheckpoints,
                                 "self-check-instance", "self-check-experiment2"),
                          new TRBSVUFinalCheckpoint(secondFinalCheckpoints.resolve("solve"),
                                  secondFinalCheckpoints.resolve("oos"), "self-check-instance",
-                                 "self-check-experiment2", 0, "2"))
-                        .run(instance, result.selectedContextual());
-                require(second.decisions().size() == 6 && second.oos().size() == 6,
-                        "Experiment 2 runner did not return the six formal robust methods.");
+                                 "self-check-experiment2", 0, "2"));
+                TRBSVUExperiment2Runner.Result second = secondRunner.run(
+                        instance, result.selectedContextual());
+                require(second.decisions().size() == 5 && second.oos().size() == 5,
+                        "Experiment 2 runner did not return all five formal robust methods.");
+                long validationCheckpointCountBefore;
+                try (var checkpoints = Files.list(secondCheckpoints)) {
+                    validationCheckpointCountBefore = checkpoints.filter(Files::isRegularFile).count();
+                }
+                Path frozenFinalCheckpoints = Files.createTempDirectory(Path.of("tmp"),
+                        "trb_svu_experiment2_frozen_final_checkpoint_check_");
+                TRBSVUExperiment2Runner frozenRunner = new TRBSVUExperiment2Runner(
+                        settings, experiment1, 1, new double[]{0.1}, new double[]{0.05},
+                        new TRBSVUValidationCheckpoint(secondCheckpoints,
+                                "self-check-instance", "self-check-experiment2"),
+                        new TRBSVUFinalCheckpoint(frozenFinalCheckpoints.resolve("solve"),
+                                frozenFinalCheckpoints.resolve("oos"), "self-check-instance",
+                                "self-check-experiment2-frozen", 1, "2"));
+                TRBSVUExperiment2Runner.Result frozen = frozenRunner.runWithSelectedParameters(
+                        instance, result.selectedContextual(), second.selectedParameter(),
+                        second.validationCost(), second.validationCurve());
+                require(frozen.decisions().keySet().equals(second.decisions().keySet())
+                                && frozen.validationDetails().isEmpty(),
+                        "Frozen-parameter Experiment 2 reran validation or changed methods.");
                 try (var checkpoints = Files.list(secondCheckpoints)) {
                     require(checkpoints.filter(Files::isRegularFile).count()
-                                    == second.validationDetails().size(),
-                            "Experiment 2 validation results were not checkpointed one-for-one.");
+                                    == validationCheckpointCountBefore,
+                            "Frozen-parameter Experiment 2 unexpectedly changed validation checkpoints.");
                 }
                 try (var checkpoints = Files.list(secondFinalCheckpoints.resolve("solve"))) {
                     require(checkpoints.filter(Files::isRegularFile).count()
@@ -269,14 +280,19 @@ public final class TRBSVURunnerSelfCheck {
                                     == 2L * second.oos().size(),
                             "Experiment 2 OOS results were not checkpointed one method at a time.");
                 }
-                try (var paths = Files.walk(secondFinalCheckpoints)) {
-                    for (Path path : paths.sorted(Comparator.reverseOrder()).toList())
-                        Files.deleteIfExists(path);
+                try (var checkpoints = Files.list(frozenFinalCheckpoints.resolve("solve"))) {
+                    require(checkpoints.filter(Files::isRegularFile).count()
+                                    == frozen.decisions().size(),
+                            "Frozen Experiment 2 final solves were not recomputed and checkpointed.");
                 }
-                try (var paths = Files.walk(secondCheckpoints)) {
-                    for (Path path : paths.sorted(Comparator.reverseOrder()).toList())
-                        Files.deleteIfExists(path);
+                try (var checkpoints = Files.list(frozenFinalCheckpoints.resolve("oos"))) {
+                    require(checkpoints.filter(Files::isRegularFile).count()
+                                    == 2L * frozen.oos().size(),
+                            "Frozen Experiment 2 OOS results were not checkpointed method by method.");
                 }
+                deleteTree(frozenFinalCheckpoints);
+                deleteTree(secondFinalCheckpoints);
+                deleteTree(secondCheckpoints);
                 System.out.println("Experiment 2 mini-run methods=" + second.decisions().keySet());
             }
         }
@@ -404,6 +420,17 @@ public final class TRBSVURunnerSelfCheck {
                     || !Arrays.equals(a.decision(), b.decision())) return false;
         }
         return true;
+    }
+
+    private static void deleteTree(Path root) throws Exception {
+        List<Path> paths;
+        try (var stream = Files.walk(root)) {
+            paths = stream.sorted(Comparator.reverseOrder()).toList();
+        }
+        for (Path path : paths) {
+            if (Files.exists(path)) Files.setAttribute(path, "dos:readonly", false);
+            Files.deleteIfExists(path);
+        }
     }
 
     private static void require(boolean condition, String message) {

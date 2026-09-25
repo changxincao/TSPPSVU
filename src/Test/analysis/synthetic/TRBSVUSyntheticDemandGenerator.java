@@ -46,11 +46,12 @@ public final class TRBSVUSyntheticDemandGenerator {
         FOURTH_POWER_GAUSSIAN_POSITIVE_CENTERED,
         DOMINANT_POSITIVE_CENTERED,
         TWO_ACTIVE, ONE_ACTIVE, SIGNED_CENTERED, GROUPED_CENTERED,
-        DENSE_INDEPENDENT_UNIFORM_POSITIVE
+        DENSE_INDEPENDENT_UNIFORM_POSITIVE,
+        DENSE_INDEPENDENT_UNIFORM_02_CENTERED
     }
 
     public enum BaseStructure {
-        UNIFORM_10_30, THREE_LEVEL_WIDE, THREE_LEVEL_10_30_50_70
+        UNIFORM_10_30, UNIFORM_10_100, THREE_LEVEL_WIDE, THREE_LEVEL_10_30_50_70
     }
 
     public enum Volatility {
@@ -136,6 +137,21 @@ public final class TRBSVUSyntheticDemandGenerator {
             return result;
         }
 
+        /** Procurement scale for a path whose trend is t/H, t=0,...,H-1. */
+        public double[] linearTrendTypicalDemand() {
+            double[] result = new double[laneCount()];
+            double meanTrend = (historicalPeriods - 1.0) / (2.0 * historicalPeriods);
+            for (int j = 0; j < result.length; j++) {
+                if (isCentered(contextStructure)) {
+                    result[j] = base[j] + trend[j] * (meanTrend - 0.5);
+                } else {
+                    result[j] = base[j] + 0.5 * (market[j] + promotion[j] + attention[j])
+                            + meanTrend * trend[j];
+                }
+            }
+            return result;
+        }
+
         /** The nominal level, not the mean after rejecting negative Normal draws. */
         public double[] nominalDemand(CovariateVector context) {
             double[] x = context.values();
@@ -171,8 +187,8 @@ public final class TRBSVUSyntheticDemandGenerator {
         public final CovariateVector testContext;
         public final List<Sample> oos;
 
-        private Replication(Parameters parameters, List<Sample> history,
-                            CovariateVector testContext, List<Sample> oos) {
+        Replication(Parameters parameters, List<Sample> history,
+                    CovariateVector testContext, List<Sample> oos) {
             this.parameters = parameters;
             this.history = List.copyOf(history);
             this.testContext = testContext;
@@ -347,6 +363,10 @@ public final class TRBSVUSyntheticDemandGenerator {
             for (int k = 0; k < ratios.length; k++) ratios[k] = random.nextDouble();
             return;
         }
+        if (structure == ContextStructure.DENSE_INDEPENDENT_UNIFORM_02_CENTERED) {
+            for (int k = 0; k < ratios.length; k++) ratios[k] = 0.2 * random.nextDouble();
+            return;
+        }
         if (structure == ContextStructure.DENSE_WIDE_POSITIVE) {
             ratios[0] = 0.1 + (0.8 / 0.3) * (ratios[0] - 0.3);
             ratios[1] = 0.1 + (0.8 / 0.2) * (ratios[1] - 0.2);
@@ -465,6 +485,7 @@ public final class TRBSVUSyntheticDemandGenerator {
                 || structure == ContextStructure.DENSE_POSITIVE_CENTERED
                 || structure == ContextStructure.MODERATE_RANDOM_POSITIVE_CENTERED
                 || structure == ContextStructure.WIDE_RANDOM_POSITIVE_CENTERED
+                || structure == ContextStructure.DENSE_INDEPENDENT_UNIFORM_02_CENTERED
                 || structure == ContextStructure.SIMPLEX_RANDOM_POSITIVE_CENTERED
                 || structure == ContextStructure.LOGNORMAL_RANDOM_POSITIVE_CENTERED
                 || structure == ContextStructure.SQUARED_GAUSSIAN_POSITIVE_CENTERED
@@ -483,6 +504,7 @@ public final class TRBSVUSyntheticDemandGenerator {
 
     private static double base(BaseStructure structure, int level, double quantile) {
         if (structure == BaseStructure.UNIFORM_10_30) return 10.0 + 20.0 * quantile;
+        if (structure == BaseStructure.UNIFORM_10_100) return 10.0 + 90.0 * quantile;
         if (structure == BaseStructure.THREE_LEVEL_10_30_50_70)
             return 10.0 + 20.0 * (level + quantile);
         return switch (level) {

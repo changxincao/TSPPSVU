@@ -147,23 +147,24 @@ public final class TRBSVUProcurementGenerator {
         double[][] rates = new double[carrierCount][lanes];
         double[][] capacities = new double[carrierCount][lanes];
         double[] spot = new double[lanes];
+        double[] carrierFactor = new double[carrierCount];
+        for (int i = 0; i < carrierCount; i++) {
+            carrierFactor[i] = uniform(random, 0.7, 1.3);
+        }
         for (int j = 0; j < lanes; j++) {
             double laneRate = uniform(random, 20.0, 100.0);
-            double spread = uniform(random, 0.05, 0.30);
             List<Integer> carriers = new ArrayList<>();
             for (int i = 0; i < carrierCount; i++) {
                 if (eligible[i][j]) carriers.add(i);
             }
             Collections.shuffle(carriers, random);
             double rateSum = 0.0;
-            for (int k = 0; k < carriers.size(); k++) {
-                int i = carriers.get(k);
-                double multiplier = new double[] {0.5, 1.0, 1.5}[3 * k / carriers.size()];
-                rates[i][j] = laneRate * multiplier * uniform(random, 1.0 - spread, 1.0 + spread);
+            for (int i : carriers) {
+                rates[i][j] = laneRate * carrierFactor[i] * uniform(random, 0.9, 1.1);
                 capacities[i][j] = typicalDemand[j] * uniform(random, 0.3, 0.5);
                 rateSum += rates[i][j];
             }
-            spot[j] = uniform(random, 1.5, 2.5) * rateSum / carriers.size();
+            spot[j] = uniform(random, 2.0, 3.0) * rateSum / carriers.size();
         }
 
         double[] mqc = new double[carrierCount];
@@ -176,7 +177,7 @@ public final class TRBSVUProcurementGenerator {
                 eligibleDemand += typicalDemand[j];
                 minimumRate = Math.min(minimumRate, rates[i][j]);
             }
-            mqc[i] = eligibleDemand * uniform(random, 0.1, 0.2);
+            mqc[i] = eligibleDemand * uniform(random, 0.15, 0.35);
             penalty[i] = minimumRate;
         }
         List<String> carrierNames = new ArrayList<>(carrierCount);

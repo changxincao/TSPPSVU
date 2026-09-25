@@ -8,13 +8,21 @@ import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.Distribution;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.Parameters;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.Replication;
 import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.Volatility;
+import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.ContextStructure;
+import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.BaseStructure;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 /** One shared market, historical path, final context and conditional OOS pool. */
 public final class TRBSVUSyntheticCase {
     public record Generated(TRBSVUSyntheticCase instance, Parameters demandParameters) { }
+    public record QueryCase(TRBSVUSyntheticCase instance, String queryType,
+                            int sourceCandidate, double demandRatio) { }
+    public record GeneratedQueries(List<QueryCase> queries, Parameters demandParameters) {
+        public GeneratedQueries { queries = List.copyOf(queries); }
+    }
 
     public record Seeds(long demandParameters, long procurement,
                         long contexts, long historicalNoise, long oosNoise) {
@@ -58,16 +66,81 @@ public final class TRBSVUSyntheticCase {
                                                Volatility volatility, Seeds seeds) {
         if (seeds == null) throw new IllegalArgumentException("Seeds are required.");
         Parameters demandParameters = TRBSVUSyntheticDemandGenerator.sampleParameters(
-                lanes, historicalPeriods, seeds.demandParameters());
-        Replication demand = TRBSVUSyntheticDemandGenerator.generate(demandParameters,
-                distribution, volatility, oosDraws, seeds.contexts(),
-                seeds.historicalNoise(), seeds.oosNoise());
+                lanes, historicalPeriods, seeds.demandParameters(), 10.0,
+                ContextStructure.DENSE_INDEPENDENT_UNIFORM_POSITIVE,
+                BaseStructure.UNIFORM_10_100, 0.1, 0.3);
+        TRBSVUSyntheticDemandGenerator.MultiQueryReplication generated =
+                TRBSVUSyntheticDemandGenerator.generateMultiQueryWithLinearTrend(
+                        demandParameters, distribution, volatility, 1, oosDraws,
+                        seeds.contexts(), seeds.historicalNoise(), seeds.oosNoise(),
+                        TRBSVUSyntheticDemandGenerator.ContextDistribution.UNIFORM);
+        TRBSVUSyntheticDemandGenerator.ConditionalQuery query = generated.queries.get(0);
+        Replication demand = new Replication(demandParameters, generated.history,
+                query.context, query.oos);
         ProcurementParams market = TRBSVUProcurementGenerator.generate(
-                carriers, demandParameters.typicalDemand(), seeds.procurement());
+                carriers, demandParameters.linearTrendTypicalDemand(), seeds.procurement());
         List<String> laneNames = new ArrayList<>(lanes);
         for (int j = 0; j < lanes; j++) laneNames.add("L" + (j + 1));
         return new Generated(new TRBSVUSyntheticCase(market, laneNames, demand, seeds),
                 demandParameters);
+    }
+
+    /** Formal baseline: 20 ordinary queries plus 20 high-R queries selected without OOS outcomes. */
+    public static GeneratedQueries generateFormalQueries(int carriers, int lanes,
+                                                          int historicalPeriods, int oosDraws,
+                                                          Distribution distribution,
+                                                          Volatility volatility, Seeds seeds) {
+        if (seeds == null) throw new IllegalArgumentException("Seeds are required.");
+        Parameters parameters = TRBSVUSyntheticDemandGenerator.sampleParameters(
+                lanes, historicalPeriods, seeds.demandParameters(), 10.0,
+                ContextStructure.DENSE_INDEPENDENT_UNIFORM_POSITIVE,
+                BaseStructure.UNIFORM_10_100, 0.1, 0.3);
+        int randomQueries = TRBSVUFormalProtocol.RANDOM_QUERIES;
+        int highQueries = TRBSVUFormalProtocol.HIGH_R_QUERIES;
+        int candidates = Math.max(randomQueries + highQueries, 100);
+        TRBSVUSyntheticDemandGenerator.MultiQueryReplication generated =
+                TRBSVUSyntheticDemandGenerator.generateMultiQueryWithLinearTrend(
+                        parameters, distribution, volatility, candidates, oosDraws,
+                        seeds.contexts(), seeds.historicalNoise(), seeds.oosNoise(),
+                        TRBSVUSyntheticDemandGenerator.ContextDistribution.UNIFORM);
+        double[] procurementDemand = parameters.linearTrendTypicalDemand();
+        ProcurementParams market = TRBSVUProcurementGenerator.generate(
+                carriers, procurementDemand, seeds.procurement());
+        List<String> laneNames = new ArrayList<>(lanes);
+        for (int j = 0; j < lanes; j++) laneNames.add("L" + (j + 1));
+        double typicalTotal = sum(procurementDemand);
+        List<Integer> highCandidates = new ArrayList<>();
+        for (int q = randomQueries; q < generated.queries.size(); q++) highCandidates.add(q);
+        highCandidates.sort(Comparator
+                .comparingDouble((Integer q) -> sum(parameters.nominalDemand(
+                        generated.queries.get(q).context))).reversed()
+                .thenComparingInt(Integer::intValue));
+        List<QueryCase> result = new ArrayList<>(randomQueries + highQueries);
+        for (int q = 0; q < randomQueries; q++)
+            result.add(queryCase(market, laneNames, generated, seeds, q,
+                    "RANDOM", typicalTotal));
+        for (int rank = 0; rank < highQueries; rank++) {
+            int q = highCandidates.get(rank);
+            result.add(queryCase(market, laneNames, generated, seeds, q,
+                    "HIGH_R", typicalTotal));
+        }
+        return new GeneratedQueries(result, parameters);
+    }
+
+    private static QueryCase queryCase(ProcurementParams market, List<String> laneNames,
+                                       TRBSVUSyntheticDemandGenerator.MultiQueryReplication generated,
+                                       Seeds seeds, int query, String type, double typicalTotal) {
+        TRBSVUSyntheticDemandGenerator.ConditionalQuery selected = generated.queries.get(query);
+        TRBSVUSyntheticCase instance = new TRBSVUSyntheticCase(market, laneNames,
+                generated.history, selected.context, selected.oos, seeds);
+        double ratio = sum(generated.parameters.nominalDemand(selected.context)) / typicalTotal;
+        return new QueryCase(instance, type, query, ratio);
+    }
+
+    private static double sum(double[] values) {
+        double total = 0.0;
+        for (double value : values) total += value;
+        return total;
     }
 
     /** Returns one fixed-length, past-only rolling validation window. */

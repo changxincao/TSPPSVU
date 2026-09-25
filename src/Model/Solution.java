@@ -21,6 +21,10 @@ public  class Solution {
     public int wassersteinTotalPointCount;
     public double[] wassersteinBoxUpper;
     public double[] wassersteinDistanceScale;
+    /** Scalar dimensions of the final deterministic reformulation, when exposed by the solver. */
+    public int modelVariableCount;
+    public int modelConstraintCount;
+    public int modelConeCount;
     
     public Solution() {
 		this.objValue = 0;
@@ -53,5 +57,8 @@ public  class Solution {
         this.wassersteinTotalPointCount = -1;
         this.wassersteinBoxUpper = null;
         this.wassersteinDistanceScale = null;
+        this.modelVariableCount = -1;
+        this.modelConstraintCount = -1;
+        this.modelConeCount = -1;
     }
 }

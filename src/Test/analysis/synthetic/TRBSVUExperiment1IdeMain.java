@@ -31,16 +31,16 @@ import java.util.concurrent.TimeUnit;
 public final class TRBSVUExperiment1IdeMain {
     // Edit these defaults directly, or override them with --key=value program arguments in Eclipse.
     private static final Path DEFAULT_INPUT = Path.of("analysis", "TRB_reviewer_revision",
-            "101_svu_experiment12_I15J50S75_20260917");
+            "formal_svu_experiment12_cases_20260925");
     private static final Path DEFAULT_OUTPUT = Path.of("analysis", "TRB_reviewer_revision",
-            "121_svu_experiment1_I15J50S75_20260917");
-    private static final int DEFAULT_PARALLEL_TASKS = 6;
+            "formal_svu_experiment1_results_20260925");
+    private static final int DEFAULT_PARALLEL_TASKS = 4;
     private static final int DEFAULT_SOLVER_THREADS = 4;
     private static final int DEFAULT_LIMIT_SECONDS = 14_400;
     private static final int DEFAULT_VALIDATION_ORIGINS = TRBSVUFormalProtocol.VALIDATION_ORIGINS;
-    private static final String DEFAULT_REPLICATIONS = "0-19";
+    private static final String DEFAULT_REPLICATIONS = "0-9";
     private static final String DEFAULT_METHODS = "ALL";
-    private static final List<String> ALL_METHODS = List.of("D", "SAA-All", "Tuned-SAA",
+    private static final List<String> ALL_METHODS = List.of("D", "SAA-All",
             "CSAA-Exp", "CSAA-Gau", "CSAA-Epa", "CSAA-Tri", "RF-CSAA");
     private static final List<String> CONTEXTUAL_METHODS = List.of(
             "CSAA-Exp", "CSAA-Gau", "CSAA-Epa", "CSAA-Tri", "RF-CSAA");
@@ -113,9 +113,9 @@ public final class TRBSVUExperiment1IdeMain {
 
     private static void runWorker(String[] args) throws Exception {
         if (args.length != 7)
-            throw new IllegalArgumentException("Worker usage: <instance.tsv> <taskOutput> <replication> "
+            throw new IllegalArgumentException("Worker usage: <replicationInput> <taskOutput> <replication> "
                     + "<method> <validationOrigins> <solverThreads> <limitSeconds>");
-        Path instanceFile = Path.of(args[0]);
+        Path replicationInput = Path.of(args[0]);
         Path output = Path.of(args[1]);
         int replication = Integer.parseInt(args[2]);
         String method = canonicalMethod(args[3]);
@@ -123,17 +123,10 @@ public final class TRBSVUExperiment1IdeMain {
         int threads = Integer.parseInt(args[5]);
         int limit = Integer.parseInt(args[6]);
         Files.createDirectories(output);
-        TRBSVUSyntheticCase instance = TRBSVUSyntheticCaseIO.loadText(instanceFile);
-        if (instance.params.I != TRBSVUFormalProtocol.CARRIERS
-                || instance.params.J != TRBSVUFormalProtocol.LANES
-                || instance.history.size() != TRBSVUFormalProtocol.HISTORY_PERIODS
-                || instance.oos.size() != TRBSVUFormalProtocol.OOS_DRAWS) {
-            throw new IllegalArgumentException("IDE formal runner requires I="
-                    + TRBSVUFormalProtocol.CARRIERS + ", J=" + TRBSVUFormalProtocol.LANES
-                    + ", S=" + TRBSVUFormalProtocol.HISTORY_PERIODS + ", OOS="
-                    + TRBSVUFormalProtocol.OOS_DRAWS + ".");
-        }
-        String instanceHash = sha256(Files.readAllBytes(instanceFile));
+        List<QueryInput> queries = loadQueries(replicationInput);
+        TRBSVUSyntheticCase reference = TRBSVUSyntheticCaseIO.loadText(queries.get(0).file());
+        verifyFormalDimensions(reference);
+        String queryPoolHash = queryPoolFingerprint(queries);
         Path rfScript = Path.of("analysis", "trb_svu", "rf_leaf_weights.py").toAbsolutePath();
         Path python = Path.of(".venv-rsome", "Scripts", "python.exe").toAbsolutePath();
         String sourceHash = sourceFingerprint(Path.of("src"));
@@ -142,7 +135,7 @@ public final class TRBSVUExperiment1IdeMain {
         String protocol = sha256(("TRBSVU_EXP1_METHOD_V3|method=" + method + "|origins=" + origins
                 + "|validationTrainingPeriods="
                 + TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS
-                + "|threads=" + threads + "|limit=" + limit + "|instance=" + instanceHash
+                + "|threads=" + threads + "|limit=" + limit + "|queryPool=" + queryPoolHash
                 + "|retention=" + Arrays.toString(TRBSVUExperiment1Runner.RETENTION)
                 + "|bandwidth=" + Arrays.toString(TRBSVUExperiment1Runner.BANDWIDTH)
                 + "|rfMinLeaf=" + Arrays.toString(TRBSVUExperiment1Runner.RF_MIN_LEAF)
@@ -158,16 +151,35 @@ public final class TRBSVUExperiment1IdeMain {
         Settings settings = new Settings(threads, limit, 1e-4,
                 RCSAASolverVariant.LBBD_PRIMAL_EXACT, false, true);
         TRBSVUForestWeights forest = new TRBSVUForestWeights(python.toString(), rfScript);
-        TRBSVUExperiment1Runner runner = new TRBSVUExperiment1Runner(settings, forest, origins,
-                new TRBSVUValidationCheckpoint(output.resolve("validation_checkpoints"),
-                        instanceHash, protocol),
-                new TRBSVUFinalCheckpoint(output.resolve("solve_checkpoints"),
-                        output.resolve("oos_checkpoints"), instanceHash, protocol,
-                        replication, "1"));
-        TRBSVUExperiment1Runner.Result result = runner.run(instance, Set.of(method));
-        writeResult(output, replication, instance, method, result);
+        TRBSVUValidationCheckpoint validationCheckpoint = new TRBSVUValidationCheckpoint(
+                output.resolve("validation_checkpoints"), queryPoolHash, protocol);
+        for (QueryInput query : queries) {
+            TRBSVUSyntheticCase instance = TRBSVUSyntheticCaseIO.loadText(query.file());
+            verifyFormalDimensions(instance);
+            verifySharedTrainingCore(reference, instance, query.index());
+            String queryHash = sha256(Files.readAllBytes(query.file()));
+            String queryProtocol = sha256((protocol + "|queryIndex=" + query.index()
+                    + "|queryType=" + query.type() + "|querySha256=" + queryHash)
+                    .getBytes(StandardCharsets.UTF_8));
+            Path queryOutput = output.resolve("queries")
+                    .resolve(String.format(Locale.ROOT, "query_%03d", query.index()));
+            TRBSVUExperiment1Runner runner = new TRBSVUExperiment1Runner(settings, forest, origins,
+                    validationCheckpoint,
+                    new TRBSVUFinalCheckpoint(queryOutput.resolve("solve_checkpoints"),
+                            queryOutput.resolve("oos_checkpoints"), queryHash, queryProtocol,
+                            replication, "1"));
+            TRBSVUExperiment1Runner.Result result = runner.run(instance, Set.of(method));
+            writeResult(queryOutput, replication, instance, method, result);
+            Files.writeString(queryOutput.resolve("query_metadata.txt"),
+                    "queryIndex=" + query.index() + "\nqueryType=" + query.type()
+                            + "\nsourceCandidate=" + query.sourceCandidate()
+                            + "\ndemandRatio=" + query.demandRatio()
+                            + "\nquerySha256=" + queryHash + "\n",
+                    StandardCharsets.UTF_8);
+        }
         Files.writeString(complete, "protocol=" + protocol + "\ninstance="
-                + instanceFile.toAbsolutePath() + "\nmethod=" + method + "\nsourceSha256="
+                + replicationInput.toAbsolutePath() + "\nqueryCount=" + queries.size()
+                + "\nmethod=" + method + "\nsourceSha256="
                 + sourceHash + "\nrfScriptSha256=" + rfScriptHash
                 + "\npythonEnvironment=" + pythonEnvironment + "\n",
                 StandardCharsets.UTF_8);
@@ -226,10 +238,19 @@ public final class TRBSVUExperiment1IdeMain {
         List<Task> tasks = new ArrayList<>();
         for (int replication : replications) {
             String name = String.format(Locale.ROOT, "rep_%03d", replication);
-            Path instance = config.input.resolve(name).resolve("instance").resolve("instance.tsv");
+            Path replicationInput = config.input.resolve(name);
+            Path instance = replicationInput.resolve("instance").resolve("instance.tsv");
             if (!Files.isRegularFile(instance))
                 throw new IllegalStateException("Missing frozen input: " + instance.toAbsolutePath());
-            for (String method : config.methods) tasks.add(new Task(replication, name, method, instance));
+            Path manifest = instance.getParent().resolve("manifest.txt");
+            String expected = "protocolVersion=" + TRBSVUFormalProtocol.EXPERIMENT12_VERSION;
+            if (!Files.isRegularFile(manifest) || Files.readAllLines(manifest, StandardCharsets.UTF_8)
+                    .stream().noneMatch(expected::equals))
+                throw new IllegalStateException("Input is not a frozen "
+                        + TRBSVUFormalProtocol.EXPERIMENT12_VERSION + " case: " + instance);
+            loadQueries(replicationInput);
+            for (String method : config.methods)
+                tasks.add(new Task(replication, name, method, replicationInput));
         }
         return tasks;
     }
@@ -241,7 +262,8 @@ public final class TRBSVUExperiment1IdeMain {
             Path replicationOutput = output.resolve(name);
             ContextualChoice chosen = null;
             for (String method : CONTEXTUAL_METHODS) {
-                Path candidateFile = replicationOutput.resolve(safe(method)).resolve("validation")
+                Path candidateFile = replicationOutput.resolve(safe(method)).resolve("queries")
+                        .resolve("query_000").resolve("validation")
                         .resolve("context_candidate.csv");
                 if (!Files.isRegularFile(candidateFile))
                     throw new IllegalStateException("Missing contextual candidate for " + name
@@ -266,6 +288,15 @@ public final class TRBSVUExperiment1IdeMain {
                 throw new IllegalStateException("Output contains a different frozen instance: " + targetInstance);
             if (!Files.exists(targetInstance))
                 Files.copy(sourceInstance, targetInstance, StandardCopyOption.COPY_ATTRIBUTES);
+            Path sourceQueries = input.resolve(name).resolve("queries").resolve("queries.tsv");
+            Path targetQueries = replicationOutput.resolve("queries.tsv");
+            if (!Files.isRegularFile(sourceQueries))
+                throw new IllegalStateException("Missing frozen query manifest: " + sourceQueries);
+            Files.copy(sourceQueries, targetQueries, StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.COPY_ATTRIBUTES);
+            Files.writeString(replicationOutput.resolve("query_pool_sha256.txt"),
+                    queryPoolFingerprint(loadQueries(input.resolve(name))) + "\n",
+                    StandardCharsets.UTF_8);
             System.out.println("Experiment 1 contextual C* aggregated for " + name + ": " + chosen);
         }
     }
@@ -362,6 +393,86 @@ public final class TRBSVUExperiment1IdeMain {
                 || output.indexOf('\r') >= 0)
             throw new IllegalStateException("Cannot identify the RF Python environment: " + output);
         return output;
+    }
+
+    record QueryInput(int index, String type, int sourceCandidate,
+                      double demandRatio, Path file) { }
+
+    static List<QueryInput> loadQueries(Path replicationInput) throws Exception {
+        Path manifest = replicationInput.resolve("queries").resolve("queries.tsv");
+        if (!Files.isRegularFile(manifest))
+            throw new IllegalStateException("Missing formal query manifest: " + manifest.toAbsolutePath());
+        List<String> lines = Files.readAllLines(manifest, StandardCharsets.UTF_8);
+        int expectedCount = TRBSVUFormalProtocol.RANDOM_QUERIES
+                + TRBSVUFormalProtocol.HIGH_R_QUERIES;
+        if (lines.size() != expectedCount + 1
+                || !lines.get(0).equals("query_index\tquery_type\tsource_candidate\tdemand_ratio\tinstance_file"))
+            throw new IllegalStateException("Invalid formal query manifest: " + manifest);
+        List<QueryInput> result = new ArrayList<>(expectedCount);
+        for (int row = 1; row < lines.size(); row++) {
+            String[] fields = lines.get(row).split("\\t", -1);
+            if (fields.length != 5) throw new IllegalStateException("Invalid query row: " + lines.get(row));
+            int index = Integer.parseInt(fields[0]);
+            if (index != row - 1) throw new IllegalStateException("Non-sequential query index: " + index);
+            String expectedType = index < TRBSVUFormalProtocol.RANDOM_QUERIES ? "RANDOM" : "HIGH_R";
+            if (!expectedType.equals(fields[1]))
+                throw new IllegalStateException("Unexpected query type at index " + index + ": " + fields[1]);
+            Path file = manifest.getParent().resolve(fields[4]).normalize();
+            if (!Files.isRegularFile(file)) throw new IllegalStateException("Missing query input: " + file);
+            result.add(new QueryInput(index, fields[1], Integer.parseInt(fields[2]),
+                    Double.parseDouble(fields[3]), file));
+        }
+        Path primary = replicationInput.resolve("instance").resolve("instance.tsv");
+        if (!Files.isRegularFile(primary) || Files.mismatch(primary, result.get(0).file()) != -1L)
+            throw new IllegalStateException("Primary instance is not identical to query_000: " + replicationInput);
+        return List.copyOf(result);
+    }
+
+    static String queryPoolFingerprint(List<QueryInput> queries) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        for (QueryInput query : queries) {
+            digest.update(query.file().getFileName().toString().getBytes(StandardCharsets.UTF_8));
+            digest.update((byte) 0);
+            digest.update(Files.readAllBytes(query.file()));
+            digest.update((byte) 0);
+        }
+        return HexFormat.of().formatHex(digest.digest());
+    }
+
+    static void verifyFormalDimensions(TRBSVUSyntheticCase instance) {
+        if (instance.params.I != TRBSVUFormalProtocol.CARRIERS
+                || instance.params.J != TRBSVUFormalProtocol.LANES
+                || instance.history.size() != TRBSVUFormalProtocol.HISTORY_PERIODS
+                || instance.oos.size() != TRBSVUFormalProtocol.OOS_DRAWS)
+            throw new IllegalArgumentException("IDE formal runner requires I="
+                    + TRBSVUFormalProtocol.CARRIERS + ", J=" + TRBSVUFormalProtocol.LANES
+                    + ", S=" + TRBSVUFormalProtocol.HISTORY_PERIODS + ", OOS="
+                    + TRBSVUFormalProtocol.OOS_DRAWS + ".");
+    }
+
+    static void verifySharedTrainingCore(TRBSVUSyntheticCase expected,
+                                         TRBSVUSyntheticCase actual, int query) {
+        boolean same = expected.lanes.equals(actual.lanes)
+                && expected.seeds.equals(actual.seeds)
+                && expected.params.carriers.equals(actual.params.carriers)
+                && expected.params.alpha == actual.params.alpha
+                && expected.params.beta == actual.params.beta
+                && Arrays.equals(expected.params.e, actual.params.e)
+                && Arrays.equals(expected.params.p, actual.params.p)
+                && Arrays.equals(expected.params.h, actual.params.h)
+                && Arrays.deepEquals(expected.params.q, actual.params.q)
+                && Arrays.deepEquals(expected.params.r, actual.params.r)
+                && Arrays.deepEquals(expected.params.eligible, actual.params.eligible)
+                && expected.history.size() == actual.history.size();
+        for (int s = 0; same && s < expected.history.size(); s++) {
+            var left = expected.history.get(s);
+            var right = actual.history.get(s);
+            same = left.id == right.id && left.period.tIndex == right.period.tIndex
+                    && Arrays.equals(left.theta.values(), right.theta.values())
+                    && Arrays.equals(left.demand(), right.demand());
+        }
+        if (!same) throw new IllegalStateException(
+                "Query " + query + " does not share the frozen market and training history.");
     }
 
     private record Task(int replication, String replicationName, String method, Path instance) {

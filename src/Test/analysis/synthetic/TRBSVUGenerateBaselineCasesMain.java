@@ -14,7 +14,7 @@ public final class TRBSVUGenerateBaselineCasesMain {
 
     public static void main(String[] args) throws Exception {
         if (args.length < 1 || args.length > 3)
-            throw new IllegalArgumentException("Usage: <outputDir> [baseSeed=20260915] [count=20]");
+            throw new IllegalArgumentException("Usage: <outputDir> [baseSeed=20260915] [count=10]");
         Path root = Path.of(args[0]);
         long baseSeed = args.length > 1 ? Long.parseLong(args[1]) : 20260915L;
         int count = args.length > 2 ? Integer.parseInt(args[2])
@@ -30,20 +30,45 @@ public final class TRBSVUGenerateBaselineCasesMain {
             TRBSVUSyntheticCase.Seeds seeds = new TRBSVUSyntheticCase.Seeds(
                     random.nextLong(), random.nextLong(), random.nextLong(),
                     random.nextLong(), random.nextLong());
-            TRBSVUSyntheticCase.Generated generated = TRBSVUSyntheticCase.generateDetailed(
+            TRBSVUSyntheticCase.GeneratedQueries generated = TRBSVUSyntheticCase.generateFormalQueries(
                     TRBSVUFormalProtocol.CARRIERS, TRBSVUFormalProtocol.LANES,
                     TRBSVUFormalProtocol.HISTORY_PERIODS, TRBSVUFormalProtocol.OOS_DRAWS,
                     Distribution.NORMAL, Volatility.LOW, seeds);
+            TRBSVUSyntheticCase.QueryCase primary = generated.queries().get(0);
             Path text = instanceDirectory.resolve("instance.tsv");
-            TRBSVUSyntheticCaseIO.saveText(generated.instance(), text);
-            TRBSVUResultWriter.writeInstance(instanceDirectory, generated.instance());
+            TRBSVUSyntheticCaseIO.saveText(primary.instance(), text);
+            TRBSVUResultWriter.writeInstance(instanceDirectory, primary.instance());
             TRBSVUResultWriter.writeDgpParameters(instanceDirectory, generated.demandParameters(),
-                    Distribution.NORMAL, Volatility.LOW);
+                    Distribution.NORMAL, Volatility.LOW,
+                    generated.demandParameters().linearTrendTypicalDemand());
+            Path queryRoot = root.resolve(String.format("rep_%03d", index)).resolve("queries");
+            Files.createDirectories(queryRoot);
+            StringBuilder queryManifest = new StringBuilder(
+                    "query_index\tquery_type\tsource_candidate\tdemand_ratio\tinstance_file\n");
+            for (int q = 0; q < generated.queries().size(); q++) {
+                TRBSVUSyntheticCase.QueryCase query = generated.queries().get(q);
+                Path queryFile = queryRoot.resolve(String.format("query_%03d.instance.tsv", q));
+                TRBSVUSyntheticCaseIO.saveText(query.instance(), queryFile);
+                queryManifest.append(q).append('\t').append(query.queryType()).append('\t')
+                        .append(query.sourceCandidate()).append('\t').append(query.demandRatio())
+                        .append('\t').append(queryFile.getFileName()).append('\n');
+            }
+            Files.writeString(queryRoot.resolve("queries.tsv"), queryManifest,
+                    StandardCharsets.UTF_8);
             Files.writeString(instanceDirectory.resolve("manifest.txt"),
-                    "baseline=Normal-Low\nI=" + TRBSVUFormalProtocol.CARRIERS
+                    "protocolVersion=" + TRBSVUFormalProtocol.EXPERIMENT12_VERSION
+                            + "\nbaseline=Normal-Low\nI=" + TRBSVUFormalProtocol.CARRIERS
                             + "\nJ=" + TRBSVUFormalProtocol.LANES
                             + "\nH=" + TRBSVUFormalProtocol.HISTORY_PERIODS
                             + "\nOOS=" + TRBSVUFormalProtocol.OOS_DRAWS + "\n"
+                            + "randomQueries=" + TRBSVUFormalProtocol.RANDOM_QUERIES + "\n"
+                            + "highRQueries=" + TRBSVUFormalProtocol.HIGH_R_QUERIES + "\n"
+                            + "base=U(10,100)\ncoefficient=U(0,10*base)\n"
+                            + "trend=historical_t_over_H;query_1\n"
+                            + "commonLoading=U(0.1,0.3)\ncoverage=0.5\n"
+                            + "capacity=U(0.3,0.5)*typicalLaneDemand\n"
+                            + "rate=laneRate*carrierFactorU(0.7,1.3)*pairFactorU(0.9,1.1)\n"
+                            + "spotMarkup=U(2,3)\nmqcShare=U(0.15,0.35)\n"
                             + "validationTrainingPeriods="
                             + TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS + "\n"
                             + "validationOrigins="
@@ -55,7 +80,7 @@ public final class TRBSVUGenerateBaselineCasesMain {
                             + "historicalNoise=" + seeds.historicalNoise() + "\n"
                             + "oosNoise=" + seeds.oosNoise() + "\n",
                     StandardCharsets.UTF_8);
-            // Immediate round-trip gate: the frozen binary, not regenerated data, is the solve input.
+            // Immediate round-trip gate: the frozen text snapshot, not regenerated data, is the solve input.
             TRBSVUSyntheticCase restored = TRBSVUSyntheticCaseIO.loadText(text);
             if (restored.params.I != TRBSVUFormalProtocol.CARRIERS
                     || restored.params.J != TRBSVUFormalProtocol.LANES

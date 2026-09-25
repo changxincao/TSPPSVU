@@ -19,7 +19,7 @@ import java.util.Optional;
 
 /** Atomic, human-readable recovery files for one completed final method solve and OOS evaluation. */
 public final class TRBSVUFinalCheckpoint {
-    private static final String FORMAT = "TRBSVU_FINAL_CHECKPOINT_V2";
+    private static final String FORMAT = "TRBSVU_FINAL_CHECKPOINT_V3";
     private final Path solveDirectory;
     private final Path oosDirectory;
     private final String instanceSha256;
@@ -77,6 +77,9 @@ public final class TRBSVUFinalCheckpoint {
         solution.wassersteinTotalPointCount = integer(values, "wassersteinTotalPointCount");
         solution.wassersteinBoxUpper = decision(required(values, "wassersteinBoxUpper"));
         solution.wassersteinDistanceScale = decision(required(values, "wassersteinDistanceScale"));
+        solution.modelVariableCount = integer(values, "modelVariableCount");
+        solution.modelConstraintCount = integer(values, "modelConstraintCount");
+        solution.modelConeCount = integer(values, "modelConeCount");
         return Optional.of(solution);
     }
 
@@ -111,6 +114,9 @@ public final class TRBSVUFinalCheckpoint {
                 write(out, "wassersteinTotalPointCount", solution.wassersteinTotalPointCount);
                 write(out, "wassersteinBoxUpper", decision(solution.wassersteinBoxUpper));
                 write(out, "wassersteinDistanceScale", decision(solution.wassersteinDistanceScale));
+                write(out, "modelVariableCount", solution.modelVariableCount);
+                write(out, "modelConstraintCount", solution.modelConstraintCount);
+                write(out, "modelConeCount", solution.modelConeCount);
                 write(out, "decision", decision(solution.y));
             }
             replace(temporary, target);

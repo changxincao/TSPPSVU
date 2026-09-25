@@ -35,10 +35,11 @@ public final class TRBSVUSyntheticCaseSelfCheck {
             require(Arrays.equals(a.oos.get(s).demand(), repeat.oos.get(s).demand()),
                     "OOS reproducibility failed.");
         }
-        Parameters demandParameters = TRBSVUSyntheticDemandGenerator.sampleParameters(
-                60, 100, seeds.demandParameters());
-        checkMarket(a.params, otherCell.params, demandParameters.typicalDemand());
-        checkHomeGroupCoverage(demandParameters.typicalDemand());
+        Parameters demandParameters = TRBSVUSyntheticCase.generateDetailed(
+                20, 60, 100, 1000, Distribution.NORMAL, Volatility.LOW, seeds)
+                .demandParameters();
+        checkMarket(a.params, otherCell.params, demandParameters.linearTrendTypicalDemand());
+        checkHomeGroupCoverage(demandParameters.linearTrendTypicalDemand());
         TRBSVUSyntheticCase.ValidationWindow first = a.validationWindow(70, 70);
         TRBSVUSyntheticCase.ValidationWindow last = a.validationWindow(99, 70);
         require(first.train().size() == 70 && first.train().get(0) == a.history.get(0)
@@ -69,20 +70,25 @@ public final class TRBSVUSyntheticCaseSelfCheck {
             }
             require(count >= 1, "Lane has no eligible carrier.");
             double markup = p.e[j] / (sumRate / count);
-            require(markup >= 1.5 && markup <= 2.5, "Spot markup outside range.");
+            require(markup >= 2.0 && markup <= 3.0, "Spot markup outside range.");
         }
         for (int i = 0; i < p.I; i++) {
             double minimumRate = Double.POSITIVE_INFINITY;
+            double eligibleDemand = 0.0;
             int covered = 0;
             for (int j = 0; j < p.J; j++) {
                 if (p.eligible[i][j]) {
                     covered++;
+                    eligibleDemand += typicalDemand[j];
                     minimumRate = Math.min(minimumRate, p.r[i][j]);
                 }
             }
             require(covered == expectedPerCarrier, "Carrier coverage is not 50%.");
             require(p.h[i] == minimumRate && p.p[i] < p.M[i],
                     "MQC penalty or capacity relationship is wrong.");
+            double mqcShare = p.p[i] / eligibleDemand;
+            require(mqcShare >= 0.15 && mqcShare <= 0.35,
+                    "MQC quantity left U(0.15,0.35) eligible-demand scale.");
             require(p.p[i] == paired.p[i] && p.h[i] == paired.h[i],
                     "Paired MQC market mismatch.");
         }

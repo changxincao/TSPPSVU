@@ -128,6 +128,15 @@ def solve(root: Path) -> dict[str, object]:
     model.st(flow >= 0, spot >= 0, shortfall >= 0)
     model.st(selected.sum() >= int(meta["alpha"]), selected.sum() <= int(meta["beta"]))
 
+    reformulation = model.do_math()
+    scalar_variable_count = int(reformulation.linear.shape[1])
+    scalar_constraint_count = int(reformulation.linear.shape[0])
+    cone_count = int(len(reformulation.qmat) + len(reformulation.xmat) + len(reformulation.lmi))
+    print("PCM_REFORMULATION_SIZE "
+          f"scalarVariables={scalar_variable_count} "
+          f"scalarLinearConstraints={scalar_constraint_count} coneBlocks={cone_count}",
+          flush=True)
+
     model.solve(
         msk,
         display=True,
@@ -158,6 +167,9 @@ def solve(root: Path) -> dict[str, object]:
         "selected": np.rint(y).astype(int).tolist(),
         "selected_count": int(np.rint(y).sum()),
         "eligible_pair_count": int(pair_count),
+        "scalar_variable_count": scalar_variable_count,
+        "scalar_constraint_count": scalar_constraint_count,
+        "cone_count": cone_count,
         "integrality_error": integrality_error,
         "policy": policy,
         "include_total_variance": include_total_variance,

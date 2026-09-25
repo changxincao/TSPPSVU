@@ -33,6 +33,7 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
         checkThreeLevelWidePositive(h);
         checkThreeLevelIndependentEffects(h);
         checkIndependentUniformPositive(h);
+        checkIndependentUniform02Centered(h);
         checkParameters(p);
         checkAlternativeStructures(h);
         checkContextDistributions(p, oosCount);
@@ -426,6 +427,26 @@ public final class TRBSVUSyntheticDemandGeneratorSelfCheck {
         }
         require(counts[0] == 17 && counts[1] == 17 && counts[2] == 16,
                 "Independent-uniform base tiers are not balanced.");
+    }
+
+    private static void checkIndependentUniform02Centered(int h) {
+        Parameters p = TRBSVUSyntheticDemandGenerator.sampleParameters(
+                50, h, 59L, 1.5, ContextStructure.DENSE_INDEPENDENT_UNIFORM_02_CENTERED,
+                BaseStructure.THREE_LEVEL_10_30_50_70);
+        double[][] coefficients = {p.market(), p.trend(), p.promotion(), p.attention()};
+        for (int j = 0; j < p.laneCount(); j++) {
+            double base = p.base()[j];
+            double sum = 0.0;
+            for (double[] coefficient : coefficients) {
+                require(coefficient[j] >= 0.0 && coefficient[j] < 0.3 * base,
+                        "Unnormalized centered coefficient outside U(0,0.2) range.");
+                sum += coefficient[j];
+            }
+            require(Math.abs(p.typicalDemand()[j] - base) < 1e-9,
+                    "Centered procurement demand scale must equal base.");
+            require(base - 0.5 * sum >= 0.4 * base - 1e-9,
+                    "Centered conditional demand lost positivity guarantee.");
+        }
     }
 
     private static Replication generate(Parameters p, Distribution family,

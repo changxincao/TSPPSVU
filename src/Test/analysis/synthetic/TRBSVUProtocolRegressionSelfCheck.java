@@ -75,6 +75,21 @@ public final class TRBSVUProtocolRegressionSelfCheck {
         Path instance = input.resolve("rep_000").resolve("instance").resolve("instance.tsv");
         Files.createDirectories(instance.getParent());
         Files.writeString(instance, "frozen-instance", StandardCharsets.UTF_8);
+        Path queryManifest = input.resolve("rep_000").resolve("queries").resolve("queries.tsv");
+        Files.createDirectories(queryManifest.getParent());
+        StringBuilder manifest = new StringBuilder(
+                "query_index\tquery_type\tsource_candidate\tdemand_ratio\tinstance_file\n");
+        int queryCount = TRBSVUFormalProtocol.RANDOM_QUERIES
+                + TRBSVUFormalProtocol.HIGH_R_QUERIES;
+        for (int q = 0; q < queryCount; q++) {
+            String fileName = String.format("query_%03d.instance.tsv", q);
+            Files.writeString(queryManifest.getParent().resolve(fileName),
+                    "frozen-instance", StandardCharsets.UTF_8);
+            manifest.append(q).append('\t')
+                    .append(q < TRBSVUFormalProtocol.RANDOM_QUERIES ? "RANDOM" : "HIGH_R")
+                    .append('\t').append(q).append("\t1.0\t").append(fileName).append('\n');
+        }
+        Files.writeString(queryManifest, manifest, StandardCharsets.UTF_8);
         writeCandidate(output, "CSAA-Exp", new ContextualChoice(
                 "EXPONENTIAL", 5.0, 10.0, 1.0, List.of(5.0)));
         writeCandidate(output, "CSAA-Gau", new ContextualChoice(
@@ -97,7 +112,8 @@ public final class TRBSVUProtocolRegressionSelfCheck {
     private static void writeCandidate(Path output, String method, ContextualChoice choice)
             throws Exception {
         TRBSVUResultWriter.writeContextualChoice(output.resolve("rep_000").resolve(method)
-                .resolve("validation").resolve("context_candidate.csv"), 0, choice);
+                .resolve("queries").resolve("query_000").resolve("validation")
+                .resolve("context_candidate.csv"), 0, choice);
     }
 
     private static void verifyFinalCheckpointInvalidation(Path root) throws Exception {

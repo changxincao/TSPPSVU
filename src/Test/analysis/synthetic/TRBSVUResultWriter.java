@@ -68,6 +68,13 @@ public final class TRBSVUResultWriter {
     public static void writeDgpParameters(Path directory, Parameters parameters,
                                           Distribution distribution, Volatility volatility)
             throws Exception {
+        writeDgpParameters(directory, parameters, distribution, volatility,
+                parameters.typicalDemand());
+    }
+
+    public static void writeDgpParameters(Path directory, Parameters parameters,
+                                          Distribution distribution, Volatility volatility,
+                                          double[] procurementDemand) throws Exception {
         Files.createDirectories(directory);
         double[] base = parameters.base(), market = parameters.market();
         double[] trend = parameters.trend(), promotion = parameters.promotion();
@@ -75,7 +82,8 @@ public final class TRBSVUResultWriter {
         double[] quantile = parameters.volatilityQuantile();
         double[] commonLoading = parameters.commonLoading();
         double[] cv = parameters.volatilityParameters(volatility);
-        double[] typical = parameters.typicalDemand();
+        if (procurementDemand == null || procurementDemand.length != parameters.laneCount())
+            throw new IllegalArgumentException("One procurement demand value is required per lane.");
         try (BufferedWriter out = writer(directory.resolve("dgp_parameters.csv"))) {
             out.write("lane_index,distribution,volatility,base,market_coefficient,trend_coefficient,"
                     + "promotion_coefficient,attention_coefficient,volatility_quantile,cv,"
@@ -88,7 +96,7 @@ public final class TRBSVUResultWriter {
                         j, distribution, volatility, base[j], market[j], trend[j], promotion[j],
                         attention[j], quantile[j], cv[j], commonLoading[j],
                         commonLoading[j] * commonLoading[j], parameters.contextCoefficientScale(),
-                        parameters.contextStructure(), typical[j]));
+                        parameters.contextStructure(), procurementDemand[j]));
             }
         }
     }
@@ -235,7 +243,8 @@ public final class TRBSVUResultWriter {
                     + "certified_optimal,proof_scope,nodes,iterations,cuts,"
                     + "candidates,selected_count,selected_total_capacity,selected_total_mqc,"
                     + "decision_vector,selected_carriers,w1_radius,w1_eta,w1_initial_points,"
-                    + "w1_generated_cuts,w1_total_points,w1_box_upper,w1_distance_scale");
+                    + "w1_generated_cuts,w1_total_points,w1_box_upper,w1_distance_scale,"
+                    + "model_variable_count,model_constraint_count,model_cone_count");
             out.newLine();
             for (var entry : decisions.entrySet()) {
                 String method = entry.getKey();
@@ -244,7 +253,7 @@ public final class TRBSVUResultWriter {
                 out.write(String.format(Locale.ROOT,
                         "%d,%s,%s,%s,%.17g,%s,%.17g,%.17g,%.17g,%d,%d,%.17g,%.17g,%s,"
                                 + "%.17g,%s,%.17g,%s,%.9f,%s,%.9f,%s,%s,%s,%d,%d,%d,%d,%d,%.17g,%.17g,%s,%s,"
-                                + "%.17g,%.17g,%d,%d,%d,%s,%s%n",
+                                + "%.17g,%.17g,%d,%d,%d,%s,%s,%d,%d,%d%n",
                         replication, experiment, method,
                         parameterTypes.getOrDefault(method, "NONE"),
                         selectedParameters.getOrDefault(method, Double.NaN),
@@ -271,7 +280,9 @@ public final class TRBSVUResultWriter {
                         solution.wassersteinGeneratedCutCount,
                         solution.wassersteinTotalPointCount,
                         csv(vector(solution.wassersteinBoxUpper)),
-                        csv(vector(solution.wassersteinDistanceScale))));
+                        csv(vector(solution.wassersteinDistanceScale)),
+                        solution.modelVariableCount, solution.modelConstraintCount,
+                        solution.modelConeCount));
             }
         }
     }
@@ -306,7 +317,7 @@ public final class TRBSVUResultWriter {
             out.newLine();
             for (var entry : weights.entrySet()) {
                 String method = entry.getKey();
-                if (!method.endsWith("MM")) continue;
+                if (!method.endsWith("MM") && !method.endsWith("PCM")) continue;
                 double kappa = selectedParameters.getOrDefault(method, Double.NaN);
                 if (!Double.isFinite(kappa))
                     throw new IllegalArgumentException("Missing selected MM kappa for " + method);
@@ -453,9 +464,11 @@ public final class TRBSVUResultWriter {
     }
 
     private static String proofScope(String method) {
-        return method.endsWith("MM")
-                ? "OPTIMAL_FOR_LIFTED_AFFINE_MARGINAL_MOMENT_APPROXIMATION"
-                : "OPTIMAL_FOR_STATED_METHOD_MODEL";
+        if (method.endsWith("PCM"))
+            return "OPTIMAL_FOR_LIFTED_AFFINE_MARGINAL_PLUS_TOTAL_MOMENT_APPROXIMATION";
+        if (method.endsWith("MM"))
+            return "OPTIMAL_FOR_LIFTED_AFFINE_MARGINAL_MOMENT_APPROXIMATION";
+        return "OPTIMAL_FOR_STATED_METHOD_MODEL";
     }
 
     private static String vector(double[] values) {
