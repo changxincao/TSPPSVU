@@ -20,7 +20,7 @@ import java.nio.file.Path;
 public final class TRBSVUExperiment2Runner {
     public static final double[] LAMBDA = {0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 50, 100};
     public static final double[] W1_RADIUS = {0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1};
-    public static final double[] MOMENT_KAPPA = {1.0, 1.25, 1.5, 2.0};
+    public static final double[] MOMENT_KAPPA = {0.5, 1.0, 1.25, 1.5, 2.0};
     public static final int MOMENT_VALIDATION_LIMIT_SECONDS = 5 * 60 * 60;
     public static final int MOMENT_QUERY_LIMIT_SECONDS = 10 * 60 * 60;
 

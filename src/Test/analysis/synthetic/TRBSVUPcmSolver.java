@@ -41,7 +41,7 @@ public final class TRBSVUPcmSolver {
     public Solution solve(ProcurementParams params, List<Sample> weighted,
                           double kappa, Settings settings, boolean adaptToLift,
                           boolean includeTotalVariance) throws Exception {
-        if (weighted.isEmpty() || !(kappa >= 1.0) || !Double.isFinite(kappa))
+        if (weighted.isEmpty() || !(kappa > 0.0) || !Double.isFinite(kappa))
             throw new IllegalArgumentException("Invalid moment-DRO samples or kappa.");
         Moments moments = moments(weighted, params.J, kappa);
         Path temporaryRoot = Path.of("tmp");

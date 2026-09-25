@@ -128,7 +128,7 @@ public final class TRBSVURunnerSelfCheck {
                     Path.of("analysis", "trb_svu", "solve_pcm.py"));
             double previous = Double.NEGATIVE_INFINITY;
             double[] grid = "pcm-grid".equals(args[0])
-                    ? new double[]{1, 1.25, 1.5, 2} : new double[]{1.25};
+                    ? new double[]{0.5, 1, 1.25, 1.5, 2} : new double[]{1.25};
             for (double kappa : grid) {
                 Solution pcm = solver.solve(instance.params, equal.subList(0, 5), kappa, settings);
                 require(pcm.y != null && pcm.y.length == instance.params.I
