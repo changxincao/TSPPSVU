@@ -127,6 +127,37 @@ public final class TRBSVUSyntheticCase {
         return new GeneratedQueries(result, parameters);
     }
 
+    /** Recreates the ordinary-query candidate stream used by the formal generator. */
+    public static GeneratedQueries regenerateFormalRandomCandidates(int carriers, int lanes,
+                                                                     int historicalPeriods,
+                                                                     int oosDraws,
+                                                                     Distribution distribution,
+                                                                     Volatility volatility,
+                                                                     Seeds seeds, int count) {
+        if (seeds == null || count < 1 || count > 100)
+            throw new IllegalArgumentException("Invalid formal random-query request.");
+        Parameters parameters = TRBSVUSyntheticDemandGenerator.sampleParameters(
+                lanes, historicalPeriods, seeds.demandParameters(), 10.0,
+                ContextStructure.DENSE_INDEPENDENT_UNIFORM_POSITIVE,
+                BaseStructure.UNIFORM_10_100, 0.1, 0.3);
+        TRBSVUSyntheticDemandGenerator.MultiQueryReplication generated =
+                TRBSVUSyntheticDemandGenerator.generateMultiQueryWithLinearTrend(
+                        parameters, distribution, volatility, 100, oosDraws,
+                        seeds.contexts(), seeds.historicalNoise(), seeds.oosNoise(),
+                        TRBSVUSyntheticDemandGenerator.ContextDistribution.UNIFORM);
+        double[] procurementDemand = parameters.linearTrendTypicalDemand();
+        ProcurementParams market = TRBSVUProcurementGenerator.generate(
+                carriers, procurementDemand, seeds.procurement());
+        List<String> laneNames = new ArrayList<>(lanes);
+        for (int j = 0; j < lanes; j++) laneNames.add("L" + (j + 1));
+        double typicalTotal = sum(procurementDemand);
+        List<QueryCase> result = new ArrayList<>(count);
+        for (int q = 0; q < count; q++)
+            result.add(queryCase(market, laneNames, generated, seeds, q,
+                    "RANDOM", typicalTotal));
+        return new GeneratedQueries(result, parameters);
+    }
+
     private static QueryCase queryCase(ProcurementParams market, List<String> laneNames,
                                        TRBSVUSyntheticDemandGenerator.MultiQueryReplication generated,
                                        Seeds seeds, int query, String type, double typicalTotal) {
