@@ -19,7 +19,9 @@ import java.util.Set;
 /** Experiment 1: one pre-generated case, train-only rolling validation, shared OOS. */
 public final class TRBSVUExperiment1Runner {
     public static final double[] RETENTION = {0.4, 0.6, 0.8, 1.0};
-    public static final double[] BANDWIDTH = {0.1, 0.25, 0.5, 1, 2, 3, 5, 10, 30, 50, 100};
+    public static final double[] BANDWIDTH = {
+            0.1, 0.25, 0.5, 0.8, 0.9, 1, 2, 3, 5, 10, 30, 50, 100
+    };
     public static final double[] RF_MIN_LEAF = {1, 2, 5, 10};
 
     /** A separately implemented forest may supply same-leaf normalized weights. */
