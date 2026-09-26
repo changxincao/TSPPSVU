@@ -29,8 +29,15 @@ public final class TRBSVUProtocolRegressionSelfCheck {
                         && TRBSVUFormalProtocol.LANES == 50
                         && TRBSVUFormalProtocol.HISTORY_PERIODS == 75
                         && TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS == 50
-                        && TRBSVUFormalProtocol.VALIDATION_ORIGINS == 25,
-                "Formal scale or 50+25 validation protocol drifted.");
+                        && TRBSVUFormalProtocol.VALIDATION_ORIGINS == 25
+                        && TRBSVUFormalProtocol.RANDOM_QUERIES == 40
+                        && TRBSVUFormalProtocol.HIGH_R_QUERIES == 0,
+                "Formal scale, 50+25 validation or forty-random-query protocol drifted.");
+        require(TRBSVUExperiment2Runner.PRIMARY_METHODS.equals(
+                        Set.of("RCSAA", "C-Chi2", "C-W1"))
+                        && TRBSVUExperiment2Runner.MOMENT_METHODS.equals(
+                                Set.of("C-MM", "C-PCM")),
+                "Experiment 2 phase method sets drifted.");
         TRBSVUSyntheticCase seedCase = TRBSVUSyntheticCase.generate(7, 4, 75, 1,
                 Distribution.NORMAL, Volatility.LOW,
                 new TRBSVUSyntheticCase.Seeds(11, 13, 17, 19, 23));
@@ -110,6 +117,13 @@ public final class TRBSVUProtocolRegressionSelfCheck {
         require(selected.rfMinLeaf() == 5, "IDE aggregation lost the selected RF min leaf.");
         require(Files.mismatch(instance, output.resolve("rep_000").resolve("instance")
                 .resolve("instance.tsv")) == -1L, "IDE aggregation did not preserve the frozen instance.");
+        TRBSVUExperiment2IdeMain.main(new String[]{
+                "--input=" + input,
+                "--experiment1-output=" + output,
+                "--output=" + root.resolve("experiment2"),
+                "--replications=0",
+                "--phase=all",
+                "--dry-run"});
     }
 
     private static void writeCandidate(Path output, String method, ContextualChoice choice)

@@ -31,9 +31,9 @@ import java.util.concurrent.TimeUnit;
 public final class TRBSVUExperiment1IdeMain {
     // Edit these defaults directly, or override them with --key=value program arguments in Eclipse.
     private static final Path DEFAULT_INPUT = Path.of("analysis", "TRB_reviewer_revision",
-            "formal_svu_experiment12_cases_20260925");
+            "131_svu_experiment12_random40_I15J50S75_20260926");
     private static final Path DEFAULT_OUTPUT = Path.of("analysis", "TRB_reviewer_revision",
-            "formal_svu_experiment1_results_20260925");
+            "132_svu_experiment1_random40_I15J50S75_20260926");
     private static final int DEFAULT_PARALLEL_TASKS = 4;
     private static final int DEFAULT_SOLVER_THREADS = 4;
     private static final int DEFAULT_LIMIT_SECONDS = 14_400;

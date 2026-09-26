@@ -85,7 +85,7 @@ public final class TRBSVUSyntheticCase {
                 demandParameters);
     }
 
-    /** Formal baseline: 20 ordinary queries plus 20 high-R queries selected without OOS outcomes. */
+    /** Formal baseline: forty ordinary queries drawn from the frozen query stream. */
     public static GeneratedQueries generateFormalQueries(int carriers, int lanes,
                                                           int historicalPeriods, int oosDraws,
                                                           Distribution distribution,

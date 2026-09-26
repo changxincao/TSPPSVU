@@ -26,15 +26,25 @@ import java.util.concurrent.Executors;
  * the common rolling validation windows, then reuses that tuning for all forty queries.
  */
 public final class TRBSVUExperiment2IdeMain {
-    private static final List<String> EXPECTED_METHODS = List.of(
-            "RCSAA", "C-Chi2", "C-W1", "C-MM", "C-PCM");
+    private enum Phase {
+        PRIMARY("primary", List.of("RCSAA", "C-Chi2", "C-W1")),
+        MOMENT("moment", List.of("C-MM", "C-PCM"));
+
+        final String directory;
+        final List<String> methods;
+
+        Phase(String directory, List<String> methods) {
+            this.directory = directory;
+            this.methods = methods;
+        }
+    }
     private static final Path DEFAULT_INPUT = Path.of("analysis", "TRB_reviewer_revision",
-            "101_svu_experiment12_I15J50S75_20260917");
+            "131_svu_experiment12_random40_I15J50S75_20260926");
     private static final Path DEFAULT_EXPERIMENT1_OUTPUT = Path.of("analysis", "TRB_reviewer_revision",
-            "121_svu_experiment1_I15J50S75_20260917");
+            "132_svu_experiment1_random40_I15J50S75_20260926");
     private static final Path DEFAULT_OUTPUT = Path.of("analysis", "TRB_reviewer_revision",
-            "122_svu_experiment2_I15J50S75_20260917");
-    private static final int DEFAULT_PARALLEL_TASKS = 6;
+            "133_svu_experiment2_random40_I15J50S75_20260926");
+    private static final int DEFAULT_PARALLEL_TASKS = 4;
     private static final int DEFAULT_SOLVER_THREADS = 4;
     private static final int DEFAULT_LIMIT_SECONDS = 14_400;
     private static final String DEFAULT_REPLICATIONS = "0-9";
@@ -49,18 +59,28 @@ public final class TRBSVUExperiment2IdeMain {
         Config config = Config.parse(args);
         List<Task> tasks = buildTasks(config);
         System.out.printf(Locale.ROOT,
-                "Experiment 2 plan: input=%s exp1=%s output=%s replications=%d parallel=%d solverThreads=%d limitSec=%d%n",
+                "Experiment 2 plan: input=%s exp1=%s output=%s replications=%d phase=%s parallel=%d solverThreads=%d limitSec=%d%n",
                 config.input, config.experiment1Output, config.output, tasks.size(),
-                config.parallelTasks, config.solverThreads, config.limitSeconds);
+                config.phase, config.parallelTasks, config.solverThreads, config.limitSeconds);
         for (Task task : tasks) System.out.println("  " + task.label());
         if (config.dryRun) {
             System.out.println("Dry run only; no solver was started.");
             return;
         }
         Files.createDirectories(config.output);
+        if (config.phase.equals("all") || config.phase.equals("primary"))
+            runPhase(tasks, config, Phase.PRIMARY);
+        if (config.phase.equals("all") || config.phase.equals("moment"))
+            runPhase(tasks, config, Phase.MOMENT);
+        System.out.println("Experiment 2 scheduling complete: " + config.output.toAbsolutePath());
+    }
+
+    private static void runPhase(List<Task> tasks, Config config, Phase phase) throws Exception {
+        System.out.println("Starting Experiment 2 phase=" + phase.directory
+                + " methods=" + phase.methods);
         try (var pool = Executors.newFixedThreadPool(config.parallelTasks)) {
             var completed = new ExecutorCompletionService<TaskResult>(pool);
-            for (Task task : tasks) completed.submit(() -> launch(task, config));
+            for (Task task : tasks) completed.submit(() -> launch(task, config, phase));
             int failed = 0;
             for (int i = 0; i < tasks.size(); i++) {
                 TaskResult result = completed.take().get();
@@ -68,13 +88,14 @@ public final class TRBSVUExperiment2IdeMain {
                 if (result.exitCode() != 0) failed++;
             }
             if (failed > 0)
-                throw new IllegalStateException(failed + " Experiment 2 replication(s) failed.");
+                throw new IllegalStateException(failed + " Experiment 2 " + phase.directory
+                        + " replication(s) failed; later phases were not started.");
         }
-        System.out.println("Experiment 2 scheduling complete: " + config.output.toAbsolutePath());
+        System.out.println("Completed Experiment 2 phase=" + phase.directory);
     }
 
-    private static TaskResult launch(Task task, Config config) throws Exception {
-        Path output = config.output.resolve(task.name());
+    private static TaskResult launch(Task task, Config config, Phase phase) throws Exception {
+        Path output = config.output.resolve(phase.directory).resolve(task.name());
         Files.createDirectories(output);
         Path log = output.resolve("task.log");
         List<String> command = new ArrayList<>();
@@ -90,22 +111,25 @@ public final class TRBSVUExperiment2IdeMain {
         command.add(Integer.toString(task.replication()));
         command.add(Integer.toString(config.solverThreads));
         command.add(Integer.toString(config.limitSeconds));
+        command.add(phase.name());
         Process process = new ProcessBuilder(command).redirectErrorStream(true)
                 .redirectOutput(ProcessBuilder.Redirect.appendTo(log.toFile())).start();
         int exit = process.waitFor();
-        return new TaskResult(exit, "[" + task.label() + "] exit=" + exit + " log=" + log);
+        return new TaskResult(exit, "[" + phase.directory + "/" + task.label()
+                + "] exit=" + exit + " log=" + log);
     }
 
     private static void runWorker(String[] args) throws Exception {
-        if (args.length != 6)
+        if (args.length != 7)
             throw new IllegalArgumentException("Worker usage: <replicationInput> <selectedContext.csv> "
-                    + "<output> <replication> <solverThreads> <limitSeconds>");
+                    + "<output> <replication> <solverThreads> <limitSeconds> <phase>");
         Path replicationInput = Path.of(args[0]);
         Path selectedFile = Path.of(args[1]);
         Path output = Path.of(args[2]);
         int replication = Integer.parseInt(args[3]);
         int threads = Integer.parseInt(args[4]);
         int limit = Integer.parseInt(args[5]);
+        Phase phase = Phase.valueOf(args[6]);
         Files.createDirectories(output);
         List<TRBSVUExperiment1IdeMain.QueryInput> queries =
                 TRBSVUExperiment1IdeMain.loadQueries(replicationInput);
@@ -115,7 +139,8 @@ public final class TRBSVUExperiment2IdeMain {
         String queryPoolHash = TRBSVUExperiment1IdeMain.queryPoolFingerprint(queries);
         String sourceHash = sourceFingerprint(Path.of("src"));
         String protocol = sha256((TRBSVUFormalProtocol.EXPERIMENT12_VERSION
-                + "|experiment=2|queryPool=" + queryPoolHash + "|selected=" + selected
+                + "|experiment=2|phase=" + phase.directory + "|methods=" + phase.methods
+                + "|queryPool=" + queryPoolHash + "|selected=" + selected
                 + "|lambda=" + Arrays.toString(TRBSVUExperiment2Runner.LAMBDA)
                 + "|w1=" + Arrays.toString(TRBSVUExperiment2Runner.W1_RADIUS)
                 + "|momentKappa=" + Arrays.toString(TRBSVUExperiment2Runner.MOMENT_KAPPA)
@@ -128,7 +153,7 @@ public final class TRBSVUExperiment2IdeMain {
         if (Files.isRegularFile(complete)) {
             String previous = Files.readString(complete);
             if (previous.contains("protocol=" + protocol)
-                    && previous.contains("allFiveMethodsCompleted=true")) {
+                    && previous.contains("allRequestedMethodsCompleted=true")) {
                 System.out.println("Already complete with matching protocol: " + output);
                 return;
             }
@@ -164,16 +189,18 @@ public final class TRBSVUExperiment2IdeMain {
                             replication, "2"));
             TRBSVUExperiment2Runner.Result result;
             if (frozenParameters == null) {
-                result = runner.run(instance, selected);
+                result = runner.run(instance, selected, Set.copyOf(phase.methods));
                 frozenParameters = result.selectedParameter();
                 frozenValidationCost = result.validationCost();
                 frozenValidationCurve = result.validationCurve();
+            } else if (frozenParameters.isEmpty()) {
+                result = emptyResult(frozenValidationCost, frozenValidationCurve);
             } else {
                 result = runner.runWithSelectedParameters(instance, selected, frozenParameters,
                         frozenValidationCost, frozenValidationCurve);
             }
             writeResult(queryOutput, replication, instance, selected, result, query.index() == 0);
-            List<String> missingMethods = EXPECTED_METHODS.stream()
+            List<String> missingMethods = phase.methods.stream()
                     .filter(method -> !result.decisions().containsKey(method)).toList();
             if (!missingMethods.isEmpty())
                 incompleteQueries.add(String.format(Locale.ROOT, "query_%03d:%s",
@@ -189,13 +216,25 @@ public final class TRBSVUExperiment2IdeMain {
         }
         Files.writeString(complete, "protocol=" + protocol + "\nqueryCount=" + queries.size()
                 + "\nselectedContext=" + selected + "\nsourceSha256=" + sourceHash
-                + "\nallFiveMethodsCompleted=" + incompleteQueries.isEmpty()
+                + "\nphase=" + phase.directory
+                + "\nrequestedMethods=" + String.join(";", phase.methods)
+                + "\nallRequestedMethodsCompleted=" + incompleteQueries.isEmpty()
                 + "\nincompleteQueries=" + String.join(",", incompleteQueries) + "\n",
                 StandardCharsets.UTF_8);
+        if (!incompleteQueries.isEmpty() && phase == Phase.PRIMARY)
+            throw new IllegalStateException("Primary robust phase is incomplete: "
+                    + String.join(",", incompleteQueries));
         if (!incompleteQueries.isEmpty())
-            System.err.println("Experiment 2 finished with missing optional moment results: "
+            System.err.println("Experiment 2 phase=" + phase.directory + " finished with missing results: "
                     + String.join(",", incompleteQueries)
                     + ". A later launch will retry them while reusing valid checkpoints.");
+    }
+
+    private static TRBSVUExperiment2Runner.Result emptyResult(
+            Map<String, Double> validationCost,
+            Map<String, Map<Double, Double>> validationCurve) {
+        return new TRBSVUExperiment2Runner.Result(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(),
+                Map.of(), validationCost, validationCurve, List.of());
     }
 
     private static void writeResult(Path output, int replication, TRBSVUSyntheticCase instance,
@@ -243,10 +282,16 @@ public final class TRBSVUExperiment2IdeMain {
             String name = String.format(Locale.ROOT, "rep_%03d", replication);
             Path input = config.input.resolve(name);
             TRBSVUExperiment1IdeMain.loadQueries(input);
-            Path selected = config.experiment1Output.resolve(name).resolve("validation")
-                    .resolve("experiment1_selected_context.csv");
+            Path selected = config.experiment1Output.resolve(name).resolve("CSAA-Tri")
+                    .resolve("queries").resolve("query_000").resolve("validation")
+                    .resolve("context_candidate.csv");
             if (!Files.isRegularFile(selected))
-                throw new IllegalStateException("Missing Experiment 1 C*: " + selected);
+                throw new IllegalStateException("Missing Experiment 1 validation-selected Triangular context: "
+                        + selected);
+            ContextualChoice choice = TRBSVUExperiment4Main.loadChoice(selected);
+            if (!"TRIANGULAR".equals(choice.family()))
+                throw new IllegalStateException("Experiment 2 requires frozen Triangular weights: "
+                        + selected + " contains " + choice.family());
             Path inputInstance = input.resolve("instance").resolve("instance.tsv");
             Path experiment1Instance = config.experiment1Output.resolve(name)
                     .resolve("instance").resolve("instance.tsv");
@@ -319,7 +364,7 @@ public final class TRBSVUExperiment2IdeMain {
 
     private record Config(Path input, Path experiment1Output, Path output, int parallelTasks,
                           int solverThreads, int limitSeconds, String replications,
-                          boolean dryRun) {
+                          String phase, boolean dryRun) {
         static Config parse(String[] args) {
             Map<String, String> values = new LinkedHashMap<>();
             boolean dry = false;
@@ -331,7 +376,7 @@ public final class TRBSVUExperiment2IdeMain {
                 values.put(arg.substring(2, equals), arg.substring(equals + 1));
             }
             Set<String> known = Set.of("input", "experiment1-output", "output", "parallel",
-                    "solver-threads", "limit-seconds", "replications");
+                    "solver-threads", "limit-seconds", "replications", "phase");
             if (!known.containsAll(values.keySet()))
                 throw new IllegalArgumentException("Unknown argument(s): " + values.keySet().stream()
                         .filter(key -> !known.contains(key)).toList());
@@ -340,12 +385,15 @@ public final class TRBSVUExperiment2IdeMain {
             int limit = integer(values, "limit-seconds", DEFAULT_LIMIT_SECONDS);
             if (parallel < 1 || threads < 1 || limit < 1)
                 throw new IllegalArgumentException("Parallelism, threads and time limit must be positive.");
+            String phase = values.getOrDefault("phase", "all").toLowerCase(Locale.ROOT);
+            if (!Set.of("all", "primary", "moment").contains(phase))
+                throw new IllegalArgumentException("Phase must be all, primary or moment: " + phase);
             return new Config(Path.of(values.getOrDefault("input", DEFAULT_INPUT.toString())),
                     Path.of(values.getOrDefault("experiment1-output",
                             DEFAULT_EXPERIMENT1_OUTPUT.toString())),
                     Path.of(values.getOrDefault("output", DEFAULT_OUTPUT.toString())),
                     parallel, threads, limit,
-                    values.getOrDefault("replications", DEFAULT_REPLICATIONS), dry);
+                    values.getOrDefault("replications", DEFAULT_REPLICATIONS), phase, dry);
         }
 
         private static int integer(Map<String, String> values, String key, int fallback) {

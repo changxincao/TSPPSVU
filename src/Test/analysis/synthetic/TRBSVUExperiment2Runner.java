@@ -18,6 +18,10 @@ import java.nio.file.Path;
 
 /** Experiment 2: robust alternatives on the same frozen case and validation origins. */
 public final class TRBSVUExperiment2Runner {
+    public static final Set<String> PRIMARY_METHODS = Set.of("RCSAA", "C-Chi2", "C-W1");
+    public static final Set<String> MOMENT_METHODS = Set.of("C-MM", "C-PCM");
+    public static final Set<String> ALL_METHODS = Set.of(
+            "RCSAA", "C-Chi2", "C-W1", "C-MM", "C-PCM");
     public static final double[] LAMBDA = {0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 50, 100};
     public static final double[] W1_RADIUS = {0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1};
     public static final double[] MOMENT_KAPPA = {0.5, 1.0, 1.25, 1.5, 2.0};
@@ -90,15 +94,24 @@ public final class TRBSVUExperiment2Runner {
 
     /** Pass Experiment 1's validation-selected C*, never an OOS-selected family. */
     public Result run(TRBSVUSyntheticCase instance, ContextualChoice selected) throws Exception {
+        return run(instance, selected, ALL_METHODS);
+    }
+
+    /** Runs only the requested formal methods; used to keep moment models in a later phase. */
+    public Result run(TRBSVUSyntheticCase instance, ContextualChoice selected,
+                      Set<String> requestedMethods) throws Exception {
         int expectedHistory = TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS
                 + validationOrigins;
         if (instance.history.size() < expectedHistory || selected == null)
             throw new IllegalArgumentException("Experiment 2 requires at least " + expectedHistory
                     + " history periods and C*.");
+        if (requestedMethods == null || requestedMethods.isEmpty()
+                || !ALL_METHODS.containsAll(requestedMethods))
+            throw new IllegalArgumentException("Invalid Experiment 2 method set: " + requestedMethods);
         Map<String, Method> methods = new LinkedHashMap<>();
-        methods.put("RCSAA", Method.RCSAA);
-        methods.put("C-Chi2", Method.CHI_SQUARED);
-        methods.put("C-W1", Method.WASSERSTEIN);
+        if (requestedMethods.contains("RCSAA")) methods.put("RCSAA", Method.RCSAA);
+        if (requestedMethods.contains("C-Chi2")) methods.put("C-Chi2", Method.CHI_SQUARED);
+        if (requestedMethods.contains("C-W1")) methods.put("C-W1", Method.WASSERSTEIN);
         Map<String, Double> chosen = new LinkedHashMap<>();
         Map<String, Double> validation = new LinkedHashMap<>();
         Map<String, Map<Double, Double>> curves = new LinkedHashMap<>();
@@ -164,10 +177,12 @@ public final class TRBSVUExperiment2Runner {
             if (finalCheckpoint != null)
                 finalCheckpoint.saveOos(name, evaluation.summary(), evaluation.draws(), solution);
         }
-        TRBSVUPcmSolver momentSolver = new TRBSVUPcmSolver(
-                Path.of(".venv-rsome", "Scripts", "python.exe"),
-                Path.of("analysis", "trb_svu", "solve_pcm.py"));
+        TRBSVUPcmSolver momentSolver = null;
         for (String name : List.of("C-MM", "C-PCM")) {
+            if (!requestedMethods.contains(name)) continue;
+            if (momentSolver == null) momentSolver = new TRBSVUPcmSolver(
+                    Path.of(".venv-rsome", "Scripts", "python.exe"),
+                    Path.of("analysis", "trb_svu", "solve_pcm.py"));
             boolean includeTotalVariance = name.equals("C-PCM");
             double bestParameter = Double.NaN, bestCost = Double.POSITIVE_INFINITY;
             double bestSd = Double.POSITIVE_INFINITY;
