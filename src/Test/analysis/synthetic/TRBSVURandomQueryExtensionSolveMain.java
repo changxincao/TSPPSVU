@@ -49,6 +49,12 @@ public final class TRBSVURandomQueryExtensionSolveMain {
         TRBSVUExperiment1IdeMain.verifyFormalDimensions(reference);
         ContextualChoice choice = needsChoice(method)
                 ? TRBSVUExperiment4Main.loadChoice(Path.of(choiceArg)) : null;
+        Path legacyChoiceFile = oldOutput.resolve("queries").resolve("query_000")
+                .resolve("validation").resolve("context_candidate.csv");
+        if (method.startsWith("CSAA-") && Files.isRegularFile(legacyChoiceFile)) {
+            choice = mergeKernelFallbackOrder(choice,
+                    TRBSVUExperiment4Main.loadChoice(legacyChoiceFile));
+        }
         verifyChoice(method, choice);
         double validationCost = choice == null
                 ? loadValidationCost(oldOutput, method) : choice.validationCost();
@@ -58,8 +64,9 @@ public final class TRBSVURandomQueryExtensionSolveMain {
         TRBSVUExperiment1Runner contextual = new TRBSVUExperiment1Runner(settings, forest,
                 TRBSVUFormalProtocol.VALIDATION_ORIGINS);
         String poolHash = queryPoolFingerprint(queries);
-        String choiceHash = choice == null ? "NONE" : sha256(Files.readAllBytes(Path.of(choiceArg)));
-        String protocol = sha256(("TRBSVU_RANDOM_QUERY_EXTENSION_SOLVE_V1|method=" + method
+        String choiceHash = choice == null ? "NONE" : sha256(choice.toString()
+                .getBytes(StandardCharsets.UTF_8));
+        String protocol = sha256(("TRBSVU_RANDOM_QUERY_EXTENSION_SOLVE_V2|method=" + method
                 + "|threads=" + threads + "|limit=" + limitSeconds + "|pool=" + poolHash
                 + "|choice=" + choiceHash).getBytes(StandardCharsets.UTF_8));
         Files.createDirectories(output);
@@ -173,6 +180,20 @@ public final class TRBSVURandomQueryExtensionSolveMain {
         } else if (!"RF".equals(choice.family()) || choice.rfMinLeaf() < 1) {
             throw new IllegalStateException("Wrong RF choice: " + choice);
         }
+    }
+
+    private static ContextualChoice mergeKernelFallbackOrder(ContextualChoice selected,
+                                                              ContextualChoice legacy) {
+        if (selected == null || legacy == null || !selected.family().equals(legacy.family()))
+            throw new IllegalStateException("Cannot merge incompatible kernel choices.");
+        List<Double> merged = new ArrayList<>();
+        for (double candidate : selected.bandwidthOrder())
+            if (!merged.contains(candidate)) merged.add(candidate);
+        for (double candidate : legacy.bandwidthOrder())
+            if (!merged.contains(candidate)) merged.add(candidate);
+        if (!merged.contains(selected.bandwidth())) merged.add(0, selected.bandwidth());
+        return new ContextualChoice(selected.family(), selected.bandwidth(),
+                selected.validationCost(), selected.validationSd(), merged, 0);
     }
 
     private static double parameter(String method, ContextualChoice choice) {
