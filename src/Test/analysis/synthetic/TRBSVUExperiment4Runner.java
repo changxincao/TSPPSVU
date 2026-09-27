@@ -12,7 +12,7 @@ import java.util.List;
 
 /** One-lambda paired comparison of exact RCSAA and contextual modified-chi-square DRO. */
 public final class TRBSVUExperiment4Runner {
-    public static final double[] LAMBDA = {0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 50, 100};
+    public static final double[] LAMBDA = {0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10};
 
     public record Certificate(double weightedMean, double weightedSd, double minimum,
                               double denominator, double ratio, boolean holds) { }

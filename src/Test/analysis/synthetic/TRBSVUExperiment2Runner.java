@@ -22,7 +22,7 @@ public final class TRBSVUExperiment2Runner {
     public static final Set<String> MOMENT_METHODS = Set.of("C-MM", "C-PCM");
     public static final Set<String> ALL_METHODS = Set.of(
             "RCSAA", "C-Chi2", "C-W1", "C-MM", "C-PCM");
-    public static final double[] LAMBDA = {0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 50, 100};
+    public static final double[] LAMBDA = {0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10};
     public static final double[] W1_RADIUS = {
             0.0001, 0.00025, 0.0005, 0.001, 0.0025,
             0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1
