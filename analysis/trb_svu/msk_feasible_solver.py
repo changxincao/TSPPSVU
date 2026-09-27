@@ -13,7 +13,7 @@ import time
 import warnings
 
 import numpy as np
-from mosek.fusion import Domain, Expr, Matrix, Model, ObjectiveSense
+from mosek.fusion import AccSolutionStatus, Domain, Expr, Matrix, Model, ObjectiveSense
 from scipy.sparse import coo_matrix
 
 from rsome.gcp import GCProg
@@ -50,6 +50,9 @@ def solve(form, display=True, log=False, params=None):
     num_constr, num_var = form.linear.shape
 
     with Model() as mosek_model:
+        # Fusion rejects Variable.level() for a merely feasible MIP incumbent
+        # unless the model explicitly accepts non-optimal primal solutions.
+        mosek_model.acceptedSolutionStatus(AccSolutionStatus.Feasible)
         num_cont = len(idx_cont)
         xc = mosek_model.variable("xc", num_cont)
         x = Expr.mul(Matrix.sparse(num_var, num_cont, idx_cont,

@@ -23,7 +23,8 @@ import java.util.Map;
 
 /**
  * Incrementally merges the already-computed Experiment 1 validation grid with
- * B=0.8/0.9 and refreshes final/OOS results only when the selected bandwidth changes.
+ * B=0.8/0.9 and refreshes final/OOS results when the selected bandwidth or its
+ * finite-support fallback order changes.
  */
 public final class TRBSVUBandwidthRefreshMain {
     private static final String EXPERIMENT = "1-B-REFRESH";
@@ -64,8 +65,7 @@ public final class TRBSVUBandwidthRefreshMain {
         List<Double> order = ranked.stream().map(Score::bandwidth).toList();
         ContextualChoice newChoice = new ContextualChoice(kernel.name(), selected.bandwidth(),
                 selected.mean(), selected.sd(), order);
-        boolean changed = Double.doubleToLongBits(oldChoice.bandwidth())
-                != Double.doubleToLongBits(newChoice.bandwidth());
+        boolean changed = strategyChanged(oldChoice, newChoice);
         Files.createDirectories(output);
         writeSelection(output.resolve("selection.csv"), replication, method, oldChoice, newChoice,
                 changed, allScores);
@@ -91,7 +91,8 @@ public final class TRBSVUBandwidthRefreshMain {
         String protocol = sha256(("TRBSVU_BANDWIDTH_REFRESH_V1|method=" + method
                 + "|B=" + selected.bandwidth() + "|rank=" + order
                 + "|threads=" + threads + "|limit=" + limitSeconds
-                + "|queryPool=" + TRBSVUExperiment1IdeMain.queryPoolFingerprint(queries))
+                + "|queryPool=" + TRBSVUExperiment1IdeMain.queryPoolFingerprint(queries)
+                + "|source=" + sourceFingerprint(Path.of("src")))
                 .getBytes(StandardCharsets.UTF_8));
         for (TRBSVUExperiment1IdeMain.QueryInput query : queries) {
             TRBSVUSyntheticCase instance = TRBSVUSyntheticCaseIO.loadText(query.file());
@@ -151,16 +152,21 @@ public final class TRBSVUBandwidthRefreshMain {
                 + "\ndemandRatio=" + query.demandRatio() + "\n", StandardCharsets.UTF_8);
     }
 
-    private static List<Score> loadOldScores(Path oldOutput, String method) throws Exception {
+    static List<Score> loadOldScores(Path oldOutput, String method) throws Exception {
         Path file = oldOutput.resolve("queries").resolve("query_000")
                 .resolve("validation").resolve("summary.csv");
         List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+        String expectedHeader = "replication,experiment,method,candidate,mean_validation_cost,"
+                + "sd_validation_cost,q95_validation_cost,cvar95_validation_cost,"
+                + "maximum_validation_cost,valid,selected";
+        if (lines.isEmpty() || !expectedHeader.equals(lines.get(0)))
+            throw new IllegalStateException("Unexpected validation summary schema: " + file);
         List<Score> result = new ArrayList<>();
         for (int row = 1; row < lines.size(); row++) {
             String[] f = lines.get(row).split(",", -1);
             if (f.length < 11 || !method.equals(f[2])) continue;
             result.add(new Score(Double.parseDouble(f[3]), Double.parseDouble(f[4]),
-                    Double.parseDouble(f[5]), Boolean.parseBoolean(f[10])));
+                    Double.parseDouble(f[5]), Boolean.parseBoolean(f[9])));
         }
         if (result.isEmpty()) throw new IllegalStateException("Missing old validation summary: " + file);
         return result;
@@ -228,11 +234,39 @@ public final class TRBSVUBandwidthRefreshMain {
         return false;
     }
 
+    static boolean strategyChanged(ContextualChoice oldChoice, ContextualChoice newChoice) {
+        if (Double.doubleToLongBits(oldChoice.bandwidth())
+                != Double.doubleToLongBits(newChoice.bandwidth())) return true;
+        boolean finiteSupport = Kernel.EPANECHNIKOV.name().equals(newChoice.family())
+                || Kernel.TRIANGULAR.name().equals(newChoice.family());
+        return finiteSupport && !oldChoice.bandwidthOrder().equals(newChoice.bandwidthOrder());
+    }
+
+    private static String sourceFingerprint(Path root) throws Exception {
+        Path absolute = root.toAbsolutePath().normalize();
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        List<Path> sources;
+        try (var stream = Files.walk(absolute)) {
+            sources = stream.filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().endsWith(".java"))
+                    .sorted(Comparator.comparing(path -> absolute.relativize(path)
+                            .toString().replace('\\', '/'))).toList();
+        }
+        for (Path source : sources) {
+            digest.update(absolute.relativize(source).toString().replace('\\', '/')
+                    .getBytes(StandardCharsets.UTF_8));
+            digest.update((byte) 0);
+            digest.update(Files.readAllBytes(source));
+            digest.update((byte) 0);
+        }
+        return HexFormat.of().formatHex(digest.digest());
+    }
+
     private static String sha256(byte[] bytes) throws Exception {
         return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
     }
 
-    private record Score(double bandwidth, double mean, double sd, boolean valid) { }
+    record Score(double bandwidth, double mean, double sd, boolean valid) { }
 
     private static final Comparator<Score> SCORE_ORDER = (left, right) -> {
         if (TRBSVUStatistics.better(left.mean(), left.sd(), left.bandwidth(),

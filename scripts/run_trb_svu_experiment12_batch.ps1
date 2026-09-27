@@ -9,6 +9,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+throw "This legacy combined Experiment 1/2 runner is retired. Use TRBSVUExperiment1IdeMain and TRBSVUExperiment2IdeMain as documented in README.md."
 if ($Replications -lt 1 -or $MaxParallel -lt 1 -or $SolverThreads -lt 1 `
         -or $LimitSeconds -lt 1 -or $MaxAttempts -lt 1) {
     throw "All batch counts and limits must be positive."

@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
  * IDE entry point for Experiment 2. Each method/replication task tunes that robust
@@ -160,6 +161,16 @@ public final class TRBSVUExperiment2IdeMain {
         ContextualChoice selected = TRBSVUExperiment4Main.loadChoice(selectedFile);
         String queryPoolHash = TRBSVUExperiment1IdeMain.queryPoolFingerprint(queries);
         String sourceHash = sourceFingerprint(Path.of("src"));
+        Path python = Path.of(".venv-rsome", "Scripts", "python.exe").toAbsolutePath();
+        boolean usesMomentPython = phase == Phase.MOMENT;
+        String pcmScriptHash = usesMomentPython
+                ? sha256(Files.readAllBytes(Path.of("analysis", "trb_svu", "solve_pcm.py")))
+                : "NOT_USED";
+        String mosekAdapterHash = usesMomentPython
+                ? sha256(Files.readAllBytes(Path.of("analysis", "trb_svu", "msk_feasible_solver.py")))
+                : "NOT_USED";
+        String momentPythonEnvironment = usesMomentPython
+                ? momentPythonEnvironment(python) : "NOT_USED";
         String protocol = sha256((TRBSVUFormalProtocol.EXPERIMENT12_VERSION
                 + "|experiment=2|phase=" + phase.directory + "|methods=" + requestedMethods
                 + "|queryPool=" + queryPoolHash + "|selected=" + selected
@@ -170,7 +181,9 @@ public final class TRBSVUExperiment2IdeMain {
                 + TRBSVUExperiment2Runner.MOMENT_VALIDATION_LIMIT_SECONDS
                 + "|momentQueryLimit=" + TRBSVUExperiment2Runner.MOMENT_QUERY_LIMIT_SECONDS
                 + "|rcsaaCompactFormulation=SWITCHED_COMPACT"
-                + "|threads=" + threads + "|limit=" + limit + "|source=" + sourceHash)
+                + "|threads=" + threads + "|limit=" + limit + "|source=" + sourceHash
+                + "|pcmScript=" + pcmScriptHash + "|mosekAdapter=" + mosekAdapterHash
+                + "|momentPythonEnvironment=" + momentPythonEnvironment)
                 .getBytes(StandardCharsets.UTF_8));
         Path complete = output.resolve("complete.txt");
         if (Files.isRegularFile(complete)) {
@@ -184,7 +197,6 @@ public final class TRBSVUExperiment2IdeMain {
         Files.deleteIfExists(complete);
         Settings settings = new Settings(threads, limit, 1e-4,
                 RCSAASolverVariant.LBBD_PRIMAL_EXACT, false, true, true);
-        Path python = Path.of(".venv-rsome", "Scripts", "python.exe").toAbsolutePath();
         TRBSVUForestWeights forest = new TRBSVUForestWeights(python.toString(),
                 Path.of("analysis", "trb_svu", "rf_leaf_weights.py").toAbsolutePath());
         TRBSVUExperiment1Runner contextual = new TRBSVUExperiment1Runner(
@@ -240,6 +252,9 @@ public final class TRBSVUExperiment2IdeMain {
         }
         Files.writeString(complete, "protocol=" + protocol + "\nqueryCount=" + queries.size()
                 + "\nselectedContext=" + selected + "\nsourceSha256=" + sourceHash
+                + "\npcmScriptSha256=" + pcmScriptHash
+                + "\nmosekAdapterSha256=" + mosekAdapterHash
+                + "\nmomentPythonEnvironment=" + momentPythonEnvironment
                 + "\nphase=" + phase.directory
                 + "\nrequestedMethods=" + String.join(";", requestedMethods)
                 + "\nrcsaaCompactFormulation=SWITCHED_COMPACT"
@@ -418,6 +433,23 @@ public final class TRBSVUExperiment2IdeMain {
 
     private static String sha256(byte[] content) throws Exception {
         return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content));
+    }
+
+    private static String momentPythonEnvironment(Path python) throws Exception {
+        String code = "import sys; from importlib.metadata import version; "
+                + "print('python='+sys.version.split()[0]+'|numpy='+version('numpy')"
+                + "+'|rsome='+version('rsome')+'|Mosek='+version('Mosek'))";
+        Process process = new ProcessBuilder(python.toString(), "-c", code)
+                .redirectErrorStream(true).start();
+        if (!process.waitFor(30, TimeUnit.SECONDS)) {
+            process.destroyForcibly();
+            throw new IllegalStateException("Timed out while reading the moment Python environment.");
+        }
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+        if (process.exitValue() != 0 || output.isEmpty() || output.indexOf('\n') >= 0
+                || output.indexOf('\r') >= 0)
+            throw new IllegalStateException("Cannot identify the moment Python environment: " + output);
+        return output;
     }
 
     private static String javaExecutable() {

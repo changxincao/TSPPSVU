@@ -37,13 +37,22 @@ The full source tree was verified with standard `javac` on 2026-09-16.
 
 ## Main revision workflow
 
-The current Experiment 1/2 batch entry point is:
+The formal workflow uses the two method-isolated IDE entry points below. Run
+Experiment 1 first; Experiment 2 consumes its frozen contextual choice.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/run_trb_svu_experiment12_batch.ps1
+```text
+Test.analysis.synthetic.TRBSVUExperiment1IdeMain
+Test.analysis.synthetic.TRBSVUExperiment2IdeMain --phase=primary
+Test.analysis.synthetic.TRBSVUExperiment2IdeMain --phase=moment
 ```
 
-Before using it on another machine, configure the solver library paths and create the local `.venv-rsome` Python environment. The runner generates frozen instances, validation checkpoints, solver logs, final decisions, and OOS evaluation outputs under its configured output directory.
+Each entry point accepts `--input`, `--output`, `--replications`, `--parallel`,
+`--solver-threads`, and `--limit-seconds`; Experiment 2 additionally accepts
+`--experiment1-output`, `--methods`, and `--phase`. Use `--dry-run` to inspect
+the task plan without starting a solver. Before using it on another machine,
+configure the solver library paths and create the local `.venv-rsome` Python
+environment. The historical `scripts/run_trb_svu_experiment12_batch.ps1`
+targets the retired combined protocol and must not be used for current formal runs.
 
 ## Reproducibility notes
 

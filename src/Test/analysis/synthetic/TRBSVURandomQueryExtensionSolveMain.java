@@ -14,11 +14,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /** Solves added ordinary queries with Experiment 1 parameters frozen before OOS evaluation. */
 public final class TRBSVURandomQueryExtensionSolveMain {
@@ -66,9 +68,15 @@ public final class TRBSVURandomQueryExtensionSolveMain {
         String poolHash = queryPoolFingerprint(queries);
         String choiceHash = choice == null ? "NONE" : sha256(choice.toString()
                 .getBytes(StandardCharsets.UTF_8));
+        String sourceHash = sourceFingerprint(Path.of("src"));
+        boolean usesForest = "RF-CSAA".equals(method);
+        String rfScriptHash = usesForest ? sha256(Files.readAllBytes(rfScript)) : "NOT_USED";
+        String rfEnvironment = usesForest ? pythonEnvironment(python) : "NOT_USED";
         String protocol = sha256(("TRBSVU_RANDOM_QUERY_EXTENSION_SOLVE_V2|method=" + method
                 + "|threads=" + threads + "|limit=" + limitSeconds + "|pool=" + poolHash
-                + "|choice=" + choiceHash).getBytes(StandardCharsets.UTF_8));
+                + "|choice=" + choiceHash + "|source=" + sourceHash
+                + "|rfScript=" + rfScriptHash + "|rfEnvironment=" + rfEnvironment)
+                .getBytes(StandardCharsets.UTF_8));
         Files.createDirectories(output);
         Path complete = output.resolve("complete.txt");
         if (Files.isRegularFile(complete)
@@ -114,7 +122,9 @@ public final class TRBSVURandomQueryExtensionSolveMain {
         }
         Files.writeString(complete, "protocol=" + protocol + "\nmethod=" + method
                 + "\nqueryCount=" + queries.size() + "\nqueryPoolSha256=" + poolHash
-                + "\nchoiceSha256=" + choiceHash + "\n", StandardCharsets.UTF_8);
+                + "\nchoiceSha256=" + choiceHash + "\nsourceSha256=" + sourceHash
+                + "\nrfScriptSha256=" + rfScriptHash + "\nrfEnvironment=" + rfEnvironment
+                + "\n", StandardCharsets.UTF_8);
         System.out.printf(Locale.ROOT, "RANDOM_EXTENSION_COMPLETE rep=%d method=%s queries=%d%n",
                 replication, method, queries.size());
     }
@@ -278,6 +288,43 @@ public final class TRBSVURandomQueryExtensionSolveMain {
 
     private static String sha256(byte[] bytes) throws Exception {
         return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+    }
+
+    private static String sourceFingerprint(Path root) throws Exception {
+        Path absolute = root.toAbsolutePath().normalize();
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        List<Path> sources;
+        try (var stream = Files.walk(absolute)) {
+            sources = stream.filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().endsWith(".java"))
+                    .sorted(Comparator.comparing(path -> absolute.relativize(path)
+                            .toString().replace('\\', '/'))).toList();
+        }
+        for (Path source : sources) {
+            digest.update(absolute.relativize(source).toString().replace('\\', '/')
+                    .getBytes(StandardCharsets.UTF_8));
+            digest.update((byte) 0);
+            digest.update(Files.readAllBytes(source));
+            digest.update((byte) 0);
+        }
+        return HexFormat.of().formatHex(digest.digest());
+    }
+
+    private static String pythonEnvironment(Path python) throws Exception {
+        String code = "import sys; from importlib.metadata import version; "
+                + "print('python='+sys.version.split()[0]+'|numpy='+version('numpy')"
+                + "+'|scikit-learn='+version('scikit-learn'))";
+        Process process = new ProcessBuilder(python.toString(), "-c", code)
+                .redirectErrorStream(true).start();
+        if (!process.waitFor(30, TimeUnit.SECONDS)) {
+            process.destroyForcibly();
+            throw new IllegalStateException("Timed out while reading the RF Python environment.");
+        }
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+        if (process.exitValue() != 0 || output.isEmpty() || output.indexOf('\n') >= 0
+                || output.indexOf('\r') >= 0)
+            throw new IllegalStateException("Cannot identify the RF Python environment: " + output);
+        return output;
     }
 
     private record QueryInput(int index, int sourceCandidate, double demandRatio, Path file) { }

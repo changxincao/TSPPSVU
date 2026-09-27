@@ -65,9 +65,27 @@ public final class TRBSVUProtocolRegressionSelfCheck {
                         && "FAILS".equals(TRBSVUExperiment4Main.certificateStatus(
                         new Certificate(1, 0.5, 0, 1, 0.5, false))),
                 "Resolved certificate statuses are incorrect.");
+        ContextualChoice oldKernelStrategy = new ContextualChoice(
+                "TRIANGULAR", 0.5, 1.0, 0.1, List.of(0.5, 1.0));
+        ContextualChoice newKernelStrategy = new ContextualChoice(
+                "TRIANGULAR", 0.5, 1.0, 0.1, List.of(0.5, 0.8, 1.0));
+        require(TRBSVUBandwidthRefreshMain.strategyChanged(
+                        oldKernelStrategy, newKernelStrategy),
+                "Bandwidth refresh ignored a changed finite-support fallback order.");
+        require(!TRBSVUBandwidthRefreshMain.strategyChanged(
+                        newKernelStrategy, newKernelStrategy),
+                "Bandwidth refresh marked an identical strategy as changed.");
+        ContextualChoice oldSmoothStrategy = new ContextualChoice(
+                "GAUSSIAN", 0.5, 1.0, 0.1, List.of(0.5, 1.0));
+        ContextualChoice newSmoothStrategy = new ContextualChoice(
+                "GAUSSIAN", 0.5, 1.0, 0.1, List.of(0.5, 0.8, 1.0));
+        require(!TRBSVUBandwidthRefreshMain.strategyChanged(
+                        oldSmoothStrategy, newSmoothStrategy),
+                "A smooth kernel was refreshed even though its selected bandwidth was unchanged.");
 
         Path root = Files.createTempDirectory("trb_svu_protocol_check_");
         try {
+            verifyBandwidthRefreshSummarySchema(root);
             verifyIdeAggregation(root);
             verifyFinalCheckpointInvalidation(root);
         } finally {
@@ -77,6 +95,25 @@ public final class TRBSVUProtocolRegressionSelfCheck {
             }
         }
         System.out.println("TRBSVUProtocolRegressionSelfCheck PASS");
+    }
+
+    private static void verifyBandwidthRefreshSummarySchema(Path root) throws Exception {
+        Path summary = root.resolve("bandwidth-old").resolve("queries").resolve("query_000")
+                .resolve("validation").resolve("summary.csv");
+        Files.createDirectories(summary.getParent());
+        Files.writeString(summary,
+                "replication,experiment,method,candidate,mean_validation_cost,"
+                        + "sd_validation_cost,q95_validation_cost,cvar95_validation_cost,"
+                        + "maximum_validation_cost,valid,selected\n"
+                        + "0,1,CSAA-Tri,1.0,10.0,2.0,11.0,12.0,13.0,true,true\n"
+                        + "0,1,CSAA-Tri,2.0,11.0,2.5,12.0,13.0,14.0,true,false\n",
+                StandardCharsets.UTF_8);
+        List<TRBSVUBandwidthRefreshMain.Score> scores =
+                TRBSVUBandwidthRefreshMain.loadOldScores(root.resolve("bandwidth-old"),
+                        "CSAA-Tri");
+        require(scores.size() == 2 && scores.stream().allMatch(
+                        TRBSVUBandwidthRefreshMain.Score::valid),
+                "Bandwidth refresh confused the validation valid and selected columns.");
     }
 
     private static void verifyIdeAggregation(Path root) throws Exception {
