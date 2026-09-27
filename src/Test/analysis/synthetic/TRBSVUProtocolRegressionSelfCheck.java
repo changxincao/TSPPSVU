@@ -139,7 +139,7 @@ public final class TRBSVUProtocolRegressionSelfCheck {
                 "--replications=0",
                 "--phase=primary",
                 "--methods=C-W1",
-                "--w1-grid=0.001,0.0025",
+                "--w1-grid=0.0001,0.00025,0.0005",
                 "--dry-run"});
     }
 
