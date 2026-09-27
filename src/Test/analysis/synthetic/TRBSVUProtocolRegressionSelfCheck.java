@@ -124,6 +124,14 @@ public final class TRBSVUProtocolRegressionSelfCheck {
                 "--replications=0",
                 "--phase=all",
                 "--dry-run"});
+        TRBSVUExperiment2IdeMain.main(new String[]{
+                "--input=" + input,
+                "--experiment1-output=" + output,
+                "--output=" + root.resolve("experiment2-primary-subset"),
+                "--replications=0",
+                "--phase=primary",
+                "--methods=RCSAA,C-W1",
+                "--dry-run"});
     }
 
     private static void writeCandidate(Path output, String method, ContextualChoice choice)

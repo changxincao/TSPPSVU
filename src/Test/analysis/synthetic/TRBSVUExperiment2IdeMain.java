@@ -22,8 +22,9 @@ import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.Executors;
 
 /**
- * IDE entry point for Experiment 2. Each replication tunes every robust method once on
- * the common rolling validation windows, then reuses that tuning for all forty queries.
+ * IDE entry point for Experiment 2. Each method/replication task tunes that robust
+ * method once on the common rolling validation windows, then reuses the result for
+ * all forty queries.
  */
 public final class TRBSVUExperiment2IdeMain {
     private enum Phase {
@@ -36,6 +37,12 @@ public final class TRBSVUExperiment2IdeMain {
         Phase(String directory, List<String> methods) {
             this.directory = directory;
             this.methods = methods;
+        }
+
+        static Phase forMethod(String method) {
+            for (Phase phase : values())
+                if (phase.methods.contains(method)) return phase;
+            throw new IllegalArgumentException("Unknown Experiment 2 method: " + method);
         }
     }
     private static final Path DEFAULT_INPUT = Path.of("analysis", "TRB_reviewer_revision",
@@ -59,28 +66,29 @@ public final class TRBSVUExperiment2IdeMain {
         Config config = Config.parse(args);
         List<Task> tasks = buildTasks(config);
         System.out.printf(Locale.ROOT,
-                "Experiment 2 plan: input=%s exp1=%s output=%s replications=%d phase=%s parallel=%d solverThreads=%d limitSec=%d%n",
+                "Experiment 2 plan: input=%s exp1=%s output=%s tasks=%d phase=%s methods=%s parallel=%d solverThreads=%d limitSec=%d%n",
                 config.input, config.experiment1Output, config.output, tasks.size(),
-                config.phase, config.parallelTasks, config.solverThreads, config.limitSeconds);
+                config.phase, config.methods, config.parallelTasks, config.solverThreads,
+                config.limitSeconds);
         for (Task task : tasks) System.out.println("  " + task.label());
         if (config.dryRun) {
             System.out.println("Dry run only; no solver was started.");
             return;
         }
         Files.createDirectories(config.output);
-        if (config.phase.equals("all") || config.phase.equals("primary"))
-            runPhase(tasks, config, Phase.PRIMARY);
-        if (config.phase.equals("all") || config.phase.equals("moment"))
-            runPhase(tasks, config, Phase.MOMENT);
+        for (Phase phase : Phase.values()) {
+            List<Task> phaseTasks = tasks.stream()
+                    .filter(task -> task.phase() == phase).toList();
+            if (!phaseTasks.isEmpty()) runTasks(phaseTasks, config, phase);
+        }
         System.out.println("Experiment 2 scheduling complete: " + config.output.toAbsolutePath());
     }
 
-    private static void runPhase(List<Task> tasks, Config config, Phase phase) throws Exception {
-        System.out.println("Starting Experiment 2 phase=" + phase.directory
-                + " methods=" + phase.methods);
+    private static void runTasks(List<Task> tasks, Config config, Phase phase) throws Exception {
+        System.out.println("Starting Experiment 2 method-isolated phase=" + phase.directory + ".");
         try (var pool = Executors.newFixedThreadPool(config.parallelTasks)) {
             var completed = new ExecutorCompletionService<TaskResult>(pool);
-            for (Task task : tasks) completed.submit(() -> launch(task, config, phase));
+            for (Task task : tasks) completed.submit(() -> launch(task, config));
             int failed = 0;
             for (int i = 0; i < tasks.size(); i++) {
                 TaskResult result = completed.take().get();
@@ -88,14 +96,15 @@ public final class TRBSVUExperiment2IdeMain {
                 if (result.exitCode() != 0) failed++;
             }
             if (failed > 0)
-                throw new IllegalStateException(failed + " Experiment 2 " + phase.directory
-                        + " replication(s) failed; later phases were not started.");
+                throw new IllegalStateException(failed
+                        + " Experiment 2 method/replication task(s) failed.");
         }
-        System.out.println("Completed Experiment 2 phase=" + phase.directory);
+        System.out.println("Completed Experiment 2 method-isolated phase=" + phase.directory + ".");
     }
 
-    private static TaskResult launch(Task task, Config config, Phase phase) throws Exception {
-        Path output = config.output.resolve(phase.directory).resolve(task.name());
+    private static TaskResult launch(Task task, Config config) throws Exception {
+        Path output = config.output.resolve(task.phase().directory)
+                .resolve(task.method()).resolve(task.name());
         Files.createDirectories(output);
         Path log = output.resolve("task.log");
         List<String> command = new ArrayList<>();
@@ -111,18 +120,19 @@ public final class TRBSVUExperiment2IdeMain {
         command.add(Integer.toString(task.replication()));
         command.add(Integer.toString(config.solverThreads));
         command.add(Integer.toString(config.limitSeconds));
-        command.add(phase.name());
+        command.add(task.phase().name());
+        command.add(task.method());
         Process process = new ProcessBuilder(command).redirectErrorStream(true)
                 .redirectOutput(ProcessBuilder.Redirect.appendTo(log.toFile())).start();
         int exit = process.waitFor();
-        return new TaskResult(exit, "[" + phase.directory + "/" + task.label()
+        return new TaskResult(exit, "[" + task.label()
                 + "] exit=" + exit + " log=" + log);
     }
 
     private static void runWorker(String[] args) throws Exception {
-        if (args.length != 7)
+        if (args.length != 8)
             throw new IllegalArgumentException("Worker usage: <replicationInput> <selectedContext.csv> "
-                    + "<output> <replication> <solverThreads> <limitSeconds> <phase>");
+                    + "<output> <replication> <solverThreads> <limitSeconds> <phase> <method>");
         Path replicationInput = Path.of(args[0]);
         Path selectedFile = Path.of(args[1]);
         Path output = Path.of(args[2]);
@@ -130,6 +140,11 @@ public final class TRBSVUExperiment2IdeMain {
         int threads = Integer.parseInt(args[4]);
         int limit = Integer.parseInt(args[5]);
         Phase phase = Phase.valueOf(args[6]);
+        String requestedMethod = args[7];
+        if (!phase.methods.contains(requestedMethod))
+            throw new IllegalArgumentException("Method " + requestedMethod
+                    + " does not belong to phase " + phase);
+        Set<String> requestedMethods = Set.of(requestedMethod);
         Files.createDirectories(output);
         List<TRBSVUExperiment1IdeMain.QueryInput> queries =
                 TRBSVUExperiment1IdeMain.loadQueries(replicationInput);
@@ -139,7 +154,7 @@ public final class TRBSVUExperiment2IdeMain {
         String queryPoolHash = TRBSVUExperiment1IdeMain.queryPoolFingerprint(queries);
         String sourceHash = sourceFingerprint(Path.of("src"));
         String protocol = sha256((TRBSVUFormalProtocol.EXPERIMENT12_VERSION
-                + "|experiment=2|phase=" + phase.directory + "|methods=" + phase.methods
+                + "|experiment=2|phase=" + phase.directory + "|methods=" + requestedMethods
                 + "|queryPool=" + queryPoolHash + "|selected=" + selected
                 + "|lambda=" + Arrays.toString(TRBSVUExperiment2Runner.LAMBDA)
                 + "|w1=" + Arrays.toString(TRBSVUExperiment2Runner.W1_RADIUS)
@@ -190,7 +205,7 @@ public final class TRBSVUExperiment2IdeMain {
                             replication, "2"));
             TRBSVUExperiment2Runner.Result result;
             if (frozenParameters == null) {
-                result = runner.run(instance, selected, Set.copyOf(phase.methods));
+                result = runner.run(instance, selected, requestedMethods);
                 frozenParameters = result.selectedParameter();
                 frozenValidationCost = result.validationCost();
                 frozenValidationCurve = result.validationCurve();
@@ -201,7 +216,7 @@ public final class TRBSVUExperiment2IdeMain {
                         frozenValidationCost, frozenValidationCurve);
             }
             writeResult(queryOutput, replication, instance, selected, result, query.index() == 0);
-            List<String> missingMethods = phase.methods.stream()
+            List<String> missingMethods = requestedMethods.stream()
                     .filter(method -> !result.decisions().containsKey(method)).toList();
             if (!missingMethods.isEmpty())
                 incompleteQueries.add(String.format(Locale.ROOT, "query_%03d:%s",
@@ -218,7 +233,7 @@ public final class TRBSVUExperiment2IdeMain {
         Files.writeString(complete, "protocol=" + protocol + "\nqueryCount=" + queries.size()
                 + "\nselectedContext=" + selected + "\nsourceSha256=" + sourceHash
                 + "\nphase=" + phase.directory
-                + "\nrequestedMethods=" + String.join(";", phase.methods)
+                + "\nrequestedMethods=" + String.join(";", requestedMethods)
                 + "\nrcsaaCompactFormulation=SWITCHED_COMPACT"
                 + "\nallRequestedMethodsCompleted=" + incompleteQueries.isEmpty()
                 + "\nincompleteQueries=" + String.join(",", incompleteQueries) + "\n",
@@ -280,6 +295,7 @@ public final class TRBSVUExperiment2IdeMain {
 
     private static List<Task> buildTasks(Config config) throws Exception {
         List<Task> tasks = new ArrayList<>();
+        List<String> methods = selectedMethods(config);
         for (int replication : parseReplications(config.replications)) {
             String name = String.format(Locale.ROOT, "rep_%03d", replication);
             Path input = config.input.resolve(name);
@@ -312,9 +328,33 @@ public final class TRBSVUExperiment2IdeMain {
                             .trim().equals(currentPoolHash))
                 throw new IllegalStateException("Experiment 1 C* belongs to a different frozen "
                         + "instance or query pool: " + name);
-            tasks.add(new Task(replication, name, input, selected));
+            for (String method : methods)
+                tasks.add(new Task(replication, name, input, selected,
+                        Phase.forMethod(method), method));
         }
         return tasks;
+    }
+
+    private static List<String> selectedMethods(Config config) {
+        List<String> defaults = switch (config.phase) {
+            case "primary" -> Phase.PRIMARY.methods;
+            case "moment" -> Phase.MOMENT.methods;
+            case "all" -> List.of("RCSAA", "C-Chi2", "C-W1", "C-MM", "C-PCM");
+            default -> throw new IllegalArgumentException("Unknown phase: " + config.phase);
+        };
+        if (config.methods == null || config.methods.isBlank()) return defaults;
+        LinkedHashSet<String> requested = new LinkedHashSet<>();
+        for (String token : config.methods.split(",")) {
+            String method = token.trim();
+            if (!TRBSVUExperiment2Runner.ALL_METHODS.contains(method))
+                throw new IllegalArgumentException("Unknown Experiment 2 method: " + method);
+            if (!defaults.contains(method))
+                throw new IllegalArgumentException("Method " + method
+                        + " is excluded by phase=" + config.phase);
+            requested.add(method);
+        }
+        if (requested.isEmpty()) throw new IllegalArgumentException("Empty method selection.");
+        return List.copyOf(requested);
     }
 
     private static Set<Integer> parseReplications(String text) {
@@ -359,14 +399,15 @@ public final class TRBSVUExperiment2IdeMain {
         return Path.of(System.getProperty("java.home"), "bin", "java.exe").toString();
     }
 
-    private record Task(int replication, String name, Path input, Path selectedContext) {
-        String label() { return name; }
+    private record Task(int replication, String name, Path input, Path selectedContext,
+                        Phase phase, String method) {
+        String label() { return phase.directory + "/" + method + "/" + name; }
     }
     private record TaskResult(int exitCode, String message) { }
 
     private record Config(Path input, Path experiment1Output, Path output, int parallelTasks,
                           int solverThreads, int limitSeconds, String replications,
-                          String phase, boolean dryRun) {
+                          String phase, String methods, boolean dryRun) {
         static Config parse(String[] args) {
             Map<String, String> values = new LinkedHashMap<>();
             boolean dry = false;
@@ -378,7 +419,7 @@ public final class TRBSVUExperiment2IdeMain {
                 values.put(arg.substring(2, equals), arg.substring(equals + 1));
             }
             Set<String> known = Set.of("input", "experiment1-output", "output", "parallel",
-                    "solver-threads", "limit-seconds", "replications", "phase");
+                    "solver-threads", "limit-seconds", "replications", "phase", "methods");
             if (!known.containsAll(values.keySet()))
                 throw new IllegalArgumentException("Unknown argument(s): " + values.keySet().stream()
                         .filter(key -> !known.contains(key)).toList());
@@ -395,7 +436,8 @@ public final class TRBSVUExperiment2IdeMain {
                             DEFAULT_EXPERIMENT1_OUTPUT.toString())),
                     Path.of(values.getOrDefault("output", DEFAULT_OUTPUT.toString())),
                     parallel, threads, limit,
-                    values.getOrDefault("replications", DEFAULT_REPLICATIONS), phase, dry);
+                    values.getOrDefault("replications", DEFAULT_REPLICATIONS), phase,
+                    values.get("methods"), dry);
         }
 
         private static int integer(Map<String, String> values, String key, int fallback) {

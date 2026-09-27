@@ -72,9 +72,11 @@ public final class TRBSVUSolveMethods {
         Data data = new Data(lanes, samples, query.copy(), params);
         Config config = config(settings);
         System.out.printf(Locale.ROOT,
-                "SOLVE_BEGIN method=%s robustness=%.17g scenarios=%d positiveWeights=%d ess=%.10f threads=%d limitSec=%d%n",
+                "SOLVE_BEGIN method=%s robustness=%.17g scenarios=%d positiveWeights=%d ess=%.10f threads=%d limitSec=%d rcsaaVariant=%s repair=%s compact=%s switched=%s%n",
                 method, robustness, samples.size(), TRBSVUExperiment1Runner.positiveCount(samples),
-                TRBSVUExperiment1Runner.ess(samples), settings.threads(), settings.timeLimitSeconds());
+                TRBSVUExperiment1Runner.ess(samples), settings.threads(), settings.timeLimitSeconds(),
+                settings.rcsaaVariant(), settings.repairCuts(), settings.compactDual(),
+                settings.switchedCompactDual());
         try {
         Solution solution = switch (method) {
             case NOMINAL -> new SAAModel().solve(data, config, null);
