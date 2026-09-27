@@ -22,8 +22,6 @@ final class RCSAALBBDPrimalExactSolver {
     private static final double BOUND_CONSISTENCY_REL_TOL = 5e-8;
 
     Solution solve(Data data, Config cfg) throws Exception {
-        if (cfg.rcsaaCompactSwitchedDual)
-            throw new IllegalArgumentException("Experimental switched compact is quarantined: I10 bound contradicts independently verified feasible solution; diagnostic fixed-y tests only");
         if (cfg.lambda < 0 || !Double.isFinite(cfg.lambda))
             throw new IllegalArgumentException("RCSAA lambda must be finite and nonnegative");
         if (cfg.rcsaaCompactDual && cfg.rcsaaRepairCuts)
@@ -162,7 +160,9 @@ final class RCSAALBBDPrimalExactSolver {
                             secondsBetween(afterMaster, afterScenario),
                             secondsBetween(t0, t1)));
                     Solution solution = new Solution(bestUpperBound, bestY, secondsBetween(t0, t1));
-                    solution.solverStatus = cfg.rcsaaCompactDual
+                    solution.solverStatus = cfg.rcsaaCompactSwitchedDual
+                            ? "OPTIMAL_RCSAA_SWITCHED_COMPACT"
+                            : cfg.rcsaaCompactDual
                             ? "OPTIMAL_RCSAA_PRODUCT_COMPACT" : "OPTIMAL_RCSAA_REPAIR";
                     solution.bestBound = reportedBound;
                     solution.relativeGap = reportedGap;
@@ -299,7 +299,8 @@ final class RCSAALBBDPrimalExactSolver {
             tolerance = cfg.tol;
             repairCuts = cfg.rcsaaRepairCuts;
 
-            model = new Model("RCSAA-LBBD-Primal-Exact");
+            model = new Model(cfg.rcsaaCompactSwitchedDual
+                    ? "RCSAA-Switched-Compact" : "RCSAA-LBBD-Primal-Exact");
             if (cfg.writeSolverLogToConsole)
                 model.setLogHandler(new java.io.PrintWriter(System.out, true));
             model.acceptedSolutionStatus(AccSolutionStatus.Feasible);

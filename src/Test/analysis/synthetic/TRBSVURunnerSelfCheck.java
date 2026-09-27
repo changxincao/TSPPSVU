@@ -96,7 +96,11 @@ public final class TRBSVURunnerSelfCheck {
                     "RF weight construction failed for min leaf " + minLeaf + ".");
         }
         Settings settings = new Settings(1, 60, 1e-4,
-                RCSAASolverVariant.LBBD_PRIMAL_SEARCH, true, false);
+                RCSAASolverVariant.LBBD_PRIMAL_EXACT, false, true, true);
+        require(new Settings(1, 60, 1e-4,
+                        RCSAASolverVariant.LBBD_PRIMAL_EXACT, false, true)
+                        .switchedCompactDual(),
+                "High-level compact settings did not select switched compact.");
         Solution d = TRBSVUSolveMethods.solve(instance.params, instance.lanes, mean,
                 instance.testContext, Method.NOMINAL, 0.0, settings);
         require(d.y != null && d.y.length == instance.params.I, "Nominal solution missing.");

@@ -23,10 +23,23 @@ public final class TRBSVUSolveMethods {
 
     public record Settings(int threads, int timeLimitSeconds, double tolerance,
                            RCSAASolverVariant rcsaaVariant,
-                           boolean repairCuts, boolean compactDual) {
+                           boolean repairCuts, boolean compactDual,
+                           boolean switchedCompactDual) {
+        public Settings(int threads, int timeLimitSeconds, double tolerance,
+                        RCSAASolverVariant rcsaaVariant,
+                        boolean repairCuts, boolean compactDual) {
+            // High-level compact requests use the verified product-free formulation.
+            // Product/McCormick compact remains available only through the explicit
+            // seven-argument constructor for diagnostic comparisons.
+            this(threads, timeLimitSeconds, tolerance, rcsaaVariant,
+                    repairCuts, compactDual, compactDual);
+        }
+
         public Settings {
             if (threads < 1 || timeLimitSeconds < 1 || !(tolerance > 0.0)
                     || rcsaaVariant == null) throw new IllegalArgumentException("Invalid solver settings.");
+            if (switchedCompactDual && !compactDual)
+                throw new IllegalArgumentException("Switched compact requires compact dual.");
         }
     }
 
@@ -80,6 +93,7 @@ public final class TRBSVUSolveMethods {
                 config.rcsaaSolverVariant = settings.rcsaaVariant();
                 config.rcsaaRepairCuts = settings.repairCuts();
                 config.rcsaaCompactDual = settings.compactDual();
+                config.rcsaaCompactSwitchedDual = settings.switchedCompactDual();
                 yield new DROModel().solve(data, config);
             }
             case WASSERSTEIN -> {

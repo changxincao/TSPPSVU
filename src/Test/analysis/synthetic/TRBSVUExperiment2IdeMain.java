@@ -147,6 +147,7 @@ public final class TRBSVUExperiment2IdeMain {
                 + "|momentValidationLimit="
                 + TRBSVUExperiment2Runner.MOMENT_VALIDATION_LIMIT_SECONDS
                 + "|momentQueryLimit=" + TRBSVUExperiment2Runner.MOMENT_QUERY_LIMIT_SECONDS
+                + "|rcsaaCompactFormulation=SWITCHED_COMPACT"
                 + "|threads=" + threads + "|limit=" + limit + "|source=" + sourceHash)
                 .getBytes(StandardCharsets.UTF_8));
         Path complete = output.resolve("complete.txt");
@@ -160,7 +161,7 @@ public final class TRBSVUExperiment2IdeMain {
         }
         Files.deleteIfExists(complete);
         Settings settings = new Settings(threads, limit, 1e-4,
-                RCSAASolverVariant.LBBD_PRIMAL_EXACT, false, true);
+                RCSAASolverVariant.LBBD_PRIMAL_EXACT, false, true, true);
         Path python = Path.of(".venv-rsome", "Scripts", "python.exe").toAbsolutePath();
         TRBSVUForestWeights forest = new TRBSVUForestWeights(python.toString(),
                 Path.of("analysis", "trb_svu", "rf_leaf_weights.py").toAbsolutePath());
@@ -218,6 +219,7 @@ public final class TRBSVUExperiment2IdeMain {
                 + "\nselectedContext=" + selected + "\nsourceSha256=" + sourceHash
                 + "\nphase=" + phase.directory
                 + "\nrequestedMethods=" + String.join(";", phase.methods)
+                + "\nrcsaaCompactFormulation=SWITCHED_COMPACT"
                 + "\nallRequestedMethodsCompleted=" + incompleteQueries.isEmpty()
                 + "\nincompleteQueries=" + String.join(",", incompleteQueries) + "\n",
                 StandardCharsets.UTF_8);

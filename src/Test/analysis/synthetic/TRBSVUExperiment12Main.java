@@ -52,7 +52,7 @@ public final class TRBSVUExperiment12Main {
                 ? new Settings(threads, limitSeconds, 1e-4,
                     RCSAASolverVariant.LBBD_PRIMAL_SEARCH, true, false)
                 : new Settings(threads, limitSeconds, 1e-4,
-                    RCSAASolverVariant.LBBD_PRIMAL_EXACT, false, true);
+                    RCSAASolverVariant.LBBD_PRIMAL_EXACT, false, true, true);
         SplittableRandom random = new SplittableRandom(baseSeed + index);
         TRBSVUSyntheticCase.Seeds seeds = new TRBSVUSyntheticCase.Seeds(
                 random.nextLong(), random.nextLong(), random.nextLong(),
@@ -91,6 +91,8 @@ public final class TRBSVUExperiment12Main {
         String instanceSha256 = sha256(Files.readAllBytes(caseFile));
         String commonProtocol = TRBSVUFormalProtocol.EXPERIMENT12_VERSION
                 + "|equality=true|algorithm=" + algorithm
+                + "|rcsaaCompactFormulation="
+                + (algorithm.equals("compact") ? "SWITCHED_COMPACT" : "REPAIR_CUT")
                 + "|threads=" + threads + "|limitSeconds=" + limitSeconds + "|tolerance=1e-4"
                 + "|validationTrainingPeriods="
                 + TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS
@@ -146,7 +148,7 @@ public final class TRBSVUExperiment12Main {
                  + "w1ZeroWeightSamplesExcludedFromCenter=true\n"
                  + "w1SharedSupportUsesFullTrainingPool=true\n"
                  + "rcsaaCompactFormulation="
-                 + (algorithm.equals("compact") ? "PRODUCT_MCCORMICK_COMPACT" : "REPAIR_CUT") + "\n";
+                 + (algorithm.equals("compact") ? "SWITCHED_COMPACT" : "REPAIR_CUT") + "\n";
         Path completionMarker = replication.resolve("experiment12_complete.txt");
         if (mode.equals("both")) Files.deleteIfExists(completionMarker);
         TRBSVUExperiment1Runner exp1 = new TRBSVUExperiment1Runner(settings, forest, origins,

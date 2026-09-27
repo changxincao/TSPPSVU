@@ -401,7 +401,8 @@ public final class TRBSVUExperiment2Runner {
 
     private static Settings withTimeLimit(Settings base, int timeLimitSeconds) {
         return new Settings(base.threads(), timeLimitSeconds, base.tolerance(),
-                base.rcsaaVariant(), base.repairCuts(), base.compactDual());
+                base.rcsaaVariant(), base.repairCuts(), base.compactDual(),
+                base.switchedCompactDual());
     }
 
     private static void requireUsableIncumbent(Solution solution, String method, int carriers) {
