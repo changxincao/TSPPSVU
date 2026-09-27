@@ -138,7 +138,9 @@ public final class TRBSVUExperiment2Runner {
                 System.out.println("Experiment 2 validated method=" + name + " parameter="
                         + parameter + " origins=" + validationOrigins + " cost=" + score.mean()
                         + " sd=" + score.sd());
-                if (better(score, parameter, bestCost, bestSd, bestParameter)) {
+                boolean preferLargerOnTie = method == Method.WASSERSTEIN;
+                if (better(score, parameter, bestCost, bestSd, bestParameter,
+                        preferLargerOnTie)) {
                     bestCost = score.mean();
                     bestSd = score.sd();
                     bestParameter = parameter;
@@ -208,7 +210,7 @@ public final class TRBSVUExperiment2Runner {
                 System.out.println("Experiment 2 validated method=" + name + " kappa="
                         + kappa + " origins=" + validationOrigins + " cost=" + score.mean()
                         + " sd=" + score.sd());
-                if (better(score, kappa, bestCost, bestSd, bestParameter)) {
+                if (better(score, kappa, bestCost, bestSd, bestParameter, false)) {
                     bestCost = score.mean();
                     bestSd = score.sd();
                     bestParameter = kappa;
@@ -518,8 +520,13 @@ public final class TRBSVUExperiment2Runner {
 
     private static boolean better(ValidationScore score, double parameter,
                                   double incumbentMean, double incumbentSd,
-                                  double incumbentParameter) {
+                                  double incumbentParameter,
+                                  boolean preferLargerParameterOnTie) {
         if (!Double.isFinite(score.mean())) return false;
+        if (preferLargerParameterOnTie)
+            return TRBSVUStatistics.betterWithLargerParameterTieBreak(
+                    score.mean(), score.sd(), parameter,
+                    incumbentMean, incumbentSd, incumbentParameter);
         return TRBSVUStatistics.better(score.mean(), score.sd(), parameter,
                 incumbentMean, incumbentSd, incumbentParameter);
     }

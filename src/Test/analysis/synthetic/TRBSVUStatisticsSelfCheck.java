@@ -22,6 +22,13 @@ public final class TRBSVUStatisticsSelfCheck {
                 || !TRBSVUStatistics.better(100.0, 4.0, 1.0, 100.0, 4.0, 2.0)
                 || TRBSVUStatistics.better(101.0, 1.0, 1.0, 100.0, 5.0, 2.0))
             throw new AssertionError("Validation tie-break order changed.");
+        if (!TRBSVUStatistics.betterWithLargerParameterTieBreak(
+                    100.0, 4.0, 2.0, 100.0, 4.0, 1.0)
+                || TRBSVUStatistics.betterWithLargerParameterTieBreak(
+                    100.0, 4.0, 1.0, 100.0, 4.0, 2.0)
+                || !TRBSVUStatistics.betterWithLargerParameterTieBreak(
+                    100.0, 3.0, 1.0, 100.0, 4.0, 2.0))
+            throw new AssertionError("Larger-parameter validation tie break failed.");
         System.out.println("TRBSVUStatisticsSelfCheck PASS");
     }
 

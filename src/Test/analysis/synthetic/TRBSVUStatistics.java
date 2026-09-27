@@ -53,4 +53,15 @@ final class TRBSVUStatistics {
         if (sdOrder != 0) return sdOrder < 0;
         return Double.compare(parameter, incumbentParameter) < 0;
     }
+
+    /** Lowest mean, then lowest sample SD, then highest numeric parameter. */
+    static boolean betterWithLargerParameterTieBreak(double mean, double sd, double parameter,
+                                                     double incumbentMean, double incumbentSd,
+                                                     double incumbentParameter) {
+        int meanOrder = Double.compare(mean, incumbentMean);
+        if (meanOrder != 0) return meanOrder < 0;
+        int sdOrder = Double.compare(sd, incumbentSd);
+        if (sdOrder != 0) return sdOrder < 0;
+        return Double.compare(parameter, incumbentParameter) > 0;
+    }
 }
