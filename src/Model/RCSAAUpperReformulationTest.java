@@ -21,7 +21,14 @@ public final class RCSAAUpperReformulationTest {
         if (RCSAALBBDPrimalExactSolver.boundsConsistent(101.0, 100.0, 1e-4))
             throw new IllegalStateException("RCSAA certificate accepted LB > UB.");
         if (RCSAALBBDPrimalExactSolver.boundsConsistent(100.00001, 100.0, 1e-4))
-            throw new IllegalStateException("RCSAA certificate accepted a slightly inconsistent LB > UB.");
+            throw new IllegalStateException("RCSAA certificate accepted a material LB > UB.");
+        if (!RCSAALBBDPrimalExactSolver.boundsConsistent(100.000004, 100.0, 1e-4))
+            throw new IllegalStateException("RCSAA certificate rejected a roundoff-scale LB > UB.");
+        if (RCSAALBBDPrimalExactSolver.boundsConsistent(100.000004, 100.0, 1e-10))
+            throw new IllegalStateException("RCSAA certificate ignored a tighter bound tolerance.");
+        if (!RCSAALBBDPrimalExactSolver.boundsConsistent(
+                1_494_221.4960580762, 1_494_221.4561692288, 1e-4))
+            throw new IllegalStateException("RCSAA certificate rejected the observed numerical overlap.");
         Path out = Path.of(args[1]);
         Files.createDirectories(out);
         Config cfg = new Config();
