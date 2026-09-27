@@ -66,10 +66,10 @@ public final class TRBSVUExperiment2IdeMain {
         Config config = Config.parse(args);
         List<Task> tasks = buildTasks(config);
         System.out.printf(Locale.ROOT,
-                "Experiment 2 plan: input=%s exp1=%s output=%s tasks=%d phase=%s methods=%s parallel=%d solverThreads=%d limitSec=%d%n",
+                "Experiment 2 plan: input=%s exp1=%s output=%s tasks=%d phase=%s methods=%s parallel=%d solverThreads=%d limitSec=%d w1Grid=%s%n",
                 config.input, config.experiment1Output, config.output, tasks.size(),
                 config.phase, config.methods, config.parallelTasks, config.solverThreads,
-                config.limitSeconds);
+                config.limitSeconds, config.w1Grid == null ? "default" : config.w1Grid);
         for (Task task : tasks) System.out.println("  " + task.label());
         if (config.dryRun) {
             System.out.println("Dry run only; no solver was started.");
@@ -122,6 +122,8 @@ public final class TRBSVUExperiment2IdeMain {
         command.add(Integer.toString(config.limitSeconds));
         command.add(task.phase().name());
         command.add(task.method());
+        if ("C-W1".equals(task.method()) && config.w1Grid != null)
+            command.add(config.w1Grid);
         Process process = new ProcessBuilder(command).redirectErrorStream(true)
                 .redirectOutput(ProcessBuilder.Redirect.appendTo(log.toFile())).start();
         int exit = process.waitFor();
@@ -130,9 +132,10 @@ public final class TRBSVUExperiment2IdeMain {
     }
 
     private static void runWorker(String[] args) throws Exception {
-        if (args.length != 8)
+        if (args.length != 8 && args.length != 9)
             throw new IllegalArgumentException("Worker usage: <replicationInput> <selectedContext.csv> "
-                    + "<output> <replication> <solverThreads> <limitSeconds> <phase> <method>");
+                    + "<output> <replication> <solverThreads> <limitSeconds> <phase> <method> "
+                    + "[w1RadiusCsv]");
         Path replicationInput = Path.of(args[0]);
         Path selectedFile = Path.of(args[1]);
         Path output = Path.of(args[2]);
@@ -144,6 +147,10 @@ public final class TRBSVUExperiment2IdeMain {
         if (!phase.methods.contains(requestedMethod))
             throw new IllegalArgumentException("Method " + requestedMethod
                     + " does not belong to phase " + phase);
+        if (args.length == 9 && !"C-W1".equals(requestedMethod))
+            throw new IllegalArgumentException("A W1 radius override is valid only for C-W1.");
+        double[] w1Grid = args.length == 9
+                ? parsePositiveGrid(args[8]) : TRBSVUExperiment2Runner.W1_RADIUS;
         Set<String> requestedMethods = Set.of(requestedMethod);
         Files.createDirectories(output);
         List<TRBSVUExperiment1IdeMain.QueryInput> queries =
@@ -157,7 +164,7 @@ public final class TRBSVUExperiment2IdeMain {
                 + "|experiment=2|phase=" + phase.directory + "|methods=" + requestedMethods
                 + "|queryPool=" + queryPoolHash + "|selected=" + selected
                 + "|lambda=" + Arrays.toString(TRBSVUExperiment2Runner.LAMBDA)
-                + "|w1=" + Arrays.toString(TRBSVUExperiment2Runner.W1_RADIUS)
+                + "|w1=" + Arrays.toString(w1Grid)
                 + "|momentKappa=" + Arrays.toString(TRBSVUExperiment2Runner.MOMENT_KAPPA)
                 + "|momentValidationLimit="
                 + TRBSVUExperiment2Runner.MOMENT_VALIDATION_LIMIT_SECONDS
@@ -199,7 +206,8 @@ public final class TRBSVUExperiment2IdeMain {
             Path queryOutput = output.resolve("queries")
                     .resolve(String.format(Locale.ROOT, "query_%03d", query.index()));
             TRBSVUExperiment2Runner runner = new TRBSVUExperiment2Runner(settings, contextual,
-                    TRBSVUFormalProtocol.VALIDATION_ORIGINS, validationCheckpoint,
+                    TRBSVUFormalProtocol.VALIDATION_ORIGINS,
+                    TRBSVUExperiment2Runner.LAMBDA, w1Grid, validationCheckpoint,
                     new TRBSVUFinalCheckpoint(queryOutput.resolve("solve_checkpoints"),
                             queryOutput.resolve("oos_checkpoints"), queryHash, queryProtocol,
                             replication, "2"));
@@ -373,6 +381,23 @@ public final class TRBSVUExperiment2IdeMain {
         return result;
     }
 
+    static double[] parsePositiveGrid(String text) {
+        if (text == null || text.isBlank())
+            throw new IllegalArgumentException("Empty W1 radius grid.");
+        String[] tokens = text.split(",");
+        double[] grid = new double[tokens.length];
+        double previous = Double.NEGATIVE_INFINITY;
+        for (int i = 0; i < tokens.length; i++) {
+            double value = Double.parseDouble(tokens[i].trim());
+            if (!Double.isFinite(value) || value <= 0.0 || value <= previous)
+                throw new IllegalArgumentException(
+                        "W1 radii must be finite, positive, and strictly increasing: " + text);
+            grid[i] = value;
+            previous = value;
+        }
+        return grid;
+    }
+
     private static String sourceFingerprint(Path root) throws Exception {
         Path absolute = root.toAbsolutePath().normalize();
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -407,7 +432,7 @@ public final class TRBSVUExperiment2IdeMain {
 
     private record Config(Path input, Path experiment1Output, Path output, int parallelTasks,
                           int solverThreads, int limitSeconds, String replications,
-                          String phase, String methods, boolean dryRun) {
+                           String phase, String methods, String w1Grid, boolean dryRun) {
         static Config parse(String[] args) {
             Map<String, String> values = new LinkedHashMap<>();
             boolean dry = false;
@@ -419,7 +444,8 @@ public final class TRBSVUExperiment2IdeMain {
                 values.put(arg.substring(2, equals), arg.substring(equals + 1));
             }
             Set<String> known = Set.of("input", "experiment1-output", "output", "parallel",
-                    "solver-threads", "limit-seconds", "replications", "phase", "methods");
+                    "solver-threads", "limit-seconds", "replications", "phase", "methods",
+                    "w1-grid");
             if (!known.containsAll(values.keySet()))
                 throw new IllegalArgumentException("Unknown argument(s): " + values.keySet().stream()
                         .filter(key -> !known.contains(key)).toList());
@@ -437,7 +463,7 @@ public final class TRBSVUExperiment2IdeMain {
                     Path.of(values.getOrDefault("output", DEFAULT_OUTPUT.toString())),
                     parallel, threads, limit,
                     values.getOrDefault("replications", DEFAULT_REPLICATIONS), phase,
-                    values.get("methods"), dry);
+                    values.get("methods"), values.get("w1-grid"), dry);
         }
 
         private static int integer(Map<String, String> values, String key, int fallback) {

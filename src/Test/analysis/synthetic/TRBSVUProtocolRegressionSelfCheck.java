@@ -132,6 +132,15 @@ public final class TRBSVUProtocolRegressionSelfCheck {
                 "--phase=primary",
                 "--methods=RCSAA,C-W1",
                 "--dry-run"});
+        TRBSVUExperiment2IdeMain.main(new String[]{
+                "--input=" + input,
+                "--experiment1-output=" + output,
+                "--output=" + root.resolve("experiment2-w1-left-extension"),
+                "--replications=0",
+                "--phase=primary",
+                "--methods=C-W1",
+                "--w1-grid=0.001,0.0025",
+                "--dry-run"});
     }
 
     private static void writeCandidate(Path output, String method, ContextualChoice choice)
