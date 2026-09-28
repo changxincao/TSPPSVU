@@ -13,8 +13,21 @@ public final class TRBSVUProcurementGenerator {
     }
 
     public static ProcurementParams generate(int carrierCount, double[] typicalDemand, long seed) {
+        return generate(carrierCount, typicalDemand, seed, 0.1);
+    }
+
+    /**
+     * Diagnostic overload that changes only the carrier--lane local rate factor.
+     * A halfwidth of 0.1 exactly reproduces the formal baseline U(0.9,1.1).
+     */
+    public static ProcurementParams generate(int carrierCount, double[] typicalDemand, long seed,
+                                             double localRateHalfwidth) {
         if (carrierCount < 6 || typicalDemand == null || typicalDemand.length == 0) {
             throw new IllegalArgumentException("At least six carriers and one lane are required.");
+        }
+        if (!(localRateHalfwidth >= 0.0 && localRateHalfwidth < 1.0)
+                || !Double.isFinite(localRateHalfwidth)) {
+            throw new IllegalArgumentException("Local rate halfwidth must lie in [0,1). ");
         }
         int lanes = typicalDemand.length;
         for (double value : typicalDemand) {
@@ -24,7 +37,7 @@ public final class TRBSVUProcurementGenerator {
         }
         Random random = new Random(seed);
         boolean[][] eligible = randomEligibility(carrierCount, typicalDemand.length, random);
-        return buildMarket(typicalDemand, random, eligible);
+        return buildMarket(typicalDemand, random, eligible, localRateHalfwidth);
     }
 
     public static ProcurementParams generateWithHomeGroupCoverage(
@@ -49,7 +62,7 @@ public final class TRBSVUProcurementGenerator {
         boolean[][] eligible = homeGroupEligibility(
                 carrierCount, typicalDemand.length, laneGroup, groupCount,
                 homeCoverage, random);
-        return buildMarket(typicalDemand, random, eligible);
+        return buildMarket(typicalDemand, random, eligible, 0.1);
     }
 
     private static boolean[][] randomEligibility(int carrierCount, int lanes, Random random) {
@@ -141,7 +154,8 @@ public final class TRBSVUProcurementGenerator {
     }
 
     private static ProcurementParams buildMarket(
-            double[] typicalDemand, Random random, boolean[][] eligible) {
+            double[] typicalDemand, Random random, boolean[][] eligible,
+            double localRateHalfwidth) {
         int carrierCount = eligible.length;
         int lanes = typicalDemand.length;
         double[][] rates = new double[carrierCount][lanes];
@@ -160,7 +174,9 @@ public final class TRBSVUProcurementGenerator {
             Collections.shuffle(carriers, random);
             double rateSum = 0.0;
             for (int i : carriers) {
-                rates[i][j] = laneRate * carrierFactor[i] * uniform(random, 0.9, 1.1);
+                rates[i][j] = laneRate * carrierFactor[i]
+                        * uniform(random, 1.0 - localRateHalfwidth,
+                                1.0 + localRateHalfwidth);
                 capacities[i][j] = typicalDemand[j] * uniform(random, 0.3, 0.5);
                 rateSum += rates[i][j];
             }
