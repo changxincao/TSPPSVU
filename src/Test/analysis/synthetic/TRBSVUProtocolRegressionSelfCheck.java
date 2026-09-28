@@ -88,6 +88,8 @@ public final class TRBSVUProtocolRegressionSelfCheck {
             verifyBandwidthRefreshSummarySchema(root);
             verifyIdeAggregation(root);
             verifyFinalCheckpointInvalidation(root);
+            verifyCompletionMarker(root);
+            verifyNullableMomentDiagnostics();
         } finally {
             try (var paths = Files.walk(root)) {
                 for (Path path : paths.sorted(Comparator.reverseOrder()).toList())
@@ -207,6 +209,45 @@ public final class TRBSVUProtocolRegressionSelfCheck {
         current.save("RCSAA", 1.0, solution);
         require(current.load("RCSAA", 1.0).isPresent(),
                 "The current protocol could not replace a stale final checkpoint.");
+    }
+
+    private static void verifyCompletionMarker(Path root) throws Exception {
+        Path output = root.resolve("completion");
+        Path marker = output.resolve("complete.txt");
+        TRBSVUCompletionMarker.writeAtomically(marker, "protocol=test\n");
+        require(TRBSVUCompletionMarker.matches(marker, "protocol=test"),
+                "Atomic completion marker cannot be read back.");
+        require(!TRBSVUCompletionMarker.queryArtifactsComplete(output, List.of(0),
+                        "solve/result.csv"),
+                "A completion marker incorrectly hid a missing result artifact.");
+        Path result = output.resolve("queries/query_000/solve/result.csv");
+        Files.createDirectories(result.getParent());
+        Files.writeString(result, "header\nvalue\n", StandardCharsets.UTF_8);
+        require(TRBSVUCompletionMarker.queryArtifactsComplete(output, List.of(0),
+                        "solve/result.csv"),
+                "A present nonempty result artifact was not recognized.");
+        Path metadata = output.resolve("queries/query_000/query_metadata.txt");
+        Files.writeString(metadata, "completedMethods=C-Chi2;C-W1\nmissingMethods=\n",
+                StandardCharsets.UTF_8);
+        require(TRBSVUCompletionMarker.queryMethodsComplete(output, List.of(0),
+                        Set.of("C-Chi2", "C-W1")),
+                "Complete requested-method metadata was not recognized.");
+        Files.writeString(metadata, "completedMethods=C-Chi2\nmissingMethods=C-W1\n",
+                StandardCharsets.UTF_8);
+        require(!TRBSVUCompletionMarker.queryMethodsComplete(output, List.of(0),
+                        Set.of("C-Chi2", "C-W1")),
+                "Missing requested methods were incorrectly accepted as complete.");
+        TRBSVUCompletionMarker.invalidate(marker);
+        require(!Files.exists(marker), "Completion marker invalidation failed.");
+    }
+
+    private static void verifyNullableMomentDiagnostics() {
+        require(Double.isNaN(TRBSVUPcmSolver.nullableNumber(
+                        "{\"best_bound\": null}", "best_bound")),
+                "A missing MOSEK bound was not mapped to unavailable.");
+        require(Math.abs(TRBSVUPcmSolver.nullableNumber(
+                        "{\"best_bound\": 12.5}", "best_bound") - 12.5) < 1e-12,
+                "A finite MOSEK bound could not be parsed.");
     }
 
     private static void require(boolean condition, String message) {

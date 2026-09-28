@@ -234,8 +234,8 @@ public final class TRBSVUPcmSolver {
         Solution solution = new Solution(objective, y, seconds);
         solution.optimizerTimeSec = number(json, "solver_seconds");
         solution.solverStatus = status;
-        solution.bestBound = number(json, "best_bound");
-        solution.relativeGap = number(json, "relative_gap");
+        solution.bestBound = nullableNumber(json, "best_bound");
+        solution.relativeGap = nullableNumber(json, "relative_gap");
         solution.certifiedOptimal = bool(json, "certified_optimal");
         solution.modelVariableCount = (int) number(json, "scalar_variable_count");
         solution.modelConstraintCount = (int) number(json, "scalar_constraint_count");
@@ -248,6 +248,18 @@ public final class TRBSVUPcmSolver {
         while (start < json.length() && Character.isWhitespace(json.charAt(start))) start++;
         int end = start;
         while (end < json.length() && "0123456789+-.eE".indexOf(json.charAt(end)) >= 0) end++;
+        return Double.parseDouble(json.substring(start, end));
+    }
+
+    static double nullableNumber(String json, String key) {
+        int keyStart = json.indexOf("\"" + key + "\"");
+        if (keyStart < 0) return Double.NaN;
+        int start = json.indexOf(':', keyStart) + 1;
+        while (start < json.length() && Character.isWhitespace(json.charAt(start))) start++;
+        if (json.startsWith("null", start) || json.startsWith("NaN", start)) return Double.NaN;
+        int end = start;
+        while (end < json.length() && "0123456789+-.eE".indexOf(json.charAt(end)) >= 0) end++;
+        if (end == start) return Double.NaN;
         return Double.parseDouble(json.substring(start, end));
     }
 

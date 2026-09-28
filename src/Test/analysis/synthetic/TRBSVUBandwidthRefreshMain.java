@@ -67,12 +67,17 @@ public final class TRBSVUBandwidthRefreshMain {
                 selected.mean(), selected.sd(), order);
         boolean changed = strategyChanged(oldChoice, newChoice);
         Files.createDirectories(output);
+        Path complete = output.resolve("complete.txt");
+        TRBSVUCompletionMarker.invalidate(complete);
         writeSelection(output.resolve("selection.csv"), replication, method, oldChoice, newChoice,
                 changed, allScores);
         TRBSVUResultWriter.writeContextualChoice(output.resolve("context_candidate.csv"),
                 replication, newChoice);
         if (!changed) {
-            Files.writeString(output.resolve("complete.txt"), "changed=false\n", StandardCharsets.UTF_8);
+            if (!TRBSVUCompletionMarker.nonempty(output.resolve("selection.csv"))
+                    || !TRBSVUCompletionMarker.nonempty(output.resolve("context_candidate.csv")))
+                throw new IllegalStateException("Bandwidth refresh metadata is incomplete: " + output);
+            TRBSVUCompletionMarker.writeAtomically(complete, "changed=false\n");
             System.out.printf(Locale.ROOT, "UNCHANGED rep=%d method=%s B=%.17g%n",
                     replication, method, oldChoice.bandwidth());
             return;
@@ -86,6 +91,8 @@ public final class TRBSVUBandwidthRefreshMain {
                 }, TRBSVUFormalProtocol.VALIDATION_ORIGINS);
         List<TRBSVUExperiment1IdeMain.QueryInput> queries =
                 TRBSVUExperiment1IdeMain.loadQueries(input);
+        List<Integer> queryIndices = queries.stream().map(
+                TRBSVUExperiment1IdeMain.QueryInput::index).toList();
         TRBSVUSyntheticCase reference = TRBSVUSyntheticCaseIO.loadText(queries.get(0).file());
         TRBSVUExperiment1IdeMain.verifyFormalDimensions(reference);
         String protocol = sha256(("TRBSVU_BANDWIDTH_REFRESH_V1|method=" + method
@@ -122,9 +129,14 @@ public final class TRBSVUBandwidthRefreshMain {
             writeQuery(queryOutput, replication, instance, method, newChoice,
                     weightResult, solution, evaluation, query);
         }
-        Files.writeString(output.resolve("complete.txt"), "changed=true\noldB="
-                + oldChoice.bandwidth() + "\nnewB=" + newChoice.bandwidth() + "\n",
-                StandardCharsets.UTF_8);
+        TRBSVUCompletionMarker.requireQueryArtifacts(output, queryIndices,
+                "query_metadata.txt", "solve/final_solve.csv", "solve/final_weights.csv",
+                "oos/summary.csv", "oos/draws.csv");
+        if (!TRBSVUCompletionMarker.nonempty(output.resolve("selection.csv"))
+                || !TRBSVUCompletionMarker.nonempty(output.resolve("context_candidate.csv")))
+            throw new IllegalStateException("Bandwidth refresh metadata is incomplete: " + output);
+        TRBSVUCompletionMarker.writeAtomically(complete, "changed=true\noldB="
+                + oldChoice.bandwidth() + "\nnewB=" + newChoice.bandwidth() + "\n");
         System.out.printf(Locale.ROOT, "REFRESHED rep=%d method=%s oldB=%.17g newB=%.17g%n",
                 replication, method, oldChoice.bandwidth(), newChoice.bandwidth());
     }

@@ -79,12 +79,15 @@ public final class TRBSVURandomQueryExtensionSolveMain {
                 .getBytes(StandardCharsets.UTF_8));
         Files.createDirectories(output);
         Path complete = output.resolve("complete.txt");
-        if (Files.isRegularFile(complete)
-                && Files.readString(complete).contains("protocol=" + protocol)) {
+        List<Integer> queryIndices = queries.stream().map(QueryInput::index).toList();
+        if (TRBSVUCompletionMarker.matches(complete, "protocol=" + protocol)
+                && TRBSVUCompletionMarker.queryArtifactsComplete(output, queryIndices,
+                        "query_metadata.txt", "solve/final_solve.csv",
+                        "solve/final_weights.csv", "oos/summary.csv", "oos/draws.csv")) {
             System.out.println("Already complete with matching protocol: " + output);
             return;
         }
-        Files.deleteIfExists(complete);
+        TRBSVUCompletionMarker.invalidate(complete);
         if (choice != null) {
             Files.deleteIfExists(output.resolve("frozen_context_choice.csv"));
             TRBSVUResultWriter.writeContextualChoice(output.resolve("frozen_context_choice.csv"),
@@ -120,11 +123,14 @@ public final class TRBSVURandomQueryExtensionSolveMain {
             writeQuery(queryOutput, replication, instance, method, choice, validationCost,
                     weights, solution, evaluation, query);
         }
-        Files.writeString(complete, "protocol=" + protocol + "\nmethod=" + method
+        TRBSVUCompletionMarker.requireQueryArtifacts(output, queryIndices,
+                "query_metadata.txt", "solve/final_solve.csv",
+                "solve/final_weights.csv", "oos/summary.csv", "oos/draws.csv");
+        TRBSVUCompletionMarker.writeAtomically(complete, "protocol=" + protocol + "\nmethod=" + method
                 + "\nqueryCount=" + queries.size() + "\nqueryPoolSha256=" + poolHash
                 + "\nchoiceSha256=" + choiceHash + "\nsourceSha256=" + sourceHash
                 + "\nrfScriptSha256=" + rfScriptHash + "\nrfEnvironment=" + rfEnvironment
-                + "\n", StandardCharsets.UTF_8);
+                + "\n");
         System.out.printf(Locale.ROOT, "RANDOM_EXTENSION_COMPLETE rep=%d method=%s queries=%d%n",
                 replication, method, queries.size());
     }

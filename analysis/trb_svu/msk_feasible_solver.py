@@ -26,6 +26,35 @@ name = "Mosek"
 info = f"{name} {version} (feasible-incumbent preserving adapter)"
 
 
+def _bound_diagnostics(mosek_model, objective):
+    """Return a trustworthy MIP bound/gap without inventing a certificate."""
+    try:
+        bound_defined = int(mosek_model.getSolverIntInfo("mioObjBoundDefined")) > 0
+    except Exception:
+        bound_defined = False
+    if not bound_defined:
+        return np.nan, np.nan, False, False, True
+
+    try:
+        best_bound = float(mosek_model.getSolverDoubleInfo("mioObjBound"))
+    except Exception:
+        return np.nan, np.nan, False, False, True
+    if not np.isfinite(best_bound):
+        return np.nan, np.nan, False, False, True
+
+    tolerance = 1.0e-7 * max(1.0, abs(objective), abs(best_bound))
+    if best_bound > objective + tolerance:
+        warnings.warn(
+            "MOSEK reported a minimization lower bound above the incumbent; "
+            "the bound is retained for diagnosis but no relative gap is reported."
+        )
+        return best_bound, np.nan, True, False, False
+
+    denominator = max(1.0, abs(objective))
+    relative_gap = max(0.0, (objective - best_bound) / denominator)
+    return best_bound, relative_gap, True, True, True
+
+
 def solve(form, display=True, log=False, params=None):
     params = {} if params is None else params
     qmat = form.qmat if isinstance(form, (SOCProg, GCProg)) else []
@@ -128,7 +157,7 @@ def solve(form, display=True, log=False, params=None):
 
         solution = Solution("Mosek", float(x_sol @ form.obj), x_sol,
                             status, solve_time, y=dual)
-        solution.best_bound = float(mosek_model.getSolverDoubleInfo("mioObjBound"))
-        denominator = max(1.0, abs(solution.objval))
-        solution.relative_gap = max(0.0, (solution.objval - solution.best_bound) / denominator)
+        (solution.best_bound, solution.relative_gap, solution.bound_available,
+         solution.gap_available, solution.bound_consistent) = _bound_diagnostics(
+             mosek_model, solution.objval)
         return solution

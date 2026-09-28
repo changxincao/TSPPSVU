@@ -143,11 +143,16 @@ public final class TRBSVUExperiment1IdeMain {
                 + "|pythonEnvironment=" + pythonEnvironment)
                 .getBytes(StandardCharsets.UTF_8));
         Path complete = output.resolve("complete.txt");
-        if (Files.exists(complete) && Files.readString(complete).contains("protocol=" + protocol)) {
+        List<Integer> queryIndices = queries.stream().map(QueryInput::index).toList();
+        if (TRBSVUCompletionMarker.matches(complete, "protocol=" + protocol)
+                && TRBSVUCompletionMarker.queryArtifactsComplete(output, queryIndices,
+                        "query_metadata.txt", "validation/summary.csv", "validation/details.csv",
+                        "solve/final_solve.csv", "solve/final_weights.csv",
+                        "oos/summary.csv", "oos/draws.csv")) {
             System.out.println("Already complete with matching protocol: " + output);
             return;
         }
-        Files.deleteIfExists(complete);
+        TRBSVUCompletionMarker.invalidate(complete);
         Settings settings = new Settings(threads, limit, 1e-4,
                 RCSAASolverVariant.LBBD_PRIMAL_EXACT, false, true);
         TRBSVUForestWeights forest = new TRBSVUForestWeights(python.toString(), rfScript);
@@ -177,12 +182,15 @@ public final class TRBSVUExperiment1IdeMain {
                             + "\nquerySha256=" + queryHash + "\n",
                     StandardCharsets.UTF_8);
         }
-        Files.writeString(complete, "protocol=" + protocol + "\ninstance="
+        TRBSVUCompletionMarker.requireQueryArtifacts(output, queryIndices,
+                "query_metadata.txt", "validation/summary.csv", "validation/details.csv",
+                "solve/final_solve.csv", "solve/final_weights.csv",
+                "oos/summary.csv", "oos/draws.csv");
+        TRBSVUCompletionMarker.writeAtomically(complete, "protocol=" + protocol + "\ninstance="
                 + replicationInput.toAbsolutePath() + "\nqueryCount=" + queries.size()
                 + "\nmethod=" + method + "\nsourceSha256="
                 + sourceHash + "\nrfScriptSha256=" + rfScriptHash
-                + "\npythonEnvironment=" + pythonEnvironment + "\n",
-                StandardCharsets.UTF_8);
+                + "\npythonEnvironment=" + pythonEnvironment + "\n");
     }
 
     private static void writeResult(Path output, int replication, TRBSVUSyntheticCase instance,

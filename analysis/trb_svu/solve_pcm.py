@@ -154,14 +154,28 @@ def solve(root: Path) -> dict[str, object]:
     integrality_error = float(np.max(np.abs(y - np.rint(y))))
     if integrality_error > 1e-5:
         raise RuntimeError(f"PCM binary integrality error: {integrality_error}")
+    best_bound = float(getattr(model.solution, "best_bound", np.nan))
+    relative_gap = float(getattr(model.solution, "relative_gap", np.nan))
+    bound_available = bool(getattr(model.solution, "bound_available",
+                                   np.isfinite(best_bound)))
+    gap_available = bool(getattr(model.solution, "gap_available",
+                                 np.isfinite(relative_gap)))
+    bound_consistent = bool(getattr(model.solution, "bound_consistent", True))
+    certified_optimal = status == "Optimal" and bound_consistent
+    status_label = ("OPTIMAL_PCM_LIFTED_AFFINE_APPROXIMATION"
+                    if status == "Optimal"
+                    else "TIME_LIMIT_FEASIBLE_PCM_LIFTED_AFFINE_APPROXIMATION")
+    if not bound_consistent:
+        status_label += "_BOUND_INCONSISTENT"
     result = {
-        "status": ("OPTIMAL_PCM_LIFTED_AFFINE_APPROXIMATION"
-                   if status == "Optimal"
-                   else "TIME_LIMIT_FEASIBLE_PCM_LIFTED_AFFINE_APPROXIMATION"),
+        "status": status_label,
         "objective": float(model.get()),
-        "best_bound": float(model.solution.best_bound),
-        "relative_gap": float(model.solution.relative_gap),
-        "certified_optimal": status == "Optimal",
+        "best_bound": best_bound if np.isfinite(best_bound) else None,
+        "relative_gap": relative_gap if np.isfinite(relative_gap) else None,
+        "bound_available": bound_available,
+        "gap_available": gap_available,
+        "bound_consistent": bound_consistent,
+        "certified_optimal": certified_optimal,
         "solver_seconds": float(model.solution.time),
         "model_and_solve_seconds": model_and_solve_seconds,
         "selected": np.rint(y).astype(int).tolist(),

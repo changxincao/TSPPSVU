@@ -186,15 +186,20 @@ public final class TRBSVUExperiment2IdeMain {
                 + "|momentPythonEnvironment=" + momentPythonEnvironment)
                 .getBytes(StandardCharsets.UTF_8));
         Path complete = output.resolve("complete.txt");
-        if (Files.isRegularFile(complete)) {
-            String previous = Files.readString(complete);
-            if (previous.contains("protocol=" + protocol)
-                    && previous.contains("allRequestedMethodsCompleted=true")) {
-                System.out.println("Already complete with matching protocol: " + output);
-                return;
-            }
+        List<Integer> queryIndices = queries.stream().map(
+                TRBSVUExperiment1IdeMain.QueryInput::index).toList();
+        if (TRBSVUCompletionMarker.matches(complete, "protocol=" + protocol,
+                    "allRequestedMethodsCompleted=true")
+                && TRBSVUCompletionMarker.queryArtifactsComplete(output, queryIndices,
+                        "query_metadata.txt", "solve/experiment2_final_solves.csv",
+                        "solve/experiment2_final_weights.csv",
+                        "oos/experiment2_summary.csv", "oos/experiment2_draws.csv")
+                && TRBSVUCompletionMarker.queryMethodsComplete(output, queryIndices,
+                        requestedMethods)) {
+            System.out.println("Already complete with matching protocol: " + output);
+            return;
         }
-        Files.deleteIfExists(complete);
+        TRBSVUCompletionMarker.invalidate(complete);
         Settings settings = new Settings(threads, limit, 1e-4,
                 RCSAASolverVariant.LBBD_PRIMAL_EXACT, false, true, true);
         TRBSVUForestWeights forest = new TRBSVUForestWeights(python.toString(),
@@ -250,7 +255,14 @@ public final class TRBSVUExperiment2IdeMain {
                             + "\nmissingMethods=" + String.join(";", missingMethods) + "\n",
                     StandardCharsets.UTF_8);
         }
-        Files.writeString(complete, "protocol=" + protocol + "\nqueryCount=" + queries.size()
+        TRBSVUCompletionMarker.requireQueryArtifacts(output, queryIndices,
+                "query_metadata.txt", "solve/experiment2_final_solves.csv",
+                "solve/experiment2_final_weights.csv",
+                "oos/experiment2_summary.csv", "oos/experiment2_draws.csv");
+        if (incompleteQueries.isEmpty())
+            TRBSVUCompletionMarker.requireQueryMethods(output, queryIndices, requestedMethods);
+        TRBSVUCompletionMarker.writeAtomically(complete,
+                "protocol=" + protocol + "\nqueryCount=" + queries.size()
                 + "\nselectedContext=" + selected + "\nsourceSha256=" + sourceHash
                 + "\npcmScriptSha256=" + pcmScriptHash
                 + "\nmosekAdapterSha256=" + mosekAdapterHash
@@ -259,8 +271,7 @@ public final class TRBSVUExperiment2IdeMain {
                 + "\nrequestedMethods=" + String.join(";", requestedMethods)
                 + "\nrcsaaCompactFormulation=SWITCHED_COMPACT"
                 + "\nallRequestedMethodsCompleted=" + incompleteQueries.isEmpty()
-                + "\nincompleteQueries=" + String.join(",", incompleteQueries) + "\n",
-                StandardCharsets.UTF_8);
+                + "\nincompleteQueries=" + String.join(",", incompleteQueries) + "\n");
         if (!incompleteQueries.isEmpty() && phase == Phase.PRIMARY)
             throw new IllegalStateException("Primary robust phase is incomplete: "
                     + String.join(",", incompleteQueries));
