@@ -44,6 +44,7 @@ public final class TRBSVUDroMechanismProbe {
             new Cell("LOW_INDEPENDENT", Volatility.LOW, 0.0, 0.0, 0.1),
             new Cell("LOW_BASE_COMMON", Volatility.LOW, 0.1, 0.3, 0.1),
             new Cell("LOW_MODERATE_COMMON", Volatility.LOW, 0.3, 0.5, 0.1),
+            new Cell("LOW_STRONG_COMMON", Volatility.LOW, 0.5, 0.7, 0.1),
             new Cell("MEDIUM_INDEPENDENT", Volatility.MEDIUM, 0.0, 0.0, 0.1),
             new Cell("MEDIUM_BASE_COMMON", Volatility.MEDIUM, 0.1, 0.3, 0.1),
             new Cell("MEDIUM_MODERATE_COMMON", Volatility.MEDIUM, 0.3, 0.5, 0.1),
@@ -56,14 +57,16 @@ public final class TRBSVUDroMechanismProbe {
     private TRBSVUDroMechanismProbe() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1 || args.length > 4) {
+        if (args.length < 1 || args.length > 5) {
             throw new IllegalArgumentException(
-                    "Usage: <output-directory> [replications=1] [queries=3] [base-seed=20260915]");
+                    "Usage: <output-directory> [replications=1] [queries=3]"
+                            + " [base-seed=20260915] [cell-regex=.*]");
         }
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
         int replications = args.length > 1 ? Integer.parseInt(args[1]) : 1;
         int queryCount = args.length > 2 ? Integer.parseInt(args[2]) : 3;
         long baseSeed = args.length > 3 ? Long.parseLong(args[3]) : 20260915L;
+        String cellRegex = args.length > 4 ? args[4] : ".*";
         if (replications < 1 || queryCount < 1) {
             throw new IllegalArgumentException("Replication and query counts must be positive.");
         }
@@ -76,7 +79,8 @@ public final class TRBSVUDroMechanismProbe {
                 + "\tmean_lane_cv\ttotal_demand_cv\tmean_lane_correlation"
                 + "\tmean_delta_pct\tsd_delta_pct\tq95_delta_pct\tcvar_delta_pct"
                 + "\tselected_count_delta\tcommon_loading_lower\tcommon_loading_upper"
-                + "\tlocal_rate_halfwidth\tvolatility");
+                + "\tlocal_rate_halfwidth\tvolatility"
+                + "\tquery_market\tquery_trend\tquery_promotion\tquery_attention");
 
         int threads = Integer.getInteger("trb.probe.threads", 4);
         int limitSeconds = Integer.getInteger("trb.probe.limitSeconds", 3600);
@@ -89,6 +93,7 @@ public final class TRBSVUDroMechanismProbe {
                     random.nextLong(), random.nextLong(), random.nextLong(),
                     random.nextLong(), random.nextLong());
             for (Cell cell : CELLS) {
+                if (!cell.name().matches(cellRegex)) continue;
                 Parameters parameters = TRBSVUSyntheticDemandGenerator.sampleParameters(
                         J, H, seeds.demandParameters(), 10.0,
                         ContextStructure.DENSE_INDEPENDENT_UNIFORM_POSITIVE,
@@ -117,7 +122,7 @@ public final class TRBSVUDroMechanismProbe {
                     Oos csaaOos = TRBSVUSolveMethods.evaluate(market, csaa.y, conditional.oos);
                     append(rows, cell, replication, query, "CSAA-Tri", 0.0,
                             csaa, csaaOos, csaaOos, diagnostics, weighted,
-                            selectedCount(csaa.y));
+                            selectedCount(csaa.y), conditional.context.values());
                     checkpoint(output, rows);
                     for (double lambda : LAMBDAS) {
                         Solution robust = TRBSVUSolveMethods.solve(market, lanes, weighted,
@@ -126,7 +131,7 @@ public final class TRBSVUDroMechanismProbe {
                                 market, robust.y, conditional.oos);
                         append(rows, cell, replication, query, "C-Chi2", lambda,
                                 robust, robustOos, csaaOos, diagnostics, weighted,
-                                selectedCount(csaa.y));
+                                selectedCount(csaa.y), conditional.context.values());
                         checkpoint(output, rows);
                     }
                 }
@@ -137,14 +142,16 @@ public final class TRBSVUDroMechanismProbe {
     private static void append(List<String> rows, Cell cell, int replication, int query,
                                String method, double parameter, Solution solution, Oos oos,
                                Oos baseline, DemandDiagnostics diagnostics,
-                               List<Sample> weighted, int baselineSelectedCount) {
+                               List<Sample> weighted, int baselineSelectedCount,
+                               double[] queryContext) {
         rows.add(String.format(Locale.ROOT,
                 "%s\t%d\t%d\t%s\t%.10g\t%s\t%s\t%.10g\t%.6f\t%.10f\t%d\t%s"
                         + "\t%.10f\t%.10f\t%.10f\t%.10f\t%.10f\t%.10f"
                         + "\t%.10f\t%.10f\t%.10f\t%.10f"
                         + "\t%.10f\t%.10f\t%.10f"
                         + "\t%.10f\t%.10f\t%.10f\t%.10f\t%d"
-                        + "\t%.4f\t%.4f\t%.4f\t%s",
+                        + "\t%.4f\t%.4f\t%.4f\t%s"
+                        + "\t%.10f\t%.10f\t%.10f\t%.10f",
                 cell.name(), replication, query, method, parameter,
                 solution.solverStatus, solution.certifiedOptimal, solution.relativeGap,
                 solution.solveTimeSec, TRBSVUExperiment1Runner.ess(weighted),
@@ -157,7 +164,8 @@ public final class TRBSVUDroMechanismProbe {
                 delta(oos.q95(), baseline.q95()), delta(oos.cvar95(), baseline.cvar95()),
                 selectedCount(solution.y) - baselineSelectedCount,
                 cell.loadingLower(), cell.loadingUpper(), cell.localRateHalfwidth(),
-                cell.volatility()));
+                cell.volatility(), queryContext[0], queryContext[1],
+                queryContext[2], queryContext[3]));
     }
 
     private static double delta(double value, double baseline) {
