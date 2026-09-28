@@ -186,6 +186,7 @@ public final class TRBSVUExperiment2IdeMain {
                 + "|momentPythonEnvironment=" + momentPythonEnvironment)
                 .getBytes(StandardCharsets.UTF_8));
         Path complete = output.resolve("complete.txt");
+        Path incomplete = output.resolve("incomplete.txt");
         List<Integer> queryIndices = queries.stream().map(
                 TRBSVUExperiment1IdeMain.QueryInput::index).toList();
         if (TRBSVUCompletionMarker.matches(complete, "protocol=" + protocol,
@@ -200,6 +201,7 @@ public final class TRBSVUExperiment2IdeMain {
             return;
         }
         TRBSVUCompletionMarker.invalidate(complete);
+        TRBSVUCompletionMarker.invalidate(incomplete);
         Settings settings = new Settings(threads, limit, 1e-4,
                 RCSAASolverVariant.LBBD_PRIMAL_EXACT, false, true, true);
         TRBSVUForestWeights forest = new TRBSVUForestWeights(python.toString(),
@@ -261,8 +263,7 @@ public final class TRBSVUExperiment2IdeMain {
                 "oos/experiment2_summary.csv", "oos/experiment2_draws.csv");
         if (incompleteQueries.isEmpty())
             TRBSVUCompletionMarker.requireQueryMethods(output, queryIndices, requestedMethods);
-        TRBSVUCompletionMarker.writeAtomically(complete,
-                "protocol=" + protocol + "\nqueryCount=" + queries.size()
+        String completionReport = "protocol=" + protocol + "\nqueryCount=" + queries.size()
                 + "\nselectedContext=" + selected + "\nsourceSha256=" + sourceHash
                 + "\npcmScriptSha256=" + pcmScriptHash
                 + "\nmosekAdapterSha256=" + mosekAdapterHash
@@ -271,7 +272,11 @@ public final class TRBSVUExperiment2IdeMain {
                 + "\nrequestedMethods=" + String.join(";", requestedMethods)
                 + "\nrcsaaCompactFormulation=SWITCHED_COMPACT"
                 + "\nallRequestedMethodsCompleted=" + incompleteQueries.isEmpty()
-                + "\nincompleteQueries=" + String.join(",", incompleteQueries) + "\n");
+                + "\nincompleteQueries=" + String.join(",", incompleteQueries) + "\n";
+        if (incompleteQueries.isEmpty())
+            TRBSVUCompletionMarker.writeAtomically(complete, completionReport);
+        else
+            TRBSVUCompletionMarker.writeAtomically(incomplete, completionReport);
         if (!incompleteQueries.isEmpty() && phase == Phase.PRIMARY)
             throw new IllegalStateException("Primary robust phase is incomplete: "
                     + String.join(",", incompleteQueries));

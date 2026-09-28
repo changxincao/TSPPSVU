@@ -239,6 +239,10 @@ public final class TRBSVUProtocolRegressionSelfCheck {
                 "Missing requested methods were incorrectly accepted as complete.");
         TRBSVUCompletionMarker.invalidate(marker);
         require(!Files.exists(marker), "Completion marker invalidation failed.");
+        TRBSVUCompletionMarker.writeAtomically(output.resolve("incomplete.txt"),
+                "allRequestedMethodsCompleted=false\n");
+        require(!Files.exists(marker) && Files.isRegularFile(output.resolve("incomplete.txt")),
+                "An incomplete task was incorrectly represented by complete.txt.");
     }
 
     private static void verifyNullableMomentDiagnostics() {
