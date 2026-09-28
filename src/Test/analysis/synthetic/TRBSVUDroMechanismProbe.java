@@ -57,18 +57,25 @@ public final class TRBSVUDroMechanismProbe {
     private TRBSVUDroMechanismProbe() { }
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1 || args.length > 5) {
+        if (args.length < 1 || args.length > 7) {
             throw new IllegalArgumentException(
                     "Usage: <output-directory> [replications=1] [queries=3]"
-                            + " [base-seed=20260915] [cell-regex=.*]");
+                            + " [base-seed=20260915] [cell-regex=.*]"
+                            + " [oracle-samples=0] [oracle-only=false]");
         }
         Path output = Path.of(args[0]).toAbsolutePath().normalize();
         int replications = args.length > 1 ? Integer.parseInt(args[1]) : 1;
         int queryCount = args.length > 2 ? Integer.parseInt(args[2]) : 3;
         long baseSeed = args.length > 3 ? Long.parseLong(args[3]) : 20260915L;
         String cellRegex = args.length > 4 ? args[4] : ".*";
+        int oracleSamples = args.length > 5 ? Integer.parseInt(args[5]) : 0;
+        boolean oracleOnly = args.length > 6 && Boolean.parseBoolean(args[6]);
         if (replications < 1 || queryCount < 1) {
             throw new IllegalArgumentException("Replication and query counts must be positive.");
+        }
+        if (oracleSamples < 0 || (oracleOnly && oracleSamples == 0)) {
+            throw new IllegalArgumentException(
+                    "Oracle samples must be nonnegative and positive in oracle-only mode.");
         }
         Files.createDirectories(output);
         List<String> rows = new ArrayList<>();
@@ -102,7 +109,8 @@ public final class TRBSVUDroMechanismProbe {
                 MultiQueryReplication demand =
                         TRBSVUSyntheticDemandGenerator.generateMultiQueryWithLinearTrend(
                                 parameters, Distribution.NORMAL, cell.volatility(), queryCount,
-                                OOS, seeds.contexts(), seeds.historicalNoise(), seeds.oosNoise(),
+                                OOS + oracleSamples, seeds.contexts(), seeds.historicalNoise(),
+                                seeds.oosNoise(),
                                 ContextDistribution.UNIFORM);
                 ProcurementParams market = TRBSVUProcurementGenerator.generate(
                         I, parameters.linearTrendTypicalDemand(), seeds.procurement(),
@@ -110,20 +118,34 @@ public final class TRBSVUDroMechanismProbe {
                 List<String> lanes = laneNames();
                 for (int query = 0; query < queryCount; query++) {
                     var conditional = demand.queries.get(query);
+                    List<Sample> evaluation = conditional.oos.subList(0, OOS);
                     List<Sample> weighted = TRBSVUScenarioWeights.kernel(
                             demand.history, conditional.context, Kernel.TRIANGULAR, BANDWIDTH);
                     if (weighted.isEmpty()) {
                         throw new IllegalStateException("B=1 has no support for "
                                 + cell.name() + " query " + query);
                     }
-                    DemandDiagnostics diagnostics = diagnostics(conditional.oos);
+                    DemandDiagnostics diagnostics = diagnostics(evaluation);
                     Solution csaa = TRBSVUSolveMethods.solve(market, lanes, weighted,
                             conditional.context, Method.NOMINAL, 0.0, settings);
-                    Oos csaaOos = TRBSVUSolveMethods.evaluate(market, csaa.y, conditional.oos);
+                    Oos csaaOos = TRBSVUSolveMethods.evaluate(market, csaa.y, evaluation);
                     append(rows, cell, replication, query, "CSAA-Tri", 0.0,
                             csaa, csaaOos, csaaOos, diagnostics, weighted,
                             selectedCount(csaa.y), conditional.context.values());
                     checkpoint(output, rows);
+                    if (oracleSamples > 0) {
+                        List<Sample> oracleTraining = equalWeights(
+                                conditional.oos.subList(OOS, OOS + oracleSamples));
+                        Solution oracle = TRBSVUSolveMethods.solve(market, lanes, oracleTraining,
+                                conditional.context, Method.NOMINAL, 0.0, settings);
+                        Oos oracleOos = TRBSVUSolveMethods.evaluate(
+                                market, oracle.y, evaluation);
+                        append(rows, cell, replication, query, "ORACLE", oracleSamples,
+                                oracle, oracleOos, csaaOos, diagnostics, oracleTraining,
+                                selectedCount(csaa.y), conditional.context.values());
+                        checkpoint(output, rows);
+                    }
+                    if (oracleOnly) continue;
                     for (double lambda : LAMBDAS) {
                         Solution robust = TRBSVUSolveMethods.solve(market, lanes, weighted,
                                 conditional.context, Method.CHI_SQUARED, lambda, settings);
@@ -176,6 +198,15 @@ public final class TRBSVUDroMechanismProbe {
         int count = 0;
         for (double value : y) if (value > 0.5) count++;
         return count;
+    }
+
+    private static List<Sample> equalWeights(List<Sample> source) {
+        List<Sample> result = new ArrayList<>(source.size());
+        double probability = 1.0 / source.size();
+        for (Sample sample : source) {
+            result.add(new Sample(sample.id, sample.period, sample.theta.copy(), probability));
+        }
+        return result;
     }
 
     private static String selected(double[] y) {
