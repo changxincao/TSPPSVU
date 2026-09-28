@@ -76,9 +76,11 @@ public final class TRBSVUExperiment1IdeMain {
             if (failed > 0)
                 throw new IllegalStateException(failed + " Experiment 1 task(s) failed; inspect task.log files.");
         }
+        Set<Integer> replications = parseReplications(config.replications);
+        snapshotReplicationInputs(config.input, config.output, replications);
         if (config.methods.containsAll(CONTEXTUAL_METHODS)) {
             aggregateContextualChoices(config.input, config.output,
-                    parseReplications(config.replications));
+                    replications);
         } else {
             System.out.println("Replication-level C* not written because the requested methods do not "
                     + "contain all five contextual families.");
@@ -287,26 +289,40 @@ public final class TRBSVUExperiment1IdeMain {
             Path validation = replicationOutput.resolve("validation");
             TRBSVUResultWriter.writeContextualChoice(
                     validation.resolve("experiment1_selected_context.csv"), replication, chosen);
-            Path sourceInstance = input.resolve(name).resolve("instance").resolve("instance.tsv");
-            Path targetInstance = replicationOutput.resolve("instance").resolve("instance.tsv");
-            if (!Files.isRegularFile(sourceInstance))
-                throw new IllegalStateException("Missing frozen input during aggregation: " + sourceInstance);
-            Files.createDirectories(targetInstance.getParent());
-            if (Files.exists(targetInstance) && Files.mismatch(sourceInstance, targetInstance) != -1L)
-                throw new IllegalStateException("Output contains a different frozen instance: " + targetInstance);
-            if (!Files.exists(targetInstance))
-                Files.copy(sourceInstance, targetInstance, StandardCopyOption.COPY_ATTRIBUTES);
-            Path sourceQueries = input.resolve(name).resolve("queries").resolve("queries.tsv");
-            Path targetQueries = replicationOutput.resolve("queries.tsv");
-            if (!Files.isRegularFile(sourceQueries))
-                throw new IllegalStateException("Missing frozen query manifest: " + sourceQueries);
-            Files.copy(sourceQueries, targetQueries, StandardCopyOption.REPLACE_EXISTING,
-                    StandardCopyOption.COPY_ATTRIBUTES);
-            Files.writeString(replicationOutput.resolve("query_pool_sha256.txt"),
-                    queryPoolFingerprint(loadQueries(input.resolve(name))) + "\n",
-                    StandardCharsets.UTF_8);
+            snapshotReplicationInput(input, output, replication);
             System.out.println("Experiment 1 contextual C* aggregated for " + name + ": " + chosen);
         }
+    }
+
+    /** Preserves the frozen input provenance even when only a method subset is run. */
+    static void snapshotReplicationInputs(Path input, Path output, Set<Integer> replications)
+            throws Exception {
+        for (int replication : replications)
+            snapshotReplicationInput(input, output, replication);
+    }
+
+    private static void snapshotReplicationInput(Path input, Path output, int replication)
+            throws Exception {
+        String name = String.format(Locale.ROOT, "rep_%03d", replication);
+        Path replicationOutput = output.resolve(name);
+        Path sourceInstance = input.resolve(name).resolve("instance").resolve("instance.tsv");
+        Path targetInstance = replicationOutput.resolve("instance").resolve("instance.tsv");
+        if (!Files.isRegularFile(sourceInstance))
+            throw new IllegalStateException("Missing frozen input during snapshot: " + sourceInstance);
+        Files.createDirectories(targetInstance.getParent());
+        if (Files.exists(targetInstance) && Files.mismatch(sourceInstance, targetInstance) != -1L)
+            throw new IllegalStateException("Output contains a different frozen instance: " + targetInstance);
+        if (!Files.exists(targetInstance))
+            Files.copy(sourceInstance, targetInstance, StandardCopyOption.COPY_ATTRIBUTES);
+        Path sourceQueries = input.resolve(name).resolve("queries").resolve("queries.tsv");
+        Path targetQueries = replicationOutput.resolve("queries.tsv");
+        if (!Files.isRegularFile(sourceQueries))
+            throw new IllegalStateException("Missing frozen query manifest: " + sourceQueries);
+        Files.copy(sourceQueries, targetQueries, StandardCopyOption.REPLACE_EXISTING,
+                StandardCopyOption.COPY_ATTRIBUTES);
+        Files.writeString(replicationOutput.resolve("query_pool_sha256.txt"),
+                queryPoolFingerprint(loadQueries(input.resolve(name))) + "\n",
+                StandardCharsets.UTF_8);
     }
 
     private static double contextualTieParameter(ContextualChoice choice) {

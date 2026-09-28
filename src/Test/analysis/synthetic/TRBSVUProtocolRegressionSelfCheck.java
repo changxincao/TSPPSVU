@@ -180,6 +180,15 @@ public final class TRBSVUProtocolRegressionSelfCheck {
                 "--methods=C-W1",
                 "--w1-grid=0.0001,0.00025,0.0005",
                 "--dry-run"});
+        TRBSVUExperiment2IdeMain.main(new String[]{
+                "--input=" + input,
+                "--experiment1-output=" + output,
+                "--output=" + root.resolve("experiment2-chi2-grid"),
+                "--replications=0",
+                "--phase=primary",
+                "--methods=C-Chi2",
+                "--lambda-grid=0.25,0.5,1.0",
+                "--dry-run"});
     }
 
     private static void writeCandidate(Path output, String method, ContextualChoice choice)

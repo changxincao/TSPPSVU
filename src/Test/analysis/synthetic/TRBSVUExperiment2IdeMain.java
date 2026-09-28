@@ -67,10 +67,12 @@ public final class TRBSVUExperiment2IdeMain {
         Config config = Config.parse(args);
         List<Task> tasks = buildTasks(config);
         System.out.printf(Locale.ROOT,
-                "Experiment 2 plan: input=%s exp1=%s output=%s tasks=%d phase=%s methods=%s parallel=%d solverThreads=%d limitSec=%d w1Grid=%s%n",
+                "Experiment 2 plan: input=%s exp1=%s output=%s tasks=%d phase=%s methods=%s parallel=%d solverThreads=%d limitSec=%d lambdaGrid=%s w1Grid=%s%n",
                 config.input, config.experiment1Output, config.output, tasks.size(),
                 config.phase, config.methods, config.parallelTasks, config.solverThreads,
-                config.limitSeconds, config.w1Grid == null ? "default" : config.w1Grid);
+                config.limitSeconds,
+                config.lambdaGrid == null ? "default" : config.lambdaGrid,
+                config.w1Grid == null ? "default" : config.w1Grid);
         for (Task task : tasks) System.out.println("  " + task.label());
         if (config.dryRun) {
             System.out.println("Dry run only; no solver was started.");
@@ -125,6 +127,9 @@ public final class TRBSVUExperiment2IdeMain {
         command.add(task.method());
         if ("C-W1".equals(task.method()) && config.w1Grid != null)
             command.add(config.w1Grid);
+        else if (("RCSAA".equals(task.method()) || "C-Chi2".equals(task.method()))
+                && config.lambdaGrid != null)
+            command.add(config.lambdaGrid);
         Process process = new ProcessBuilder(command).redirectErrorStream(true)
                 .redirectOutput(ProcessBuilder.Redirect.appendTo(log.toFile())).start();
         int exit = process.waitFor();
@@ -136,7 +141,7 @@ public final class TRBSVUExperiment2IdeMain {
         if (args.length != 8 && args.length != 9)
             throw new IllegalArgumentException("Worker usage: <replicationInput> <selectedContext.csv> "
                     + "<output> <replication> <solverThreads> <limitSeconds> <phase> <method> "
-                    + "[w1RadiusCsv]");
+                    + "[methodSpecificGridCsv]");
         Path replicationInput = Path.of(args[0]);
         Path selectedFile = Path.of(args[1]);
         Path output = Path.of(args[2]);
@@ -148,9 +153,13 @@ public final class TRBSVUExperiment2IdeMain {
         if (!phase.methods.contains(requestedMethod))
             throw new IllegalArgumentException("Method " + requestedMethod
                     + " does not belong to phase " + phase);
-        if (args.length == 9 && !"C-W1".equals(requestedMethod))
-            throw new IllegalArgumentException("A W1 radius override is valid only for C-W1.");
-        double[] w1Grid = args.length == 9
+        if (args.length == 9 && !Set.of("RCSAA", "C-Chi2", "C-W1")
+                .contains(requestedMethod))
+            throw new IllegalArgumentException(
+                    "A grid override is valid only for RCSAA, C-Chi2 or C-W1.");
+        double[] lambdaGrid = args.length == 9 && !"C-W1".equals(requestedMethod)
+                ? parsePositiveGrid(args[8]) : TRBSVUExperiment2Runner.LAMBDA;
+        double[] w1Grid = args.length == 9 && "C-W1".equals(requestedMethod)
                 ? parsePositiveGrid(args[8]) : TRBSVUExperiment2Runner.W1_RADIUS;
         Set<String> requestedMethods = Set.of(requestedMethod);
         Files.createDirectories(output);
@@ -174,7 +183,7 @@ public final class TRBSVUExperiment2IdeMain {
         String protocol = sha256((TRBSVUFormalProtocol.EXPERIMENT12_VERSION
                 + "|experiment=2|phase=" + phase.directory + "|methods=" + requestedMethods
                 + "|queryPool=" + queryPoolHash + "|selected=" + selected
-                + "|lambda=" + Arrays.toString(TRBSVUExperiment2Runner.LAMBDA)
+                + "|lambda=" + Arrays.toString(lambdaGrid)
                 + "|w1=" + Arrays.toString(w1Grid)
                 + "|momentKappa=" + Arrays.toString(TRBSVUExperiment2Runner.MOMENT_KAPPA)
                 + "|momentValidationLimit="
@@ -226,7 +235,7 @@ public final class TRBSVUExperiment2IdeMain {
                     .resolve(String.format(Locale.ROOT, "query_%03d", query.index()));
             TRBSVUExperiment2Runner runner = new TRBSVUExperiment2Runner(settings, contextual,
                     TRBSVUFormalProtocol.VALIDATION_ORIGINS,
-                    TRBSVUExperiment2Runner.LAMBDA, w1Grid, validationCheckpoint,
+                    lambdaGrid, w1Grid, validationCheckpoint,
                     new TRBSVUFinalCheckpoint(queryOutput.resolve("solve_checkpoints"),
                             queryOutput.resolve("oos_checkpoints"), queryHash, queryProtocol,
                             replication, "2"));
@@ -480,7 +489,8 @@ public final class TRBSVUExperiment2IdeMain {
 
     private record Config(Path input, Path experiment1Output, Path output, int parallelTasks,
                           int solverThreads, int limitSeconds, String replications,
-                           String phase, String methods, String w1Grid, boolean dryRun) {
+                           String phase, String methods, String lambdaGrid,
+                           String w1Grid, boolean dryRun) {
         static Config parse(String[] args) {
             Map<String, String> values = new LinkedHashMap<>();
             boolean dry = false;
@@ -493,7 +503,7 @@ public final class TRBSVUExperiment2IdeMain {
             }
             Set<String> known = Set.of("input", "experiment1-output", "output", "parallel",
                     "solver-threads", "limit-seconds", "replications", "phase", "methods",
-                    "w1-grid");
+                    "lambda-grid", "w1-grid");
             if (!known.containsAll(values.keySet()))
                 throw new IllegalArgumentException("Unknown argument(s): " + values.keySet().stream()
                         .filter(key -> !known.contains(key)).toList());
@@ -511,7 +521,8 @@ public final class TRBSVUExperiment2IdeMain {
                     Path.of(values.getOrDefault("output", DEFAULT_OUTPUT.toString())),
                     parallel, threads, limit,
                     values.getOrDefault("replications", DEFAULT_REPLICATIONS), phase,
-                    values.get("methods"), values.get("w1-grid"), dry);
+                    values.get("methods"), values.get("lambda-grid"),
+                    values.get("w1-grid"), dry);
         }
 
         private static int integer(Map<String, String> values, String key, int fallback) {
