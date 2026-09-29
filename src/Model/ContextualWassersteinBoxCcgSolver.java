@@ -27,6 +27,7 @@ public final class ContextualWassersteinBoxCcgSolver {
         double bestUpper = Double.POSITIVE_INFINITY;
         double[] bestY = null;
         double bestEta = Double.NaN;
+        WorstDemandSnapshot bestWorstDemand = null;
         MasterResult master = null;
         int oracleSolves = 0;
         int generatedCuts = 0;
@@ -71,6 +72,7 @@ public final class ContextualWassersteinBoxCcgSolver {
             int positiveTotal = positiveSampleCount(input);
             long oracleStart = System.nanoTime();
             boolean completedOraclePass = true;
+            WorstDemandAccumulator worstDemand = new WorstDemandAccumulator(input);
 
             for (int s = 0; s < input.sampleCount(); s++) {
                 if (input.probability[s] == 0.0) continue;
@@ -95,6 +97,7 @@ public final class ContextualWassersteinBoxCcgSolver {
                 oracleSolves++;
                 optimizerTimeSec += oracle.optimizerTimeSec();
                 exact += input.probability[s] * oracle.value();
+                worstDemand.add(s, oracle.worstDemand());
                 double violationTolerance = tolerance * Math.max(1.0, Math.abs(oracle.value()));
                 if (oracle.value() > master.t[s] + violationTolerance) {
                     if (contains(points.get(s), oracle.worstDemand())) {
@@ -120,6 +123,7 @@ public final class ContextualWassersteinBoxCcgSolver {
                 bestUpper = exact;
                 bestY = master.y.clone();
                 bestEta = master.eta;
+                bestWorstDemand = worstDemand.snapshot();
                 System.out.printf(java.util.Locale.ROOT,
                         "W1-CCG incumbentUpdate iter=%d UB=%.6f eta=%.6f y=%s%n",
                         iterations, bestUpper, bestEta, java.util.Arrays.toString(bestY));
@@ -137,7 +141,7 @@ public final class ContextualWassersteinBoxCcgSolver {
             }
         }
 
-        if (master == null || bestY == null) {
+        if (master == null || bestY == null || bestWorstDemand == null) {
             throw new IllegalStateException("Wasserstein CCG did not produce an incumbent.");
         }
         double relativeGap = Math.max(0.0, bestUpper - master.objective)
@@ -157,16 +161,34 @@ public final class ContextualWassersteinBoxCcgSolver {
         solution.wassersteinInitialPointCount = initialPointCount;
         solution.wassersteinGeneratedCutCount = generatedCuts;
         solution.wassersteinTotalPointCount = totalPointCount;
+        solution.wassersteinBoxLower = input.lower.clone();
         solution.wassersteinBoxUpper = input.upper.clone();
         solution.wassersteinDistanceScale = input.scale.clone();
+        solution.wassersteinWorstMeanDistance = bestWorstDemand.meanDistance();
+        solution.wassersteinWorstMeanNominalDemand = bestWorstDemand.meanNominalDemand();
+        solution.wassersteinWorstMeanDemand = bestWorstDemand.meanWorstDemand();
+        solution.wassersteinWorstMeanNominalTotalDemand = bestWorstDemand.meanNominalTotalDemand();
+        solution.wassersteinWorstMeanTotalDemand = bestWorstDemand.meanWorstTotalDemand();
+        solution.wassersteinWorstMeanMovedLaneCount = bestWorstDemand.meanMovedLaneCount();
+        solution.wassersteinWorstMaxMovedLaneCount = bestWorstDemand.maxMovedLaneCount();
+        solution.wassersteinWorstLowerMoveProbability = bestWorstDemand.lowerMoveProbability();
+        solution.wassersteinWorstUpperMoveProbability = bestWorstDemand.upperMoveProbability();
         solution.certifiedOptimal = converged && relativeGap <= config.tol;
         solution.solverStatus = solution.certifiedOptimal ? "OPTIMAL_W1_CCG"
                 : timedOut ? "TIME_LIMIT_W1_CCG" : "ITERATION_LIMIT_W1_CCG";
         System.out.printf(java.util.Locale.ROOT,
-                "W1-CCG summary radius=%.17g eta=%.17g initialPoints=%d generatedCuts=%d totalPoints=%d oracleSolves=%d optimizerSec=%.6f boxUpper=%s distanceScale=%s%n",
+                "W1-CCG summary radius=%.17g eta=%.17g initialPoints=%d generatedCuts=%d totalPoints=%d oracleSolves=%d optimizerSec=%.6f boxLower=%s boxUpper=%s distanceScale=%s meanWorstDistance=%.17g meanNominalDemand=%s meanWorstDemand=%s meanMovedLanes=%.17g maxMovedLanes=%d meanNominalTotal=%.17g meanWorstTotal=%.17g lowerMoveProbability=%s upperMoveProbability=%s%n",
                 input.radius, bestEta, initialPointCount, generatedCuts, totalPointCount,
-                oracleSolves, optimizerTimeSec, java.util.Arrays.toString(input.upper),
-                java.util.Arrays.toString(input.scale));
+                oracleSolves, optimizerTimeSec, java.util.Arrays.toString(input.lower),
+                java.util.Arrays.toString(input.upper), java.util.Arrays.toString(input.scale),
+                bestWorstDemand.meanDistance(),
+                java.util.Arrays.toString(bestWorstDemand.meanNominalDemand()),
+                java.util.Arrays.toString(bestWorstDemand.meanWorstDemand()),
+                bestWorstDemand.meanMovedLaneCount(),
+                bestWorstDemand.maxMovedLaneCount(), bestWorstDemand.meanNominalTotalDemand(),
+                bestWorstDemand.meanWorstTotalDemand(),
+                java.util.Arrays.toString(bestWorstDemand.lowerMoveProbability()),
+                java.util.Arrays.toString(bestWorstDemand.upperMoveProbability()));
         return new Result(solution, bestEta, iterations, initialPointCount,
                 generatedCuts, totalPointCount, oracleSolves);
     }
@@ -176,6 +198,69 @@ public final class ContextualWassersteinBoxCcgSolver {
         for (double probability : input.probability) if (probability > 0.0) count++;
         return count;
     }
+
+    private static final class WorstDemandAccumulator {
+        private final WassersteinBoxInput input;
+        private final double[] lowerMoveProbability;
+        private final double[] upperMoveProbability;
+        private final double[] meanNominalDemand;
+        private final double[] meanWorstDemand;
+        private double meanDistance;
+        private double meanNominalTotalDemand;
+        private double meanWorstTotalDemand;
+        private double meanMovedLaneCount;
+        private int maxMovedLaneCount;
+
+        private WorstDemandAccumulator(WassersteinBoxInput input) {
+            this.input = input;
+            this.lowerMoveProbability = new double[input.params.J];
+            this.upperMoveProbability = new double[input.params.J];
+            this.meanNominalDemand = new double[input.params.J];
+            this.meanWorstDemand = new double[input.params.J];
+        }
+
+        private void add(int sample, double[] worst) {
+            double probability = input.probability[sample];
+            double[] nominal = input.demand[sample];
+            int moved = 0;
+            double nominalTotal = 0.0, worstTotal = 0.0;
+            for (int j = 0; j < input.params.J; j++) {
+                nominalTotal += nominal[j];
+                worstTotal += worst[j];
+                meanNominalDemand[j] += probability * nominal[j];
+                meanWorstDemand[j] += probability * worst[j];
+                double tolerance = 1e-8 * Math.max(1.0, input.upper[j]);
+                if (Math.abs(worst[j] - nominal[j]) <= tolerance) continue;
+                moved++;
+                if (Math.abs(worst[j] - input.lower[j]) <= tolerance)
+                    lowerMoveProbability[j] += probability;
+                else if (Math.abs(worst[j] - input.upper[j]) <= tolerance)
+                    upperMoveProbability[j] += probability;
+            }
+            meanDistance += probability * input.distance(sample, worst);
+            meanNominalTotalDemand += probability * nominalTotal;
+            meanWorstTotalDemand += probability * worstTotal;
+            meanMovedLaneCount += probability * moved;
+            maxMovedLaneCount = Math.max(maxMovedLaneCount, moved);
+        }
+
+        private WorstDemandSnapshot snapshot() {
+            return new WorstDemandSnapshot(meanDistance, meanNominalTotalDemand,
+                    meanWorstTotalDemand, meanMovedLaneCount, maxMovedLaneCount,
+                    meanNominalDemand.clone(), meanWorstDemand.clone(),
+                    lowerMoveProbability.clone(), upperMoveProbability.clone());
+        }
+    }
+
+    private record WorstDemandSnapshot(double meanDistance,
+                                       double meanNominalTotalDemand,
+                                       double meanWorstTotalDemand,
+                                       double meanMovedLaneCount,
+                                       int maxMovedLaneCount,
+                                       double[] meanNominalDemand,
+                                       double[] meanWorstDemand,
+                                       double[] lowerMoveProbability,
+                                       double[] upperMoveProbability) { }
 
     private static int selectedCount(double[] y) {
         int count = 0;

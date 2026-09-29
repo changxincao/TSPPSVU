@@ -100,15 +100,16 @@ public final class TRBSVUSolveMethods {
             }
             case WASSERSTEIN -> {
                 if (!(robustness >= 0.0)) throw new IllegalArgumentException("Negative W1 radius.");
-                double[] upper = wassersteinSupportUpper(weighted, params.J);
+                SupportBox support = wassersteinSupportBox(weighted, params.J);
                 double[] distanceScale = new double[params.J];
                 for (int j = 0; j < params.J; j++) {
                     // No arbitrary floor: a zero-max lane invalidates this training origin.
-                    if (!(upper[j] > 0.0)) throw new IllegalArgumentException("Zero training maximum at lane " + j);
-                    distanceScale[j] = params.J * upper[j];
+                    if (!(support.upper()[j] > 0.0))
+                        throw new IllegalArgumentException("Zero training maximum at lane " + j);
+                    distanceScale[j] = params.J * support.upper()[j];
                 }
                 WassersteinBoxInput input = WassersteinBoxInput.fromData(data,
-                        upper, distanceScale, robustness);
+                        support.lower(), support.upper(), distanceScale, robustness);
                 ContextualWassersteinBoxCcgSolver.Result result =
                         new ContextualWassersteinBoxCcgSolver().solve(input, config);
                 yield result.solution();
@@ -229,16 +230,27 @@ public final class TRBSVUSolveMethods {
         return config;
     }
 
-    private static double[] trainingMax(List<Sample> weighted, int lanes) {
-        double[] max = new double[lanes];
+    /** W1 support uses lane-wise minima/maxima over the complete training window. */
+    static SupportBox wassersteinSupportBox(List<Sample> weighted, int lanes) {
+        if (weighted == null || weighted.isEmpty())
+            throw new IllegalArgumentException("W1 support requires training samples.");
+        double[] lower = new double[lanes];
+        java.util.Arrays.fill(lower, Double.POSITIVE_INFINITY);
+        double[] upper = new double[lanes];
         for (Sample sample : weighted) {
-            for (int j = 0; j < lanes; j++) max[j] = Math.max(max[j], sample.demand()[j]);
+            double[] demand = sample.demand();
+            if (demand.length != lanes) throw new IllegalArgumentException("Demand dimension mismatch.");
+            for (int j = 0; j < lanes; j++) {
+                lower[j] = Math.min(lower[j], demand[j]);
+                upper[j] = Math.max(upper[j], demand[j]);
+            }
         }
-        return max;
+        return new SupportBox(lower, upper);
     }
 
-    /** W1 support is the smallest lane-wise box containing every training demand. */
     static double[] wassersteinSupportUpper(List<Sample> weighted, int lanes) {
-        return trainingMax(weighted, lanes);
+        return wassersteinSupportBox(weighted, lanes).upper();
     }
+
+    record SupportBox(double[] lower, double[] upper) { }
 }

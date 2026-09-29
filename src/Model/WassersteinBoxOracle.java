@@ -80,7 +80,7 @@ final class WassersteinBoxOracle {
 
             IloLinearNumExpr objective = cplex.linearNumExpr();
             for (int j = 0; j < J; j++) {
-                double movementLower = nominal[j];
+                double movementLower = nominal[j] - input.lower[j];
                 double movementUpper = input.upper[j] - nominal[j];
                 objective.addTerm(nominal[j], alpha[j]);
                 objective.addTerm(-movementLower, alphaWhenLower[j]);
@@ -127,8 +127,8 @@ final class WassersteinBoxOracle {
             double etaCoefficient = 0.0;
             for (int j = 0; j < J; j++) {
                 if (cplex.getValue(moveLower[j]) > 0.5) {
-                    worstDemand[j] = 0.0;
-                    etaCoefficient -= nominal[j] / input.scale[j];
+                    worstDemand[j] = input.lower[j];
+                    etaCoefficient -= (nominal[j] - input.lower[j]) / input.scale[j];
                 } else if (cplex.getValue(moveUpper[j]) > 0.5) {
                     worstDemand[j] = input.upper[j];
                     etaCoefficient -= (input.upper[j] - nominal[j]) / input.scale[j];

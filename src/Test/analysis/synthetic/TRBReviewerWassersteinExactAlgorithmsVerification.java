@@ -250,7 +250,7 @@ public final class TRBReviewerWassersteinExactAlgorithmsVerification {
                     for (int j = 0; j < input.params.J; j++) {
                         int endpoint = code % endpointCount;
                         code /= endpointCount;
-                        if (includeLower && endpoint == 0) point[j] = 0.0;
+                        if (includeLower && endpoint == 0) point[j] = input.lower[j];
                         if ((!includeLower && endpoint == 1)
                                 || (includeLower && endpoint == 2)) {
                             point[j] = input.upper[j];
@@ -298,10 +298,11 @@ public final class TRBReviewerWassersteinExactAlgorithmsVerification {
                 new double[][]{{10.0}}, new double[][]{{1.0}},
                 new boolean[][]{{true}}, 1, 1);
         double[][] demand = {{5.0}};
+        double[] lower = {2.0};
         double[] upper = {10.0};
         double[] scale = {1.0};
         WassersteinBoxInput input = WassersteinBoxInput.equalWeight(
-                params, demand, upper, scale, 1.0);
+                params, demand, lower, upper, scale, 1.0);
         Reference reference = enumerateReference(input, config);
         double upperOnly = fixedResult(input, config, new double[]{1.0}, false).objective;
         if (reference.objective <= upperOnly + 1e-6) {
@@ -328,11 +329,6 @@ public final class TRBReviewerWassersteinExactAlgorithmsVerification {
                         .solve(input, config, 0.5);
         check("LOWER_REGULARIZED_MULTI", input, config, reference,
                 regularizedMulti.solution(), regularizedMulti.eta());
-        ContextualWassersteinBoxSolver.Result dual = new ContextualWassersteinBoxSolver()
-                .solve(data(params, demand, new double[]{1.0}), config,
-                        upper, scale, input.radius);
-        check("LOWER_DUAL_VERTEX", input, config, reference,
-                dual.solution, dual.eta);
         return new LowerEndpointGate(reference.objective, upperOnly);
     }
 

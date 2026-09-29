@@ -69,6 +69,21 @@ public final class TRBSVURunnerSelfCheck {
         require(equal.size() == 100 && recent.size() == 30 && mean.size() == 1,
                 "Nominal scenario construction failed.");
         require(history.get(0).weight == original, "Shared history was mutated.");
+        List<Sample> supportProbe = TRBSVUScenarioWeights.copyWithWeights(
+                history.subList(0, 3), new double[]{1.0, 0.0, 0.0}, false);
+        TRBSVUSolveMethods.SupportBox support = TRBSVUSolveMethods.wassersteinSupportBox(
+                supportProbe, instance.params.J);
+        for (int j = 0; j < instance.params.J; j++) {
+            double expectedLower = Double.POSITIVE_INFINITY;
+            double expectedUpper = Double.NEGATIVE_INFINITY;
+            for (int s = 0; s < 3; s++) {
+                expectedLower = Math.min(expectedLower, history.get(s).demand()[j]);
+                expectedUpper = Math.max(expectedUpper, history.get(s).demand()[j]);
+            }
+            require(Math.abs(support.lower()[j] - expectedLower) < 1e-12
+                            && Math.abs(support.upper()[j] - expectedUpper) < 1e-12,
+                    "W1 support omitted a zero-weight training sample at lane " + j + ".");
+        }
         TRBSVUPcmSolver.Moments pcmOne = TRBSVUPcmSolver.moments(equal, instance.params.J, 1.0);
         TRBSVUPcmSolver.Moments pcmTwo = TRBSVUPcmSolver.moments(equal, instance.params.J, 2.0);
         require(Arrays.equals(pcmOne.mean(), pcmTwo.mean())

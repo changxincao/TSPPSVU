@@ -19,8 +19,18 @@ public  class Solution {
     public int wassersteinInitialPointCount;
     public int wassersteinGeneratedCutCount;
     public int wassersteinTotalPointCount;
+    public double[] wassersteinBoxLower;
     public double[] wassersteinBoxUpper;
     public double[] wassersteinDistanceScale;
+    public double wassersteinWorstMeanDistance;
+    public double[] wassersteinWorstMeanNominalDemand;
+    public double[] wassersteinWorstMeanDemand;
+    public double wassersteinWorstMeanNominalTotalDemand;
+    public double wassersteinWorstMeanTotalDemand;
+    public double wassersteinWorstMeanMovedLaneCount;
+    public int wassersteinWorstMaxMovedLaneCount;
+    public double[] wassersteinWorstLowerMoveProbability;
+    public double[] wassersteinWorstUpperMoveProbability;
     /** Scalar dimensions of the final deterministic reformulation, when exposed by the solver. */
     public int modelVariableCount;
     public int modelConstraintCount;
@@ -55,8 +65,18 @@ public  class Solution {
         this.wassersteinInitialPointCount = -1;
         this.wassersteinGeneratedCutCount = -1;
         this.wassersteinTotalPointCount = -1;
+        this.wassersteinBoxLower = null;
         this.wassersteinBoxUpper = null;
         this.wassersteinDistanceScale = null;
+        this.wassersteinWorstMeanDistance = Double.NaN;
+        this.wassersteinWorstMeanNominalDemand = null;
+        this.wassersteinWorstMeanDemand = null;
+        this.wassersteinWorstMeanNominalTotalDemand = Double.NaN;
+        this.wassersteinWorstMeanTotalDemand = Double.NaN;
+        this.wassersteinWorstMeanMovedLaneCount = Double.NaN;
+        this.wassersteinWorstMaxMovedLaneCount = -1;
+        this.wassersteinWorstLowerMoveProbability = null;
+        this.wassersteinWorstUpperMoveProbability = null;
         this.modelVariableCount = -1;
         this.modelConstraintCount = -1;
         this.modelConeCount = -1;

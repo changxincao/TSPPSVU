@@ -75,8 +75,26 @@ public final class TRBSVUFinalCheckpoint {
         solution.wassersteinInitialPointCount = integer(values, "wassersteinInitialPointCount");
         solution.wassersteinGeneratedCutCount = integer(values, "wassersteinGeneratedCutCount");
         solution.wassersteinTotalPointCount = integer(values, "wassersteinTotalPointCount");
+        solution.wassersteinBoxLower = decision(required(values, "wassersteinBoxLower"));
         solution.wassersteinBoxUpper = decision(required(values, "wassersteinBoxUpper"));
         solution.wassersteinDistanceScale = decision(required(values, "wassersteinDistanceScale"));
+        solution.wassersteinWorstMeanDistance = number(values, "wassersteinWorstMeanDistance");
+        solution.wassersteinWorstMeanNominalDemand = decision(required(values,
+                "wassersteinWorstMeanNominalDemand"));
+        solution.wassersteinWorstMeanDemand = decision(required(values,
+                "wassersteinWorstMeanDemand"));
+        solution.wassersteinWorstMeanNominalTotalDemand = number(values,
+                "wassersteinWorstMeanNominalTotalDemand");
+        solution.wassersteinWorstMeanTotalDemand = number(values,
+                "wassersteinWorstMeanTotalDemand");
+        solution.wassersteinWorstMeanMovedLaneCount = number(values,
+                "wassersteinWorstMeanMovedLaneCount");
+        solution.wassersteinWorstMaxMovedLaneCount = integer(values,
+                "wassersteinWorstMaxMovedLaneCount");
+        solution.wassersteinWorstLowerMoveProbability = decision(required(values,
+                "wassersteinWorstLowerMoveProbability"));
+        solution.wassersteinWorstUpperMoveProbability = decision(required(values,
+                "wassersteinWorstUpperMoveProbability"));
         solution.modelVariableCount = integer(values, "modelVariableCount");
         solution.modelConstraintCount = integer(values, "modelConstraintCount");
         solution.modelConeCount = integer(values, "modelConeCount");
@@ -112,8 +130,26 @@ public final class TRBSVUFinalCheckpoint {
                 write(out, "wassersteinInitialPointCount", solution.wassersteinInitialPointCount);
                 write(out, "wassersteinGeneratedCutCount", solution.wassersteinGeneratedCutCount);
                 write(out, "wassersteinTotalPointCount", solution.wassersteinTotalPointCount);
+                write(out, "wassersteinBoxLower", decision(solution.wassersteinBoxLower));
                 write(out, "wassersteinBoxUpper", decision(solution.wassersteinBoxUpper));
                 write(out, "wassersteinDistanceScale", decision(solution.wassersteinDistanceScale));
+                write(out, "wassersteinWorstMeanDistance", solution.wassersteinWorstMeanDistance);
+                write(out, "wassersteinWorstMeanNominalDemand",
+                        decision(solution.wassersteinWorstMeanNominalDemand));
+                write(out, "wassersteinWorstMeanDemand",
+                        decision(solution.wassersteinWorstMeanDemand));
+                write(out, "wassersteinWorstMeanNominalTotalDemand",
+                        solution.wassersteinWorstMeanNominalTotalDemand);
+                write(out, "wassersteinWorstMeanTotalDemand",
+                        solution.wassersteinWorstMeanTotalDemand);
+                write(out, "wassersteinWorstMeanMovedLaneCount",
+                        solution.wassersteinWorstMeanMovedLaneCount);
+                write(out, "wassersteinWorstMaxMovedLaneCount",
+                        solution.wassersteinWorstMaxMovedLaneCount);
+                write(out, "wassersteinWorstLowerMoveProbability",
+                        decision(solution.wassersteinWorstLowerMoveProbability));
+                write(out, "wassersteinWorstUpperMoveProbability",
+                        decision(solution.wassersteinWorstUpperMoveProbability));
                 write(out, "modelVariableCount", solution.modelVariableCount);
                 write(out, "modelConstraintCount", solution.modelConstraintCount);
                 write(out, "modelConeCount", solution.modelConeCount);

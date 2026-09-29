@@ -18,6 +18,7 @@ public final class WassersteinBoxInput {
     public final ProcurementParams params;
     public final double[][] demand;
     public final double[] probability;
+    public final double[] lower;
     public final double[] upper;
     public final double[] scale;
     public final double radius;
@@ -28,6 +29,17 @@ public final class WassersteinBoxInput {
                                double[] upper,
                                double[] scale,
                                double radius) {
+        this(params, demand, probability, new double[params == null ? 0 : params.J],
+                upper, scale, radius);
+    }
+
+    public WassersteinBoxInput(ProcurementParams params,
+                               double[][] demand,
+                               double[] probability,
+                               double[] lower,
+                               double[] upper,
+                               double[] scale,
+                               double radius) {
         if (params == null) throw new IllegalArgumentException("params required");
         if (demand == null || demand.length == 0) {
             throw new IllegalArgumentException("At least one demand sample is required.");
@@ -35,7 +47,8 @@ public final class WassersteinBoxInput {
         if (probability == null || probability.length != demand.length) {
             throw new IllegalArgumentException("Probability/sample count mismatch.");
         }
-        if (upper == null || upper.length != params.J
+        if (lower == null || lower.length != params.J
+                || upper == null || upper.length != params.J
                 || scale == null || scale.length != params.J) {
             throw new IllegalArgumentException("Box/scale dimension mismatch.");
         }
@@ -55,6 +68,7 @@ public final class WassersteinBoxInput {
         this.params = params;
         this.demand = new double[positiveCount][params.J];
         this.probability = new double[positiveCount];
+        this.lower = lower.clone();
         this.upper = upper.clone();
         this.scale = scale.clone();
         this.radius = radius;
@@ -70,12 +84,12 @@ public final class WassersteinBoxInput {
             probabilitySum += probability[s];
             for (int j = 0; j < params.J; j++) {
                 double value = demand[s][j];
-                if (!Double.isFinite(value) || value < -1e-9
+                if (!Double.isFinite(value) || value < this.lower[j] - 1e-9
                         || value > this.upper[j] + 1e-9) {
                     throw new IllegalArgumentException(
                             "Demand outside box at sample/lane " + s + "/" + j);
                 }
-                this.demand[retained][j] = Math.max(0.0, value);
+                this.demand[retained][j] = Math.max(this.lower[j], value);
             }
             retained++;
         }
@@ -87,7 +101,8 @@ public final class WassersteinBoxInput {
         }
 
         for (int j = 0; j < params.J; j++) {
-            if (!Double.isFinite(this.upper[j]) || this.upper[j] < 0.0
+            if (!Double.isFinite(this.lower[j]) || this.lower[j] < 0.0
+                    || !Double.isFinite(this.upper[j]) || this.upper[j] < this.lower[j]
                     || !Double.isFinite(this.scale[j]) || !(this.scale[j] > 0.0)) {
                 throw new IllegalArgumentException("Invalid upper/scale at lane " + j);
             }
@@ -95,6 +110,15 @@ public final class WassersteinBoxInput {
     }
 
     public static WassersteinBoxInput fromData(Data data,
+                                                double[] upper,
+                                                double[] scale,
+                                                double radius) {
+        if (data == null) throw new IllegalArgumentException("data required");
+        return fromData(data, new double[data.params.J], upper, scale, radius);
+    }
+
+    public static WassersteinBoxInput fromData(Data data,
+                                                double[] lower,
                                                 double[] upper,
                                                 double[] scale,
                                                 double radius) {
@@ -107,7 +131,7 @@ public final class WassersteinBoxInput {
             probability[s] = samples.get(s).weight;
         }
         return new WassersteinBoxInput(data.params, demand, probability,
-                upper, scale, radius);
+                lower, upper, scale, radius);
     }
 
     public static WassersteinBoxInput equalWeight(ProcurementParams params,
@@ -115,9 +139,19 @@ public final class WassersteinBoxInput {
                                                    double[] upper,
                                                    double[] scale,
                                                    double radius) {
+        return equalWeight(params, demand, new double[params.J], upper, scale, radius);
+    }
+
+    public static WassersteinBoxInput equalWeight(ProcurementParams params,
+                                                   double[][] demand,
+                                                   double[] lower,
+                                                   double[] upper,
+                                                   double[] scale,
+                                                   double radius) {
         double[] probability = new double[demand.length];
         for (int s = 0; s < probability.length; s++) probability[s] = 1.0;
-        return new WassersteinBoxInput(params, demand, probability, upper, scale, radius);
+        return new WassersteinBoxInput(params, demand, probability,
+                lower, upper, scale, radius);
     }
 
     public int sampleCount() {

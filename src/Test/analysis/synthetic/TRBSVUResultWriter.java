@@ -243,7 +243,12 @@ public final class TRBSVUResultWriter {
                     + "certified_optimal,proof_scope,nodes,iterations,cuts,"
                     + "candidates,selected_count,selected_total_capacity,selected_total_mqc,"
                     + "decision_vector,selected_carriers,w1_radius,w1_eta,w1_initial_points,"
-                    + "w1_generated_cuts,w1_total_points,w1_box_upper,w1_distance_scale,"
+                    + "w1_generated_cuts,w1_total_points,w1_box_lower,w1_box_upper,w1_distance_scale,"
+                    + "w1_worst_mean_distance,w1_worst_mean_nominal_demand,w1_worst_mean_demand,"
+                    + "w1_worst_mean_nominal_total_demand,"
+                    + "w1_worst_mean_total_demand,w1_worst_mean_moved_lane_count,"
+                    + "w1_worst_max_moved_lane_count,w1_worst_lower_move_probability,"
+                    + "w1_worst_upper_move_probability,"
                     + "model_variable_count,model_constraint_count,model_cone_count");
             out.newLine();
             for (var entry : decisions.entrySet()) {
@@ -253,7 +258,7 @@ public final class TRBSVUResultWriter {
                 out.write(String.format(Locale.ROOT,
                         "%d,%s,%s,%s,%.17g,%s,%.17g,%.17g,%.17g,%d,%d,%.17g,%.17g,%s,"
                                 + "%.17g,%s,%.17g,%s,%.9f,%s,%.9f,%s,%s,%s,%d,%d,%d,%d,%d,%.17g,%.17g,%s,%s,"
-                                + "%.17g,%.17g,%d,%d,%d,%s,%s,%d,%d,%d%n",
+                                + "%.17g,%.17g,%d,%d,%d,%s,%s,%s,%.17g,%s,%s,%.17g,%.17g,%.17g,%d,%s,%s,%d,%d,%d%n",
                         replication, experiment, method,
                         parameterTypes.getOrDefault(method, "NONE"),
                         selectedParameters.getOrDefault(method, Double.NaN),
@@ -279,8 +284,18 @@ public final class TRBSVUResultWriter {
                         solution.wassersteinInitialPointCount,
                         solution.wassersteinGeneratedCutCount,
                         solution.wassersteinTotalPointCount,
+                        csv(vector(solution.wassersteinBoxLower)),
                         csv(vector(solution.wassersteinBoxUpper)),
                         csv(vector(solution.wassersteinDistanceScale)),
+                        solution.wassersteinWorstMeanDistance,
+                        csv(vector(solution.wassersteinWorstMeanNominalDemand)),
+                        csv(vector(solution.wassersteinWorstMeanDemand)),
+                        solution.wassersteinWorstMeanNominalTotalDemand,
+                        solution.wassersteinWorstMeanTotalDemand,
+                        solution.wassersteinWorstMeanMovedLaneCount,
+                        solution.wassersteinWorstMaxMovedLaneCount,
+                        csv(vector(solution.wassersteinWorstLowerMoveProbability)),
+                        csv(vector(solution.wassersteinWorstUpperMoveProbability)),
                         solution.modelVariableCount, solution.modelConstraintCount,
                         solution.modelConeCount));
             }
