@@ -51,16 +51,38 @@ if (-not (Test-Path -LiteralPath (Join-Path $TaskRoot '.venv-rsome\Scripts\pytho
 Write-Status 'WAITING_FOR_EXPERIMENT1_REPAIR' @(
     'queuedPhases=other-contextual-variants,C-Chi2'
 )
+$repairRetries = 0
 while ($true) {
     if (Test-Path -LiteralPath $repairStatus -PathType Leaf) {
         $repairState = Get-Content -LiteralPath $repairStatus |
             Where-Object { $_ -like 'state=*' } | Select-Object -First 1
         if ($repairState -eq 'state=FINISHED') { break }
         if ($repairState -eq 'state=FAILED') {
-            Write-Status 'BLOCKED_BY_EXPERIMENT1_REPAIR_FAILURE' @(
+            $repairRetries++
+            if ($repairRetries -gt 5) {
+                Write-Status 'BLOCKED_BY_EXPERIMENT1_REPAIR_FAILURE' @(
+                    'queuedPhases=other-contextual-variants,C-Chi2'
+                    'repairRetriesExhausted=5'
+                )
+                exit 2
+            }
+            Write-Status 'RETRYING_EXPERIMENT1_REPAIR' @(
                 'queuedPhases=other-contextual-variants,C-Chi2'
+                "repairAttempt=$repairRetries"
+                'note=matching completed tasks are reused; only incomplete tasks solve again'
             )
-            exit 2
+            try {
+                & (Join-Path $TaskRoot 'scripts\run_main_screen_25_repair_only_remote.ps1') `
+                    -TaskRoot $TaskRoot -ExperimentRoot $ExperimentRoot
+            } catch {
+                Write-Status 'WAITING_TO_RETRY_EXPERIMENT1_REPAIR' @(
+                    'queuedPhases=other-contextual-variants,C-Chi2'
+                    "repairAttempt=$repairRetries"
+                    "lastError=$($_.Exception.Message)"
+                )
+                Start-Sleep -Seconds 30
+            }
+            continue
         }
     }
     Start-Sleep -Seconds 30
