@@ -129,13 +129,14 @@ do {
         Start-Sleep -Seconds 30
     }
 } while ($exitCode -ne 0 -and $chiAttempt -lt 6)
-if ($exitCode -ne 0) {
-    Write-Status 'FAILED_CHI_SQUARED' @(
+$chiIncomplete = $exitCode -ne 0
+if ($chiIncomplete) {
+    Write-Status 'CHI_SQUARED_INCOMPLETE_CONTINUING' @(
         "exitCode=$exitCode"
         "attempts=$chiAttempt"
-        'note=incomplete replications remain after six repair attempts'
+        'next=other-contextual-variants'
+        'note=incomplete replications remain recorded after six repair attempts; downstream methods will still run'
     )
-    exit $exitCode
 }
 
 $contextAttempt = 0
@@ -166,15 +167,24 @@ do {
         Start-Sleep -Seconds 30
     }
 } while ($exitCode -ne 0 -and $contextAttempt -lt 6)
-if ($exitCode -ne 0) {
-    Write-Status 'FAILED_CONTEXTUAL_VARIANTS' @(
+$contextIncomplete = $exitCode -ne 0
+if ($contextIncomplete) {
+    Write-Status 'CONTEXTUAL_VARIANTS_INCOMPLETE' @(
         "exitCode=$exitCode"
         "attempts=$contextAttempt"
-        'note=incomplete method/replication tasks remain after six repair attempts'
+        'note=incomplete method/replication tasks remain recorded after six repair attempts'
     )
-    exit $exitCode
 }
 
-Write-Status 'FINISHED' @(
-    'methods=CSAA-Exp,CSAA-Gau,CSAA-Epa,CSAA-Tri,RF-CSAA,C-Chi2'
-)
+if ($chiIncomplete -or $contextIncomplete) {
+    Write-Status 'FINISHED_WITH_INCOMPLETE_TASKS' @(
+        'methods=CSAA-Exp,CSAA-Gau,CSAA-Epa,CSAA-Tri,RF-CSAA,C-Chi2'
+        "chiSquaredComplete=$(-not $chiIncomplete)"
+        "contextualVariantsComplete=$(-not $contextIncomplete)"
+        'note=downstream queue was not blocked; incomplete tasks remain explicitly marked for later repair'
+    )
+} else {
+    Write-Status 'FINISHED' @(
+        'methods=CSAA-Exp,CSAA-Gau,CSAA-Epa,CSAA-Tri,RF-CSAA,C-Chi2'
+    )
+}

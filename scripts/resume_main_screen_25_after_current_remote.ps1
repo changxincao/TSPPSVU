@@ -53,10 +53,19 @@ Write-Status 'RUNNING_CHECKPOINT_AWARE_REPAIR' @(
 )
 & (Join-Path $TaskRoot 'scripts\run_main_screen_25_followup_after_repair_remote.ps1') `
     -TaskRoot $TaskRoot -ExperimentRoot $ExperimentRoot
-$exitCode = $LASTEXITCODE
-if ($null -eq $exitCode) { $exitCode = 0 }
-if ($exitCode -ne 0) {
-    Write-Status 'FAILED' @("exitCode=$exitCode")
-    exit $exitCode
+$finalFollowupState = if (Test-Path -LiteralPath $followupStatus -PathType Leaf) {
+    Get-Content -LiteralPath $followupStatus |
+        Where-Object { $_ -like 'state=*' } | Select-Object -First 1
+} else {
+    'state=MISSING'
 }
-Write-Status 'FINISHED' @('note=checkpoint-aware repair and queued phases completed')
+if ($finalFollowupState -eq 'state=FINISHED') {
+    Write-Status 'FINISHED' @('note=checkpoint-aware repair and queued phases completed')
+} elseif ($finalFollowupState -eq 'state=FINISHED_WITH_INCOMPLETE_TASKS') {
+    Write-Status 'FINISHED_WITH_INCOMPLETE_TASKS' @(
+        'note=downstream phases ran; explicitly marked incomplete tasks remain for later repair'
+    )
+} else {
+    Write-Status 'FAILED' @("followupState=$finalFollowupState")
+    exit 1
+}
