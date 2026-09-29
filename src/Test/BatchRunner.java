@@ -1018,6 +1018,12 @@ public class BatchRunner {
 
             try (IloCplex cplex = new IloCplex()) {
                 cplex.setOut(null);
+                // OOS/validation recourse is a small continuous LP.  Keep it
+                // sequential so concurrent experiment workers do not each
+                // start an additional CPLEX thread team merely to evaluate a
+                // fixed first-stage decision.  The main MIP/oracle solvers
+                // retain their configured multi-thread setting.
+                cplex.setParam(IloCplex.Param.Threads, 1);
 
                 IloNumVar[][] x = new IloNumVar[I][J];
                 for (int i = 0; i < I; i++) {
