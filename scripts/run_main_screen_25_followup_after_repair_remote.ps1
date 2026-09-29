@@ -49,7 +49,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $TaskRoot '.venv-rsome\Scripts\pytho
 }
 
 Write-Status 'WAITING_FOR_EXPERIMENT1_REPAIR' @(
-    'queuedPhases=other-contextual-variants,C-Chi2'
+    'queuedPhases=C-Chi2,other-contextual-variants'
 )
 $repairRetries = 0
 while ($true) {
@@ -61,13 +61,13 @@ while ($true) {
             $repairRetries++
             if ($repairRetries -gt 5) {
                 Write-Status 'BLOCKED_BY_EXPERIMENT1_REPAIR_FAILURE' @(
-                    'queuedPhases=other-contextual-variants,C-Chi2'
+                    'queuedPhases=C-Chi2,other-contextual-variants'
                     'repairRetriesExhausted=5'
                 )
                 exit 2
             }
             Write-Status 'RETRYING_EXPERIMENT1_REPAIR' @(
-                'queuedPhases=other-contextual-variants,C-Chi2'
+                'queuedPhases=C-Chi2,other-contextual-variants'
                 "repairAttempt=$repairRetries"
                 'note=matching completed tasks are reused; only incomplete tasks solve again'
             )
@@ -76,7 +76,7 @@ while ($true) {
                     -TaskRoot $TaskRoot -ExperimentRoot $ExperimentRoot
             } catch {
                 Write-Status 'WAITING_TO_RETRY_EXPERIMENT1_REPAIR' @(
-                    'queuedPhases=other-contextual-variants,C-Chi2'
+                    'queuedPhases=C-Chi2,other-contextual-variants'
                     "repairAttempt=$repairRetries"
                     "lastError=$($_.Exception.Message)"
                 )
@@ -96,29 +96,6 @@ $env:Path = @(
 ) -join ';'
 Remove-Item Env:JAVA_TOOL_OPTIONS -ErrorAction SilentlyContinue
 Set-Location -LiteralPath $TaskRoot
-
-Write-Status 'RUNNING_OTHER_CONTEXTUAL_VARIANTS' @(
-    'methods=CSAA-Exp,CSAA-Gau,CSAA-Epa,CSAA-Tri,RF-CSAA'
-    'note=matching CSAA-Tri complete markers are reused'
-)
-$exitCode = Invoke-Java @(
-    'Test.analysis.synthetic.TRBSVUExperiment1IdeMain',
-    "--input=$inputRoot",
-    "--output=$experiment1Root",
-    '--parallel=4',
-    '--solver-threads=4',
-    '--limit-seconds=14400',
-    '--validation-origins=25',
-    '--replications=0-24',
-    '--methods=CSAA-Exp,CSAA-Gau,CSAA-Epa,CSAA-Tri,RF-CSAA'
-)
-if ($exitCode -ne 0) {
-    Write-Status 'BLOCKED_BY_CONTEXTUAL_VARIANT_FAILURE' @(
-        "exitCode=$exitCode"
-        'note=rerun this queue after repairing failed contextual tasks; valid complete markers are reused'
-    )
-    exit $exitCode
-}
 
 Write-Status 'RUNNING_CHI_SQUARED' @(
     'method=C-Chi2'
@@ -142,6 +119,29 @@ if ($exitCode -ne 0) {
     Write-Status 'FAILED_CHI_SQUARED' @(
         "exitCode=$exitCode"
         'note=valid checkpoints and complete markers are reused on retry'
+    )
+    exit $exitCode
+}
+
+Write-Status 'RUNNING_OTHER_CONTEXTUAL_VARIANTS' @(
+    'methods=CSAA-Exp,CSAA-Gau,CSAA-Epa,CSAA-Tri,RF-CSAA'
+    'note=matching CSAA-Tri complete markers are reused'
+)
+$exitCode = Invoke-Java @(
+    'Test.analysis.synthetic.TRBSVUExperiment1IdeMain',
+    "--input=$inputRoot",
+    "--output=$experiment1Root",
+    '--parallel=4',
+    '--solver-threads=4',
+    '--limit-seconds=14400',
+    '--validation-origins=25',
+    '--replications=0-24',
+    '--methods=CSAA-Exp,CSAA-Gau,CSAA-Epa,CSAA-Tri,RF-CSAA'
+)
+if ($exitCode -ne 0) {
+    Write-Status 'FAILED_CONTEXTUAL_VARIANTS' @(
+        "exitCode=$exitCode"
+        'note=valid complete markers are reused on retry'
     )
     exit $exitCode
 }
