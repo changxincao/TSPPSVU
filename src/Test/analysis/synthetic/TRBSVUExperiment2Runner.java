@@ -138,7 +138,9 @@ public final class TRBSVUExperiment2Runner {
                 System.out.println("Experiment 2 validated method=" + name + " parameter="
                         + parameter + " origins=" + validationOrigins + " cost=" + score.mean()
                         + " sd=" + score.sd());
-                boolean preferLargerOnTie = method == Method.WASSERSTEIN;
+                // On an exact validation tie, keep the least-robust candidate so that
+                // W1 reduces to the closest available approximation of contextual SAA.
+                boolean preferLargerOnTie = false;
                 if (better(score, parameter, bestCost, bestSd, bestParameter,
                         preferLargerOnTie)) {
                     bestCost = score.mean();
