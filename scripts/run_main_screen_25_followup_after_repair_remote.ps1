@@ -97,51 +97,80 @@ $env:Path = @(
 Remove-Item Env:JAVA_TOOL_OPTIONS -ErrorAction SilentlyContinue
 Set-Location -LiteralPath $TaskRoot
 
-Write-Status 'RUNNING_CHI_SQUARED' @(
-    'method=C-Chi2'
-    'contextBase=replication-specific validation-selected CSAA-Tri bandwidth'
-    'lambdaGrid=0.1,0.25,0.5,1,2'
-)
-$exitCode = Invoke-Java @(
-    'Test.analysis.synthetic.TRBSVUExperiment2IdeMain',
-    "--input=$inputRoot",
-    "--experiment1-output=$experiment1Root",
-    "--output=$experiment2Root",
-    '--parallel=2',
-    '--solver-threads=4',
-    '--limit-seconds=14400',
-    '--replications=0-24',
-    '--phase=primary',
-    '--methods=C-Chi2',
-    '--lambda-grid=0.1,0.25,0.5,1,2'
-)
+$chiAttempt = 0
+do {
+    $chiAttempt++
+    Write-Status 'RUNNING_CHI_SQUARED' @(
+        'method=C-Chi2'
+        'contextBase=replication-specific validation-selected CSAA-Tri bandwidth'
+        'lambdaGrid=0.1,0.25,0.5,1,2'
+        "attempt=$chiAttempt"
+        'note=matching completed replications are reused; only incomplete replications solve again'
+    )
+    $exitCode = Invoke-Java @(
+        'Test.analysis.synthetic.TRBSVUExperiment2IdeMain',
+        "--input=$inputRoot",
+        "--experiment1-output=$experiment1Root",
+        "--output=$experiment2Root",
+        '--parallel=2',
+        '--solver-threads=4',
+        '--limit-seconds=14400',
+        '--replications=0-24',
+        '--phase=primary',
+        '--methods=C-Chi2',
+        '--lambda-grid=0.1,0.25,0.5,1,2'
+    )
+    if ($exitCode -ne 0 -and $chiAttempt -lt 6) {
+        Write-Status 'RETRYING_CHI_SQUARED_FAILURES' @(
+            "exitCode=$exitCode"
+            "completedAttempts=$chiAttempt"
+            'note=valid checkpoints and complete markers are reused; only incomplete replications solve again'
+        )
+        Start-Sleep -Seconds 30
+    }
+} while ($exitCode -ne 0 -and $chiAttempt -lt 6)
 if ($exitCode -ne 0) {
     Write-Status 'FAILED_CHI_SQUARED' @(
         "exitCode=$exitCode"
-        'note=valid checkpoints and complete markers are reused on retry'
+        "attempts=$chiAttempt"
+        'note=incomplete replications remain after six repair attempts'
     )
     exit $exitCode
 }
 
-Write-Status 'RUNNING_OTHER_CONTEXTUAL_VARIANTS' @(
-    'methods=CSAA-Exp,CSAA-Gau,CSAA-Epa,CSAA-Tri,RF-CSAA'
-    'note=matching CSAA-Tri complete markers are reused'
-)
-$exitCode = Invoke-Java @(
-    'Test.analysis.synthetic.TRBSVUExperiment1IdeMain',
-    "--input=$inputRoot",
-    "--output=$experiment1Root",
-    '--parallel=2',
-    '--solver-threads=4',
-    '--limit-seconds=14400',
-    '--validation-origins=25',
-    '--replications=0-24',
-    '--methods=CSAA-Exp,CSAA-Gau,CSAA-Epa,CSAA-Tri,RF-CSAA'
-)
+$contextAttempt = 0
+do {
+    $contextAttempt++
+    Write-Status 'RUNNING_OTHER_CONTEXTUAL_VARIANTS' @(
+        'methods=CSAA-Exp,CSAA-Gau,CSAA-Epa,CSAA-Tri,RF-CSAA'
+        "attempt=$contextAttempt"
+        'note=matching complete markers are reused; only incomplete method/replication tasks solve again'
+    )
+    $exitCode = Invoke-Java @(
+        'Test.analysis.synthetic.TRBSVUExperiment1IdeMain',
+        "--input=$inputRoot",
+        "--output=$experiment1Root",
+        '--parallel=2',
+        '--solver-threads=4',
+        '--limit-seconds=14400',
+        '--validation-origins=25',
+        '--replications=0-24',
+        '--methods=CSAA-Exp,CSAA-Gau,CSAA-Epa,CSAA-Tri,RF-CSAA'
+    )
+    if ($exitCode -ne 0 -and $contextAttempt -lt 6) {
+        Write-Status 'RETRYING_CONTEXTUAL_VARIANT_FAILURES' @(
+            "exitCode=$exitCode"
+            "completedAttempts=$contextAttempt"
+            'note=valid complete markers are reused; only incomplete method/replication tasks solve again'
+        )
+        Start-Sleep -Seconds 30
+    }
+} while ($exitCode -ne 0 -and $contextAttempt -lt 6)
 if ($exitCode -ne 0) {
     Write-Status 'FAILED_CONTEXTUAL_VARIANTS' @(
         "exitCode=$exitCode"
-        'note=valid complete markers are reused on retry'
+        "attempts=$contextAttempt"
+        'note=incomplete method/replication tasks remain after six repair attempts'
     )
     exit $exitCode
 }
