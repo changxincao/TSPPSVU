@@ -45,8 +45,19 @@ public static class MediumModerateW1Launcher {
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CloseHandle(IntPtr handle);
 
-    public static int Start(string application, string arguments, string currentDirectory) {
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetProcessAffinityMask(IntPtr process, UIntPtr mask);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint ResumeThread(IntPtr thread);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool TerminateProcess(IntPtr process, uint exitCode);
+
+    public static int Start(string application, string arguments, string currentDirectory,
+            ulong affinityMask) {
         const uint CREATE_NEW_PROCESS_GROUP = 0x00000200;
+        const uint CREATE_SUSPENDED = 0x00000004;
         const uint CREATE_BREAKAWAY_FROM_JOB = 0x01000000;
         const uint CREATE_NO_WINDOW = 0x08000000;
         STARTUPINFO startup = new STARTUPINFO();
@@ -54,13 +65,26 @@ public static class MediumModerateW1Launcher {
         PROCESS_INFORMATION process;
         StringBuilder command = new StringBuilder("\"" + application + "\" " + arguments);
         bool ok = CreateProcessW(application, command, IntPtr.Zero, IntPtr.Zero, false,
-            CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW,
+            CREATE_NEW_PROCESS_GROUP | CREATE_SUSPENDED | CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW,
             IntPtr.Zero, currentDirectory, ref startup, out process);
         if (!ok) throw new Win32Exception(Marshal.GetLastWin32Error());
-        int pid = process.dwProcessId;
-        CloseHandle(process.hThread);
-        CloseHandle(process.hProcess);
-        return pid;
+        try {
+            if (!SetProcessAffinityMask(process.hProcess, new UIntPtr(affinityMask))) {
+                int error = Marshal.GetLastWin32Error();
+                TerminateProcess(process.hProcess, 1);
+                throw new Win32Exception(error, "Cannot set worker affinity");
+            }
+            uint resumed = ResumeThread(process.hThread);
+            if (resumed == 0xffffffff) {
+                int error = Marshal.GetLastWin32Error();
+                TerminateProcess(process.hProcess, 1);
+                throw new Win32Exception(error, "Cannot resume affinity-pinned worker");
+            }
+            return process.dwProcessId;
+        } finally {
+            CloseHandle(process.hThread);
+            CloseHandle(process.hProcess);
+        }
     }
 }
 '@
@@ -69,12 +93,44 @@ Add-Type -TypeDefinition $source -Language CSharp
 $taskRoot = 'D:\ccx\TSPP_SVU\staging\w1-positive-support-medium-20260929'
 $runner = Join-Path $taskRoot 'scripts\run_medium_moderate_w1_top_radii_remote.ps1'
 $powershell = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
-$arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$runner`""
-$pidStarted = [MediumModerateW1Launcher]::Start(
-    $powershell, $arguments, $taskRoot)
+$outputRoot = 'D:\ccx\TSPP_SVU\experiments\moderate_common_seed20261020_20260929\medium_w1_top_radii_positive_support_pcore_20260929'
+if (Test-Path -LiteralPath $outputRoot) {
+    throw "Refusing to reuse existing formal output directory: $outputRoot"
+}
+New-Item -ItemType Directory -Path $outputRoot | Out-Null
 
-$outputRoot = 'D:\ccx\TSPP_SVU\experiments\moderate_common_seed20261020_20260929\medium_w1_top_radii_positive_support_20260929'
-New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
-Set-Content -LiteralPath (Join-Path $outputRoot 'launcher_pid.txt') `
-    -Value $pidStarted -Encoding ASCII
-Write-Output "REMOTE_W1_STARTED launcherPid=$pidStarted"
+# One logical processor from each of the eight P cores. Each controller runs one
+# worker at a time; its Java/CPLEX child inherits the controller affinity.
+$groups = @(
+    @{ Name = 'A'; Replications = '0-2'; Mask = [uint64]0x0055 },
+    @{ Name = 'B'; Replications = '3-4'; Mask = [uint64]0x5500 }
+)
+$started = @()
+foreach ($group in $groups) {
+    $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$runner`" " +
+        "-Replications `"$($group.Replications)`" -Group `"$($group.Name)`" " +
+        "-OutputRoot `"$outputRoot`""
+    $pidStarted = [MediumModerateW1Launcher]::Start(
+        $powershell, $arguments, $taskRoot, $group.Mask)
+    $started += [pscustomobject]@{
+        group = $group.Name
+        replications = $group.Replications
+        affinityMask = ('0x{0:X}' -f $group.Mask)
+        pid = $pidStarted
+    }
+}
+
+$started | ConvertTo-Csv -NoTypeInformation |
+    Set-Content -LiteralPath (Join-Path $outputRoot 'launcher_processes.csv') -Encoding UTF8
+@(
+    'globalTaskParallel=2'
+    'tasksPerController=1'
+    'solverThreadsPerTask=4'
+    'affinityPolicy=disjoint_p_cores_one_logical_processor_per_core'
+    'cplexVersion=22.1.1'
+    'javaVersion=21'
+    'support=positive_weight_lane_min_max'
+    'w1Grid=0.00025,0.001,0.01'
+) | Set-Content -LiteralPath (Join-Path $outputRoot 'launch_manifest.txt') -Encoding UTF8
+$started | Format-Table -AutoSize
+Write-Output "REMOTE_W1_STARTED output=$outputRoot"
