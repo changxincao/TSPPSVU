@@ -6,7 +6,6 @@ import Test.analysis.synthetic.TRBSVUSyntheticDemandGenerator.Volatility;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.SplittableRandom;
 
 /** Generates and freezes the formal Experiment 1/2 baseline cases; never solves a model. */
 public final class TRBSVUGenerateBaselineCasesMain {
@@ -14,9 +13,9 @@ public final class TRBSVUGenerateBaselineCasesMain {
 
     public static void main(String[] args) throws Exception {
         if (args.length < 1 || args.length > 3)
-            throw new IllegalArgumentException("Usage: <outputDir> [baseSeed=20260915] [count=10]");
+            throw new IllegalArgumentException("Usage: <outputDir> [batchSeed=20260915] [count=10]");
         Path root = Path.of(args[0]);
-        long baseSeed = args.length > 1 ? Long.parseLong(args[1]) : 20260915L;
+        long batchSeed = args.length > 1 ? Long.parseLong(args[1]) : 20260915L;
         int count = args.length > 2 ? Integer.parseInt(args[2])
                 : TRBSVUFormalProtocol.BASELINE_REPLICATIONS;
         if (count < 1) throw new IllegalArgumentException("Replication count must be positive.");
@@ -26,10 +25,8 @@ public final class TRBSVUGenerateBaselineCasesMain {
             if (Files.exists(instanceDirectory))
                 throw new IllegalStateException("Refusing to overwrite existing case: " + instanceDirectory);
             Files.createDirectories(instanceDirectory);
-            SplittableRandom random = new SplittableRandom(baseSeed + index);
-            TRBSVUSyntheticCase.Seeds seeds = new TRBSVUSyntheticCase.Seeds(
-                    random.nextLong(), random.nextLong(), random.nextLong(),
-                    random.nextLong(), random.nextLong());
+            long caseSeed = TRBSVUFormalProtocol.caseSeed(batchSeed, index);
+            TRBSVUSyntheticCase.Seeds seeds = TRBSVUFormalProtocol.seeds(batchSeed, index);
             TRBSVUSyntheticCase.GeneratedQueries generated = TRBSVUSyntheticCase.generateFormalQueries(
                     TRBSVUFormalProtocol.CARRIERS, TRBSVUFormalProtocol.LANES,
                     TRBSVUFormalProtocol.HISTORY_PERIODS, TRBSVUFormalProtocol.OOS_DRAWS,
@@ -73,7 +70,9 @@ public final class TRBSVUGenerateBaselineCasesMain {
                             + TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS + "\n"
                             + "validationOrigins="
                             + TRBSVUFormalProtocol.VALIDATION_ORIGINS + "\n"
-                            + "baseSeed=" + baseSeed + "\nreplication=" + index + "\n"
+                            + "seedScheme=randomized-six-digit-v1\n"
+                            + "batchSeed=" + batchSeed + "\ncaseSeed=" + caseSeed
+                            + "\nreplication=" + index + "\n"
                             + "demandParameters=" + seeds.demandParameters() + "\n"
                             + "procurement=" + seeds.procurement() + "\n"
                             + "contexts=" + seeds.contexts() + "\n"

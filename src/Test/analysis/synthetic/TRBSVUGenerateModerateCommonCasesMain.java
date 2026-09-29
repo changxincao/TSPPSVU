@@ -37,25 +37,27 @@ public final class TRBSVUGenerateModerateCommonCasesMain {
     public static void main(String[] args) throws Exception {
         if (args.length < 2 || args.length > 4)
             throw new IllegalArgumentException(
-                    "Usage: <outputDir> <MEDIUM|HIGH> [baseSeed=20261020] [count=5]");
+                    "Usage: <outputDir> <MEDIUM|HIGH> [batchSeed=20261020] [count=5]");
         Path root = Path.of(args[0]).toAbsolutePath().normalize();
         Volatility volatility = Volatility.valueOf(args[1].toUpperCase(Locale.ROOT));
         if (volatility != Volatility.MEDIUM && volatility != Volatility.HIGH)
             throw new IllegalArgumentException("Only MEDIUM and HIGH are supported.");
-        long baseSeed = args.length >= 3 ? Long.parseLong(args[2]) : 20261020L;
+        long batchSeed = args.length >= 3 ? Long.parseLong(args[2]) : 20261020L;
         int count = args.length >= 4 ? Integer.parseInt(args[3]) : 5;
         if (count < 1) throw new IllegalArgumentException("Count must be positive.");
         Files.createDirectories(root);
 
         StringBuilder batch = new StringBuilder(
-                "replication\tbase_seed\tvolatility\tquery_count\tselection_upper\n");
+                "replication\tbatch_seed\tcase_seed\tvolatility\tquery_count\tselection_upper\n");
         for (int replication = 0; replication < count; replication++) {
             Path replicationRoot = root.resolve(String.format(Locale.ROOT,
                     "rep_%03d", replication));
             if (Files.exists(replicationRoot))
                 throw new IllegalStateException("Refusing to overwrite: " + replicationRoot);
-            generate(replicationRoot, volatility, baseSeed + replication, replication);
-            batch.append(replication).append('\t').append(baseSeed + replication).append('\t')
+            long caseSeed = TRBSVUFormalProtocol.caseSeed(batchSeed, replication);
+            generate(replicationRoot, volatility, batchSeed, caseSeed, replication);
+            batch.append(replication).append('\t').append(batchSeed).append('\t')
+                    .append(caseSeed).append('\t')
                     .append(volatility).append('\t').append(QUERIES).append('\t')
                     .append((int) Math.ceil(SELECTION_UPPER_FRACTION * I)).append('\n');
             System.out.println("Generated " + volatility + " rep_"
@@ -65,7 +67,7 @@ public final class TRBSVUGenerateModerateCommonCasesMain {
     }
 
     private static void generate(Path replicationRoot, Volatility volatility,
-                                 long caseSeed, int replication) throws Exception {
+                                 long batchSeed, long caseSeed, int replication) throws Exception {
         SplittableRandom random = new SplittableRandom(caseSeed);
         TRBSVUSyntheticCase.Seeds seeds = new TRBSVUSyntheticCase.Seeds(
                 random.nextLong(), random.nextLong(), random.nextLong(),
@@ -128,7 +130,9 @@ public final class TRBSVUGenerateModerateCommonCasesMain {
                         + "validationTrainingPeriods="
                         + TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS + "\n"
                         + "validationOrigins=" + TRBSVUFormalProtocol.VALIDATION_ORIGINS + "\n"
-                        + "caseSeed=" + caseSeed + "\nreplication=" + replication + "\n"
+                        + "seedScheme=randomized-six-digit-v1\n"
+                        + "batchSeed=" + batchSeed + "\ncaseSeed=" + caseSeed
+                        + "\nreplication=" + replication + "\n"
                         + "demandParameters=" + seeds.demandParameters() + "\n"
                         + "procurement=" + seeds.procurement() + "\ncontexts=" + seeds.contexts() + "\n"
                         + "historicalNoise=" + seeds.historicalNoise() + "\n"

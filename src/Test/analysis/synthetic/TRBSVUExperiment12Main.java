@@ -16,7 +16,6 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.SplittableRandom;
 import java.util.concurrent.TimeUnit;
 
 /** One executable for paired Experiment 1/2 nominal, RCSAA, chi-square, and W1 methods. */
@@ -53,10 +52,8 @@ public final class TRBSVUExperiment12Main {
                     RCSAASolverVariant.LBBD_PRIMAL_SEARCH, true, false)
                 : new Settings(threads, limitSeconds, 1e-4,
                     RCSAASolverVariant.LBBD_PRIMAL_EXACT, false, true, true);
-        SplittableRandom random = new SplittableRandom(baseSeed + index);
-        TRBSVUSyntheticCase.Seeds seeds = new TRBSVUSyntheticCase.Seeds(
-                random.nextLong(), random.nextLong(), random.nextLong(),
-                random.nextLong(), random.nextLong());
+        long caseSeed = TRBSVUFormalProtocol.caseSeed(baseSeed, index);
+        TRBSVUSyntheticCase.Seeds seeds = TRBSVUFormalProtocol.seeds(baseSeed, index);
         Path replication = outputDirectory.resolve(String.format("rep_%03d", index));
         Path formalQueryManifest = replication.resolve("queries").resolve("queries.tsv");
         if (Files.isRegularFile(formalQueryManifest))
@@ -126,7 +123,9 @@ public final class TRBSVUExperiment12Main {
                 + "\nOOS=" + TRBSVUFormalProtocol.OOS_DRAWS + "\n"
                 + "validationTrainingPeriods="
                 + TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS + "\n"
-                + "baseSeed=" + baseSeed + "\nreplication=" + index + "\n"
+                + "seedScheme=randomized-six-digit-v1\n"
+                + "batchSeed=" + baseSeed + "\ncaseSeed=" + caseSeed
+                + "\nreplication=" + index + "\n"
                 + "demandParameters=" + seeds.demandParameters() + "\n"
                 + "procurement=" + seeds.procurement() + "\n"
                 + "contexts=" + seeds.contexts() + "\n"
