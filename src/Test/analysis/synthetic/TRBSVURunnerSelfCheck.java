@@ -73,6 +73,7 @@ public final class TRBSVURunnerSelfCheck {
                 history.subList(0, 3), new double[]{1.0, 0.0, 0.0}, false);
         TRBSVUSolveMethods.SupportBox support = TRBSVUSolveMethods.wassersteinSupportBox(
                 supportProbe, instance.params.J);
+        boolean zeroWeightExpandedSupport = false;
         for (int j = 0; j < instance.params.J; j++) {
             double expectedLower = Double.POSITIVE_INFINITY;
             double expectedUpper = 0.0;
@@ -83,7 +84,11 @@ public final class TRBSVURunnerSelfCheck {
             require(Math.abs(support.lower()[j] - expectedLower) < 1e-12
                             && Math.abs(support.upper()[j] - expectedUpper) < 1e-12,
                     "W1 support did not use the full rolling training window at lane " + j + ".");
+            zeroWeightExpandedSupport |= expectedLower < history.get(0).demand()[j] - 1e-12
+                    || expectedUpper > history.get(0).demand()[j] + 1e-12;
         }
+        require(zeroWeightExpandedSupport,
+                "W1 support probe does not exercise a zero-weight endpoint.");
         TRBSVUPcmSolver.Moments pcmOne = TRBSVUPcmSolver.moments(equal, instance.params.J, 1.0);
         TRBSVUPcmSolver.Moments pcmTwo = TRBSVUPcmSolver.moments(equal, instance.params.J, 2.0);
         require(Arrays.equals(pcmOne.mean(), pcmTwo.mean())
