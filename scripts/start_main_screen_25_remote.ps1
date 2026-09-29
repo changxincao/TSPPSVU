@@ -3,6 +3,7 @@ param(
     [string]$TaskRoot,
     [Parameter(Mandatory = $true)]
     [string]$ExperimentRoot,
+    [string]$RunnerName = 'run_main_screen_25_remote.ps1',
     [switch]$Resume
 )
 
@@ -76,16 +77,25 @@ if ((Test-Path -LiteralPath $ExperimentRoot) -and -not $Resume) {
 }
 New-Item -ItemType Directory -Force -Path $ExperimentRoot | Out-Null
 Add-Type -TypeDefinition $source -Language CSharp
-$runner = Join-Path $TaskRoot 'scripts\run_main_screen_25_remote.ps1'
+$runner = Join-Path $TaskRoot (Join-Path 'scripts' $RunnerName)
+if (-not (Test-Path -LiteralPath $runner -PathType Leaf)) {
+    throw "Remote runner does not exist: $runner"
+}
 $powershell = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
 $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$runner`" " +
     "-TaskRoot `"$TaskRoot`" -ExperimentRoot `"$ExperimentRoot`""
 $pidStarted = [DetachedBatchLauncher]::Start(
     $powershell, $arguments, $TaskRoot)
+$launcherRecord = if ($RunnerName -eq 'run_main_screen_25_remote.ps1') {
+    'launcher_process.txt'
+} else {
+    ([System.IO.Path]::GetFileNameWithoutExtension($RunnerName) + '_launcher_process.txt')
+}
 @(
     "controllerPid=$pidStarted"
     "started=$([DateTime]::Now.ToString('o'))"
     "taskRoot=$TaskRoot"
     "experimentRoot=$ExperimentRoot"
-) | Set-Content -LiteralPath (Join-Path $ExperimentRoot 'launcher_process.txt') -Encoding UTF8
+    "runnerName=$RunnerName"
+) | Set-Content -LiteralPath (Join-Path $ExperimentRoot $launcherRecord) -Encoding UTF8
 Write-Output "REMOTE_MAIN_SCREEN_STARTED pid=$pidStarted output=$ExperimentRoot"
