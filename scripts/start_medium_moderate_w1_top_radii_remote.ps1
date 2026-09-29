@@ -129,7 +129,7 @@ $started | ConvertTo-Csv -NoTypeInformation |
     'affinityPolicy=disjoint_p_cores_one_logical_processor_per_core'
     'cplexVersion=22.1.1'
     'javaVersion=21'
-    'support=positive_weight_lane_min_max'
+    'support=full_training_lane_min_max'
     'w1Grid=0.00025,0.001,0.01'
 ) | Set-Content -LiteralPath (Join-Path $outputRoot 'launch_manifest.txt') -Encoding UTF8
 $started | Format-Table -AutoSize

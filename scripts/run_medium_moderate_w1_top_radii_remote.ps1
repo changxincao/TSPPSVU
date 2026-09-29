@@ -17,7 +17,7 @@ $statusFile = Join-Path $OutputRoot ("status_{0}.txt" -f $Group)
 $logFile = Join-Path $OutputRoot ("controller_{0}.log" -f $Group)
 
 New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
-"RUNNING group=$Group replications=$Replications started=$([DateTime]::Now.ToString('o')) radii=0.00025,0.001,0.01 support=positive_weight_lane_min_max taskParallel=1 solverThreads=4" |
+"RUNNING group=$Group replications=$Replications started=$([DateTime]::Now.ToString('o')) radii=0.00025,0.001,0.01 support=full_training_lane_min_max taskParallel=1 solverThreads=4" |
     Set-Content -LiteralPath $statusFile -Encoding UTF8
 
 $java = 'D:\Java\jdk-21\bin\java.exe'

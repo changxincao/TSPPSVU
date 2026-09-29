@@ -74,11 +74,15 @@ public final class TRBSVURunnerSelfCheck {
         TRBSVUSolveMethods.SupportBox support = TRBSVUSolveMethods.wassersteinSupportBox(
                 supportProbe, instance.params.J);
         for (int j = 0; j < instance.params.J; j++) {
-            double expectedLower = history.get(0).demand()[j];
-            double expectedUpper = history.get(0).demand()[j];
+            double expectedLower = Double.POSITIVE_INFINITY;
+            double expectedUpper = 0.0;
+            for (int s = 0; s < 3; s++) {
+                expectedLower = Math.min(expectedLower, history.get(s).demand()[j]);
+                expectedUpper = Math.max(expectedUpper, history.get(s).demand()[j]);
+            }
             require(Math.abs(support.lower()[j] - expectedLower) < 1e-12
                             && Math.abs(support.upper()[j] - expectedUpper) < 1e-12,
-                    "W1 support included a zero-weight training sample at lane " + j + ".");
+                    "W1 support did not use the full rolling training window at lane " + j + ".");
         }
         TRBSVUPcmSolver.Moments pcmOne = TRBSVUPcmSolver.moments(equal, instance.params.J, 1.0);
         TRBSVUPcmSolver.Moments pcmTwo = TRBSVUPcmSolver.moments(equal, instance.params.J, 2.0);
