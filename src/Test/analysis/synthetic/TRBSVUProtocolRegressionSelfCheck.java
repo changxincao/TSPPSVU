@@ -25,6 +25,10 @@ public final class TRBSVUProtocolRegressionSelfCheck {
         require(Arrays.equals(TRBSVUExperiment2Runner.LAMBDA,
                         new double[]{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10}),
                 "Experiment 2 lambda grid is not the locked 9-point tuning grid.");
+        require(Arrays.equals(TRBSVUExperiment2Runner.W1_RADIUS,
+                        new double[]{0.0001, 0.00025, 0.0005, 0.001, 0.0025,
+                                0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5}),
+                "Experiment 2 W1 grid is not the locked 12-point tuning grid.");
         require(TRBSVUFormalProtocol.CARRIERS == 15
                         && TRBSVUFormalProtocol.LANES == 50
                         && TRBSVUFormalProtocol.HISTORY_PERIODS == 75
