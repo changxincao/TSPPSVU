@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$TaskRoot,
     [Parameter(Mandatory = $true)]
-    [string]$ExperimentRoot
+    [string]$ExperimentRoot,
+    [switch]$Resume
 )
 
 $ErrorActionPreference = 'Stop'
@@ -70,10 +71,10 @@ public static class DetachedBatchLauncher {
 }
 '@
 
-if (Test-Path -LiteralPath $ExperimentRoot) {
+if ((Test-Path -LiteralPath $ExperimentRoot) -and -not $Resume) {
     throw "Refusing to reuse remote experiment directory: $ExperimentRoot"
 }
-New-Item -ItemType Directory -Path $ExperimentRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $ExperimentRoot | Out-Null
 Add-Type -TypeDefinition $source -Language CSharp
 $runner = Join-Path $TaskRoot 'scripts\run_main_screen_25_remote.ps1'
 $powershell = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
