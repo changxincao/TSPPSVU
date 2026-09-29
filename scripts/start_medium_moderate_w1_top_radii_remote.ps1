@@ -93,17 +93,17 @@ Add-Type -TypeDefinition $source -Language CSharp
 $taskRoot = 'D:\ccx\TSPP_SVU\staging\w1-positive-support-medium-20260929'
 $runner = Join-Path $taskRoot 'scripts\run_medium_moderate_w1_top_radii_remote.ps1'
 $powershell = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
-$outputRoot = 'D:\ccx\TSPP_SVU\experiments\moderate_common_seed20261020_20260929\medium_w1_top_radii_positive_support_pcore_20260929'
+$outputRoot = 'D:\ccx\TSPP_SVU\experiments\moderate_common_seed20261020_20260929\medium_w1_top_radii_positive_support_2thread_20260929'
 if (Test-Path -LiteralPath $outputRoot) {
     throw "Refusing to reuse existing formal output directory: $outputRoot"
 }
 New-Item -ItemType Directory -Path $outputRoot | Out-Null
 
-# One logical processor from each of the eight P cores. Each controller runs one
-# worker at a time; its Java/CPLEX child inherits the controller affinity.
+# One logical processor from each assigned P core. Each controller runs one
+# two-thread worker at a time; its Java/CPLEX child inherits the affinity.
 $groups = @(
-    @{ Name = 'A'; Replications = '0-2'; Mask = [uint64]0x0055 },
-    @{ Name = 'B'; Replications = '3-4'; Mask = [uint64]0x5500 }
+    @{ Name = 'A'; Replications = '0-2'; Mask = [uint64]0x0005 },
+    @{ Name = 'B'; Replications = '3-4'; Mask = [uint64]0x0500 }
 )
 $started = @()
 foreach ($group in $groups) {
@@ -125,7 +125,7 @@ $started | ConvertTo-Csv -NoTypeInformation |
 @(
     'globalTaskParallel=2'
     'tasksPerController=1'
-    'solverThreadsPerTask=4'
+    'solverThreadsPerTask=2'
     'affinityPolicy=disjoint_p_cores_one_logical_processor_per_core'
     'cplexVersion=22.1.1'
     'javaVersion=21'
