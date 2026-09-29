@@ -119,6 +119,15 @@ public final class TRBSVURunnerSelfCheck {
         Solution d = TRBSVUSolveMethods.solve(instance.params, instance.lanes, mean,
                 instance.testContext, Method.NOMINAL, 0.0, settings);
         require(d.y != null && d.y.length == instance.params.I, "Nominal solution missing.");
+        Solution w1SupportCheck = TRBSVUSolveMethods.solve(instance.params, instance.lanes,
+                supportProbe, instance.testContext, Method.WASSERSTEIN, 0.0, settings);
+        require(w1SupportCheck.wassersteinInitialPointCount == 1,
+                "W1 center did not remove zero-probability samples.");
+        for (int j = 0; j < instance.params.J; j++) {
+            require(Math.abs(w1SupportCheck.wassersteinBoxLower[j] - support.lower()[j]) < 1e-12
+                            && Math.abs(w1SupportCheck.wassersteinBoxUpper[j] - support.upper()[j]) < 1e-12,
+                    "W1 solve did not retain the full-window support at lane " + j + ".");
+        }
         double realized = TRBSVUSolveMethods.realizedCost(instance.params, d.y,
                 instance.oos.get(0).demand());
         require(Double.isFinite(realized), "Equality OOS evaluation failed.");

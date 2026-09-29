@@ -67,8 +67,7 @@ public final class TRBSVUSolveMethods {
         // The original Sample objects and weights belong to the case, not to any method.
         List<Sample> samples = TRBSVUScenarioWeights.copyWithWeights(weighted,
                 weighted.stream().mapToDouble(s -> s.weight).toArray(),
-                method == Method.CHI_SQUARED || method == Method.RCSAA
-                        || method == Method.WASSERSTEIN);
+                method == Method.CHI_SQUARED || method == Method.RCSAA);
         Data data = new Data(lanes, samples, query.copy(), params);
         Config config = config(settings);
         System.out.printf(Locale.ROOT,
