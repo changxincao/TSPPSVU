@@ -38,7 +38,7 @@ Set-Location -LiteralPath $TaskRoot
     "started=$([DateTime]::Now.ToString('o'))"
     'replications=0-24'
     'methods=SAA-All,CSAA-Tri'
-    'parallelTasks=4'
+    'parallelTasks=2'
     'solverThreads=4'
     'note=matching completed tasks are skipped; no other CSAA family or DRO is launched'
 ) | Set-Content -LiteralPath $statusFile -Encoding UTF8
@@ -48,7 +48,7 @@ try {
         Test.analysis.synthetic.TRBSVUExperiment1IdeMain `
         "--input=$inputRoot" `
         "--output=$experiment1Root" `
-        '--parallel=4' `
+        '--parallel=2' `
         '--solver-threads=4' `
         '--limit-seconds=14400' `
         '--validation-origins=25' `

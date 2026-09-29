@@ -4,6 +4,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ExperimentRoot,
     [string]$RunnerName = 'run_main_screen_25_remote.ps1',
+    [UInt64]$AffinityMask = 0,
     [switch]$Resume
 )
 
@@ -53,21 +54,50 @@ public static class DetachedBatchLauncher {
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CloseHandle(IntPtr handle);
 
-    public static int Start(string application, string arguments, string currentDirectory) {
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetProcessAffinityMask(IntPtr process, UIntPtr mask);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint ResumeThread(IntPtr thread);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool TerminateProcess(IntPtr process, uint exitCode);
+
+    public static int Start(string application, string arguments, string currentDirectory,
+            ulong affinityMask) {
         const uint CREATE_NEW_PROCESS_GROUP = 0x00000200;
+        const uint CREATE_SUSPENDED = 0x00000004;
         const uint CREATE_BREAKAWAY_FROM_JOB = 0x01000000;
         const uint CREATE_NO_WINDOW = 0x08000000;
         STARTUPINFO startup = new STARTUPINFO();
         startup.cb = Marshal.SizeOf(typeof(STARTUPINFO));
         PROCESS_INFORMATION process;
         StringBuilder command = new StringBuilder("\"" + application + "\" " + arguments);
+        uint flags = CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW;
+        if (affinityMask != 0) flags |= CREATE_SUSPENDED;
         bool ok = CreateProcessW(application, command, IntPtr.Zero, IntPtr.Zero, false,
-            CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW,
+            flags,
             IntPtr.Zero, currentDirectory, ref startup, out process);
         if (!ok) throw new Win32Exception(Marshal.GetLastWin32Error());
-        CloseHandle(process.hThread);
-        CloseHandle(process.hProcess);
-        return process.dwProcessId;
+        try {
+            if (affinityMask != 0) {
+                if (!SetProcessAffinityMask(process.hProcess, new UIntPtr(affinityMask))) {
+                    int error = Marshal.GetLastWin32Error();
+                    TerminateProcess(process.hProcess, 1);
+                    throw new Win32Exception(error, "Cannot set launcher affinity");
+                }
+                uint resumed = ResumeThread(process.hThread);
+                if (resumed == 0xffffffff) {
+                    int error = Marshal.GetLastWin32Error();
+                    TerminateProcess(process.hProcess, 1);
+                    throw new Win32Exception(error, "Cannot resume affinity-pinned launcher");
+                }
+            }
+            return process.dwProcessId;
+        } finally {
+            CloseHandle(process.hThread);
+            CloseHandle(process.hProcess);
+        }
     }
 }
 '@
@@ -85,7 +115,7 @@ $powershell = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
 $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$runner`" " +
     "-TaskRoot `"$TaskRoot`" -ExperimentRoot `"$ExperimentRoot`""
 $pidStarted = [DetachedBatchLauncher]::Start(
-    $powershell, $arguments, $TaskRoot)
+    $powershell, $arguments, $TaskRoot, $AffinityMask)
 $launcherRecord = if ($RunnerName -eq 'run_main_screen_25_remote.ps1') {
     'launcher_process.txt'
 } else {
@@ -97,5 +127,6 @@ $launcherRecord = if ($RunnerName -eq 'run_main_screen_25_remote.ps1') {
     "taskRoot=$TaskRoot"
     "experimentRoot=$ExperimentRoot"
     "runnerName=$RunnerName"
+    "affinityMask=0x$($AffinityMask.ToString('X'))"
 ) | Set-Content -LiteralPath (Join-Path $ExperimentRoot $launcherRecord) -Encoding UTF8
 Write-Output "REMOTE_MAIN_SCREEN_STARTED pid=$pidStarted output=$ExperimentRoot"

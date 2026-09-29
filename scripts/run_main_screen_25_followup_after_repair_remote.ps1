@@ -27,7 +27,7 @@ function Write-Status([string]$state, [string[]]$details) {
         "state=$state"
         "updated=$([DateTime]::Now.ToString('o'))"
         'dependency=experiment1_repair_status.txt:FINISHED'
-        'parallelTasks=4'
+        'parallelTasks=2'
         'solverThreads=4'
         $details
     ) | Set-Content -LiteralPath $statusFile -Encoding UTF8
@@ -107,7 +107,7 @@ $exitCode = Invoke-Java @(
     "--input=$inputRoot",
     "--experiment1-output=$experiment1Root",
     "--output=$experiment2Root",
-    '--parallel=4',
+    '--parallel=2',
     '--solver-threads=4',
     '--limit-seconds=14400',
     '--replications=0-24',
@@ -131,7 +131,7 @@ $exitCode = Invoke-Java @(
     'Test.analysis.synthetic.TRBSVUExperiment1IdeMain',
     "--input=$inputRoot",
     "--output=$experiment1Root",
-    '--parallel=4',
+    '--parallel=2',
     '--solver-threads=4',
     '--limit-seconds=14400',
     '--validation-origins=25',
