@@ -66,14 +66,14 @@ public static class MediumModerateW1Launcher {
 '@
 
 Add-Type -TypeDefinition $source -Language CSharp
-$taskRoot = 'D:\ccx\TSPP_SVU\staging\d8830e9-w1-medium-moderate-20260929'
+$taskRoot = 'D:\ccx\TSPP_SVU\staging\w1-positive-support-medium-20260929'
 $runner = Join-Path $taskRoot 'scripts\run_medium_moderate_w1_top_radii_remote.ps1'
 $powershell = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
 $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$runner`""
 $pidStarted = [MediumModerateW1Launcher]::Start(
     $powershell, $arguments, $taskRoot)
 
-$outputRoot = 'D:\ccx\TSPP_SVU\experiments\moderate_common_seed20261020_20260929\medium_w1_top_radii_d8830e9'
+$outputRoot = 'D:\ccx\TSPP_SVU\experiments\moderate_common_seed20261020_20260929\medium_w1_top_radii_positive_support_20260929'
 New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
 Set-Content -LiteralPath (Join-Path $outputRoot 'launcher_pid.txt') `
     -Value $pidStarted -Encoding ASCII

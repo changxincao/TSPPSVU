@@ -1,15 +1,15 @@
 $ErrorActionPreference = 'Stop'
 
-$taskRoot = 'D:\ccx\TSPP_SVU\staging\d8830e9-w1-medium-moderate-20260929'
+$taskRoot = 'D:\ccx\TSPP_SVU\staging\w1-positive-support-medium-20260929'
 $experimentRoot = 'D:\ccx\TSPP_SVU\experiments\moderate_common_seed20261020_20260929'
 $inputRoot = Join-Path $experimentRoot 'medium_input'
 $experiment1Root = Join-Path $experimentRoot 'medium_experiment1'
-$outputRoot = Join-Path $experimentRoot 'medium_w1_top_radii_d8830e9'
+$outputRoot = Join-Path $experimentRoot 'medium_w1_top_radii_positive_support_20260929'
 $statusFile = Join-Path $outputRoot 'status.txt'
 $logFile = Join-Path $outputRoot 'controller.log'
 
 New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
-"RUNNING started=$([DateTime]::Now.ToString('o')) radii=0.00025,0.001,0.01 support=empirical_lane_min_max parallel=1 solverThreads=4" |
+"RUNNING started=$([DateTime]::Now.ToString('o')) radii=0.00025,0.001,0.01 support=positive_weight_lane_min_max parallel=1 solverThreads=4" |
     Set-Content -LiteralPath $statusFile -Encoding UTF8
 
 $java = 'D:\Java\jdk-21\bin\java.exe'

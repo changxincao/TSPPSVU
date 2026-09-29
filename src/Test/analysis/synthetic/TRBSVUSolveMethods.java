@@ -100,7 +100,7 @@ public final class TRBSVUSolveMethods {
             }
             case WASSERSTEIN -> {
                 if (!(robustness >= 0.0)) throw new IllegalArgumentException("Negative W1 radius.");
-                SupportBox support = wassersteinSupportBox(weighted, params.J);
+                SupportBox support = wassersteinSupportBox(samples, params.J);
                 double[] distanceScale = new double[params.J];
                 for (int j = 0; j < params.J; j++) {
                     // No arbitrary floor: a zero-max lane invalidates this training origin.
@@ -230,14 +230,17 @@ public final class TRBSVUSolveMethods {
         return config;
     }
 
-    /** W1 support uses lane-wise minima/maxima over the complete training window. */
+    /** W1 support uses lane-wise minima/maxima over the positive-mass center samples. */
     static SupportBox wassersteinSupportBox(List<Sample> weighted, int lanes) {
         if (weighted == null || weighted.isEmpty())
             throw new IllegalArgumentException("W1 support requires training samples.");
         double[] lower = new double[lanes];
         java.util.Arrays.fill(lower, Double.POSITIVE_INFINITY);
         double[] upper = new double[lanes];
+        int positiveSamples = 0;
         for (Sample sample : weighted) {
+            if (!(sample.weight > 0.0)) continue;
+            positiveSamples++;
             double[] demand = sample.demand();
             if (demand.length != lanes) throw new IllegalArgumentException("Demand dimension mismatch.");
             for (int j = 0; j < lanes; j++) {
@@ -245,6 +248,8 @@ public final class TRBSVUSolveMethods {
                 upper[j] = Math.max(upper[j], demand[j]);
             }
         }
+        if (positiveSamples == 0)
+            throw new IllegalArgumentException("W1 support requires at least one positive-weight sample.");
         return new SupportBox(lower, upper);
     }
 
