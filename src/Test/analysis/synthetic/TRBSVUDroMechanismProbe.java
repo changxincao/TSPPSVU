@@ -87,10 +87,17 @@ public final class TRBSVUDroMechanismProbe {
                 + "\tmean_delta_pct\tsd_delta_pct\tq95_delta_pct\tcvar_delta_pct"
                 + "\tselected_count_delta\tcommon_loading_lower\tcommon_loading_upper"
                 + "\tlocal_rate_halfwidth\tvolatility"
-                + "\tquery_market\tquery_trend\tquery_promotion\tquery_attention");
+                + "\tquery_market\tquery_trend\tquery_promotion\tquery_attention"
+                + "\tselection_upper_fraction\tselection_upper_count");
 
         int threads = Integer.getInteger("trb.probe.threads", 4);
         int limitSeconds = Integer.getInteger("trb.probe.limitSeconds", 3600);
+        double selectionUpperFraction = Double.parseDouble(
+                System.getProperty("trb.probe.selectionUpperFraction", "0.7"));
+        if (!(selectionUpperFraction > 0.0 && selectionUpperFraction <= 1.0)) {
+            throw new IllegalArgumentException(
+                    "trb.probe.selectionUpperFraction must be in (0,1].");
+        }
         Settings settings = new Settings(threads, limitSeconds, 1e-4,
                 RCSAASolverVariant.LBBD_PRIMAL_EXACT, false, true);
 
@@ -115,6 +122,7 @@ public final class TRBSVUDroMechanismProbe {
                 ProcurementParams market = TRBSVUProcurementGenerator.generate(
                         I, parameters.linearTrendTypicalDemand(), seeds.procurement(),
                         cell.localRateHalfwidth());
+                market = withSelectionUpperFraction(market, selectionUpperFraction);
                 List<String> lanes = laneNames();
                 for (int query = 0; query < queryCount; query++) {
                     var conditional = demand.queries.get(query);
@@ -131,7 +139,8 @@ public final class TRBSVUDroMechanismProbe {
                     Oos csaaOos = TRBSVUSolveMethods.evaluate(market, csaa.y, evaluation);
                     append(rows, cell, replication, query, "CSAA-Tri", 0.0,
                             csaa, csaaOos, csaaOos, diagnostics, weighted,
-                            selectedCount(csaa.y), conditional.context.values());
+                            selectedCount(csaa.y), conditional.context.values(),
+                            selectionUpperFraction, market.beta);
                     checkpoint(output, rows);
                     if (oracleSamples > 0) {
                         List<Sample> oracleTraining = equalWeights(
@@ -142,7 +151,8 @@ public final class TRBSVUDroMechanismProbe {
                                 market, oracle.y, evaluation);
                         append(rows, cell, replication, query, "ORACLE", oracleSamples,
                                 oracle, oracleOos, csaaOos, diagnostics, oracleTraining,
-                                selectedCount(csaa.y), conditional.context.values());
+                                selectedCount(csaa.y), conditional.context.values(),
+                                selectionUpperFraction, market.beta);
                         checkpoint(output, rows);
                     }
                     if (oracleOnly) continue;
@@ -153,7 +163,8 @@ public final class TRBSVUDroMechanismProbe {
                                 market, robust.y, conditional.oos);
                         append(rows, cell, replication, query, "C-Chi2", lambda,
                                 robust, robustOos, csaaOos, diagnostics, weighted,
-                                selectedCount(csaa.y), conditional.context.values());
+                                selectedCount(csaa.y), conditional.context.values(),
+                                selectionUpperFraction, market.beta);
                         checkpoint(output, rows);
                     }
                 }
@@ -165,7 +176,8 @@ public final class TRBSVUDroMechanismProbe {
                                String method, double parameter, Solution solution, Oos oos,
                                Oos baseline, DemandDiagnostics diagnostics,
                                List<Sample> weighted, int baselineSelectedCount,
-                               double[] queryContext) {
+                               double[] queryContext, double selectionUpperFraction,
+                               int selectionUpperCount) {
         rows.add(String.format(Locale.ROOT,
                 "%s\t%d\t%d\t%s\t%.10g\t%s\t%s\t%.10g\t%.6f\t%.10f\t%d\t%s"
                         + "\t%.10f\t%.10f\t%.10f\t%.10f\t%.10f\t%.10f"
@@ -173,7 +185,7 @@ public final class TRBSVUDroMechanismProbe {
                         + "\t%.10f\t%.10f\t%.10f"
                         + "\t%.10f\t%.10f\t%.10f\t%.10f\t%d"
                         + "\t%.4f\t%.4f\t%.4f\t%s"
-                        + "\t%.10f\t%.10f\t%.10f\t%.10f",
+                        + "\t%.10f\t%.10f\t%.10f\t%.10f\t%.4f\t%d",
                 cell.name(), replication, query, method, parameter,
                 solution.solverStatus, solution.certifiedOptimal, solution.relativeGap,
                 solution.solveTimeSec, TRBSVUExperiment1Runner.ess(weighted),
@@ -187,7 +199,16 @@ public final class TRBSVUDroMechanismProbe {
                 selectedCount(solution.y) - baselineSelectedCount,
                 cell.loadingLower(), cell.loadingUpper(), cell.localRateHalfwidth(),
                 cell.volatility(), queryContext[0], queryContext[1],
-                queryContext[2], queryContext[3]));
+                queryContext[2], queryContext[3], selectionUpperFraction,
+                selectionUpperCount));
+    }
+
+    private static ProcurementParams withSelectionUpperFraction(
+            ProcurementParams source, double fraction) {
+        int upper = Math.max(source.alpha, (int) Math.ceil(fraction * source.I));
+        if (upper == source.beta) return source;
+        return new ProcurementParams(source.carriers, source.J, source.e, source.p,
+                source.h, source.q, source.r, source.eligible, source.alpha, upper);
     }
 
     private static double delta(double value, double baseline) {
