@@ -75,13 +75,21 @@ public final class TRBSVUResultWriter {
     public static void writeDgpParameters(Path directory, Parameters parameters,
                                           Distribution distribution, Volatility volatility,
                                           double[] procurementDemand) throws Exception {
+        writeDgpParameters(directory, parameters, distribution, volatility.name(),
+                parameters.volatilityParameters(volatility), procurementDemand);
+    }
+
+    public static void writeDgpParameters(Path directory, Parameters parameters,
+                                          Distribution distribution, String volatilityLabel,
+                                          double[] cv, double[] procurementDemand) throws Exception {
         Files.createDirectories(directory);
         double[] base = parameters.base(), market = parameters.market();
         double[] trend = parameters.trend(), promotion = parameters.promotion();
         double[] attention = parameters.attention();
         double[] quantile = parameters.volatilityQuantile();
         double[] commonLoading = parameters.commonLoading();
-        double[] cv = parameters.volatilityParameters(volatility);
+        if (cv == null || cv.length != parameters.laneCount())
+            throw new IllegalArgumentException("One CV per lane is required.");
         if (procurementDemand == null || procurementDemand.length != parameters.laneCount())
             throw new IllegalArgumentException("One procurement demand value is required per lane.");
         try (BufferedWriter out = writer(directory.resolve("dgp_parameters.csv"))) {
@@ -93,7 +101,7 @@ public final class TRBSVUResultWriter {
             for (int j = 0; j < parameters.laneCount(); j++) {
                 out.write(String.format(Locale.ROOT,
                         "%d,%s,%s,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%s,%.17g%n",
-                        j, distribution, volatility, base[j], market[j], trend[j], promotion[j],
+                        j, distribution, volatilityLabel, base[j], market[j], trend[j], promotion[j],
                         attention[j], quantile[j], cv[j], commonLoading[j],
                         commonLoading[j] * commonLoading[j], parameters.contextCoefficientScale(),
                         parameters.contextStructure(), procurementDemand[j]));

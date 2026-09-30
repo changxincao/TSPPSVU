@@ -158,8 +158,22 @@ public final class TRBSVUProtocolRegressionSelfCheck {
                 .resolve("validation").resolve("experiment1_selected_context.csv"));
         require("RF".equals(selected.family()), "IDE aggregation did not select the global C*.");
         require(selected.rfMinLeaf() == 5, "IDE aggregation lost the selected RF min leaf.");
+        TRBSVUExperiment1IdeMain.aggregateContextualChoices(input, output, Set.of(0),
+                List.of("CSAA-Exp", "CSAA-Tri", "RF-CSAA"));
+        selected = TRBSVUExperiment4Main.loadChoice(output.resolve("rep_000")
+                .resolve("validation").resolve("experiment1_selected_context.csv"));
+        require("RF".equals(selected.family()) && selected.rfMinLeaf() == 5,
+                "Three-family aggregation did not preserve the validation-best RF strategy.");
         require(Files.mismatch(instance, output.resolve("rep_000").resolve("instance")
                 .resolve("instance.tsv")) == -1L, "IDE aggregation did not preserve the frozen instance.");
+        System.setProperty("trb.svu.contextSelection", "best");
+        try {
+            TRBSVUExperiment2IdeMain.main(new String[]{"--input=" + input,
+                    "--experiment1-output=" + output, "--output=" + root.resolve("best-context-pilot"),
+                    "--replications=0", "--phase=primary", "--methods=RCSAA", "--dry-run"});
+        } finally {
+            System.clearProperty("trb.svu.contextSelection");
+        }
         TRBSVUExperiment2IdeMain.main(new String[]{
                 "--input=" + input,
                 "--experiment1-output=" + output,

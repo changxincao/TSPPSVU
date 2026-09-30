@@ -85,6 +85,8 @@ public final class TRBSVUExperiment1Runner {
     private final int validationOrigins;
     private final TRBSVUValidationCheckpoint checkpoint;
     private final TRBSVUFinalCheckpoint finalCheckpoint;
+    private final double[] kernelGrid;
+    private final double[] rfLeafGrid;
 
     public TRBSVUExperiment1Runner(Settings settings, ForestWeights forest,
                                     int validationOrigins) {
@@ -101,6 +103,15 @@ public final class TRBSVUExperiment1Runner {
                                     int validationOrigins,
                                     TRBSVUValidationCheckpoint checkpoint,
                                     TRBSVUFinalCheckpoint finalCheckpoint) {
+        this(settings, forest, validationOrigins, checkpoint, finalCheckpoint,
+                BANDWIDTH, RF_MIN_LEAF);
+    }
+
+    public TRBSVUExperiment1Runner(Settings settings, ForestWeights forest,
+                                    int validationOrigins,
+                                    TRBSVUValidationCheckpoint checkpoint,
+                                    TRBSVUFinalCheckpoint finalCheckpoint,
+                                    double[] kernelGrid, double[] rfLeafGrid) {
         if (settings == null || forest == null || validationOrigins < 1)
             throw new IllegalArgumentException("Experiment 1 needs settings, RF weights and validation origins.");
         this.settings = settings;
@@ -108,6 +119,21 @@ public final class TRBSVUExperiment1Runner {
         this.validationOrigins = validationOrigins;
         this.checkpoint = checkpoint;
         this.finalCheckpoint = finalCheckpoint;
+        this.kernelGrid = checkedGrid(kernelGrid, false);
+        this.rfLeafGrid = checkedGrid(rfLeafGrid, true);
+    }
+
+    static double[] checkedGrid(double[] values, boolean integer) {
+        if (values == null || values.length == 0)
+            throw new IllegalArgumentException("Candidate grid cannot be empty.");
+        double previous = 0;
+        for (double value : values) {
+            if (!Double.isFinite(value) || value <= previous
+                    || (integer && value != Math.rint(value)))
+                throw new IllegalArgumentException("Grid must be positive, finite and increasing.");
+            previous = value;
+        }
+        return values.clone();
     }
 
     public Result run(TRBSVUSyntheticCase instance) throws Exception {
@@ -153,7 +179,7 @@ public final class TRBSVUExperiment1Runner {
         EnumMap<Kernel, Double> contextualSd = new EnumMap<>(Kernel.class);
         for (Kernel family : Kernel.values()) {
             if (!requestedMethods.contains(name(family))) continue;
-            Tuning tuning = tune(BANDWIDTH, candidate ->
+            Tuning tuning = tune(kernelGrid, candidate ->
                     validate(instance, 3, new ContextualChoice(family.name(), candidate, 0.0),
                             validationDetails));
             double bandwidth = tuning.parameter();
@@ -176,7 +202,7 @@ public final class TRBSVUExperiment1Runner {
         }
         int selectedRfMinLeaf = 0;
         if (requestedMethods.contains("RF-CSAA")) {
-            Tuning rfTuning = tune(RF_MIN_LEAF,
+            Tuning rfTuning = tune(rfLeafGrid,
                     candidate -> validate(instance, 4, candidate, validationDetails));
             selectedRfMinLeaf = (int) rfTuning.parameter();
             validation.put("RF-CSAA", rfTuning.cost());

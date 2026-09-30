@@ -68,6 +68,15 @@ public final class TRBSVUGenerateModerateCommonCasesMain {
 
     private static void generate(Path replicationRoot, Volatility volatility,
                                  long batchSeed, long caseSeed, int replication) throws Exception {
+        generate(replicationRoot, volatility, batchSeed, caseSeed, replication,
+                null, null, "randomized-six-digit-v1");
+    }
+
+    static void generate(Path replicationRoot, Volatility volatility,
+                         long batchSeed, long caseSeed, int replication,
+                         Double cvLower, Double cvUpper, String seedScheme) throws Exception {
+        if (Files.exists(replicationRoot))
+            throw new IllegalStateException("Refusing to overwrite: " + replicationRoot);
         SplittableRandom random = new SplittableRandom(caseSeed);
         TRBSVUSyntheticCase.Seeds seeds = new TRBSVUSyntheticCase.Seeds(
                 random.nextLong(), random.nextLong(), random.nextLong(),
@@ -76,9 +85,13 @@ public final class TRBSVUGenerateModerateCommonCasesMain {
                 J, H, seeds.demandParameters(), 10.0,
                 ContextStructure.DENSE_INDEPENDENT_UNIFORM_POSITIVE,
                 BaseStructure.UNIFORM_10_100, LOADING_LOWER, LOADING_UPPER);
+        double[] cv = cvLower == null ? parameters.volatilityParameters(volatility)
+                : parameters.volatilityParameters(cvLower, cvUpper);
+        String cvLabel = cvLower == null ? volatility.name()
+                : String.format(Locale.ROOT, "CV_U_%.1f_%.1f", cvLower, cvUpper);
         MultiQueryReplication generated =
                 TRBSVUSyntheticDemandGenerator.generateMultiQueryWithLinearTrend(
-                        parameters, Distribution.NORMAL, volatility, QUERIES, OOS,
+                        parameters, Distribution.NORMAL, cv, QUERIES, OOS,
                         seeds.contexts(), seeds.historicalNoise(), seeds.oosNoise(),
                         ContextDistribution.UNIFORM);
         ProcurementParams market = TRBSVUProcurementGenerator.generate(
@@ -113,11 +126,12 @@ public final class TRBSVUGenerateModerateCommonCasesMain {
         Files.writeString(queryRoot.resolve("queries.tsv"), queryManifest,
                 StandardCharsets.UTF_8);
         TRBSVUResultWriter.writeDgpParameters(instanceDirectory, parameters,
-                Distribution.NORMAL, volatility, parameters.linearTrendTypicalDemand());
+                Distribution.NORMAL, cvLabel, cv, parameters.linearTrendTypicalDemand());
         Files.writeString(instanceDirectory.resolve("manifest.txt"),
                 "protocolVersion=" + TRBSVUFormalProtocol.EXPERIMENT12_VERSION + "\n"
                         + "experiment=moderate-common-volatility\n"
-                        + "distribution=NORMAL\nvolatility=" + volatility + "\n"
+                        + "distribution=NORMAL\nvolatility=" + cvLabel + "\n"
+                        + (cvLower == null ? "" : "cvLower=" + cvLower + "\ncvUpper=" + cvUpper + "\n")
                         + "I=" + I + "\nJ=" + J + "\nH=" + H + "\nOOS=" + OOS + "\n"
                         + "queries=" + QUERIES + "\nqueryType=RANDOM\n"
                         + "base=U(10,100)\ncoefficient=U(0,10*base)\n"
@@ -130,7 +144,7 @@ public final class TRBSVUGenerateModerateCommonCasesMain {
                         + "validationTrainingPeriods="
                         + TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS + "\n"
                         + "validationOrigins=" + TRBSVUFormalProtocol.VALIDATION_ORIGINS + "\n"
-                        + "seedScheme=randomized-six-digit-v1\n"
+                        + "seedScheme=" + seedScheme + "\n"
                         + "batchSeed=" + batchSeed + "\ncaseSeed=" + caseSeed
                         + "\nreplication=" + replication + "\n"
                         + "demandParameters=" + seeds.demandParameters() + "\n"

@@ -112,6 +112,8 @@ public final class TRBSVUExperiment2IdeMain {
         Path log = output.resolve("task.log");
         List<String> command = new ArrayList<>();
         command.add(javaExecutable());
+        if (System.getProperty("trb.svu.python") != null)
+            command.add("-Dtrb.svu.python=" + System.getProperty("trb.svu.python"));
         command.add("-Djava.library.path=" + System.getProperty("java.library.path"));
         command.add("-cp");
         command.add(System.getProperty("java.class.path"));
@@ -170,7 +172,8 @@ public final class TRBSVUExperiment2IdeMain {
         ContextualChoice selected = TRBSVUExperiment4Main.loadChoice(selectedFile);
         String queryPoolHash = TRBSVUExperiment1IdeMain.queryPoolFingerprint(queries);
         String sourceHash = sourceFingerprint(Path.of("src"));
-        Path python = Path.of(".venv-rsome", "Scripts", "python.exe").toAbsolutePath();
+        Path python = Path.of(System.getProperty("trb.svu.python",
+                Path.of(".venv-rsome", "Scripts", "python.exe").toString())).toAbsolutePath();
         boolean usesMomentPython = phase == Phase.MOMENT;
         String pcmScriptHash = usesMomentPython
                 ? sha256(Files.readAllBytes(Path.of("analysis", "trb_svu", "solve_pcm.py")))
@@ -348,14 +351,17 @@ public final class TRBSVUExperiment2IdeMain {
             String name = String.format(Locale.ROOT, "rep_%03d", replication);
             Path input = config.input.resolve(name);
             TRBSVUExperiment1IdeMain.loadQueries(input);
-            Path selected = config.experiment1Output.resolve(name).resolve("CSAA-Tri")
+            boolean bestContext = "best".equals(System.getProperty("trb.svu.contextSelection"));
+            Path selected = bestContext ? config.experiment1Output.resolve(name)
+                    .resolve("validation").resolve("experiment1_selected_context.csv")
+                    : config.experiment1Output.resolve(name).resolve("CSAA-Tri")
                     .resolve("queries").resolve("query_000").resolve("validation")
                     .resolve("context_candidate.csv");
             if (!Files.isRegularFile(selected))
-                throw new IllegalStateException("Missing Experiment 1 validation-selected Triangular context: "
+                throw new IllegalStateException("Missing Experiment 1 validation-selected context: "
                         + selected);
             ContextualChoice choice = TRBSVUExperiment4Main.loadChoice(selected);
-            if (!"TRIANGULAR".equals(choice.family()))
+            if (!bestContext && !"TRIANGULAR".equals(choice.family()))
                 throw new IllegalStateException("Experiment 2 requires frozen Triangular weights: "
                         + selected + " contains " + choice.family());
             Path inputInstance = input.resolve("instance").resolve("instance.tsv");

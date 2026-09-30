@@ -52,6 +52,13 @@ public final class TRBSVUExperiment1IdeMain {
             runWorker(Arrays.copyOfRange(args, 1, args.length));
             return;
         }
+        if ((args.length == 4 || args.length == 5) && "--aggregate".equals(args[0])) {
+            List<String> contextual = parseMethods(args[3]).stream()
+                    .filter(CONTEXTUAL_METHODS::contains).toList();
+            aggregateContextualChoices(Path.of(args[1]), Path.of(args[2]),
+                    parseReplications(args.length == 5 ? args[4] : "0-4"), contextual);
+            return;
+        }
         Config config = Config.parse(args);
         List<Task> tasks = buildTasks(config);
         System.out.printf(Locale.ROOT,
@@ -94,6 +101,9 @@ public final class TRBSVUExperiment1IdeMain {
         Path log = taskDirectory.resolve("task.log");
         List<String> command = new ArrayList<>();
         command.add(javaExecutable());
+        for (String property : List.of("trb.svu.bandwidthGrid", "trb.svu.rfLeafGrid", "trb.svu.python"))
+            if (System.getProperty(property) != null)
+                command.add("-D" + property + "=" + System.getProperty(property));
         command.add("-Djava.library.path=" + System.getProperty("java.library.path"));
         command.add("-cp");
         command.add(System.getProperty("java.class.path"));
@@ -130,7 +140,12 @@ public final class TRBSVUExperiment1IdeMain {
         verifyFormalDimensions(reference);
         String queryPoolHash = queryPoolFingerprint(queries);
         Path rfScript = Path.of("analysis", "trb_svu", "rf_leaf_weights.py").toAbsolutePath();
-        Path python = Path.of(".venv-rsome", "Scripts", "python.exe").toAbsolutePath();
+        Path python = Path.of(System.getProperty("trb.svu.python",
+                Path.of(".venv-rsome", "Scripts", "python.exe").toString())).toAbsolutePath();
+        double[] kernelGrid = candidateGrid("trb.svu.bandwidthGrid",
+                TRBSVUExperiment1Runner.BANDWIDTH, false);
+        double[] rfLeafGrid = candidateGrid("trb.svu.rfLeafGrid",
+                TRBSVUExperiment1Runner.RF_MIN_LEAF, true);
         String sourceHash = sourceFingerprint(Path.of("src"));
         String rfScriptHash = sha256(Files.readAllBytes(rfScript));
         String pythonEnvironment = "RF-CSAA".equals(method) ? pythonEnvironment(python) : "NOT_USED";
@@ -139,8 +154,8 @@ public final class TRBSVUExperiment1IdeMain {
                 + TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS
                 + "|threads=" + threads + "|limit=" + limit + "|queryPool=" + queryPoolHash
                 + "|retention=" + Arrays.toString(TRBSVUExperiment1Runner.RETENTION)
-                + "|bandwidth=" + Arrays.toString(TRBSVUExperiment1Runner.BANDWIDTH)
-                + "|rfMinLeaf=" + Arrays.toString(TRBSVUExperiment1Runner.RF_MIN_LEAF)
+                + "|bandwidth=" + Arrays.toString(kernelGrid)
+                + "|rfMinLeaf=" + Arrays.toString(rfLeafGrid)
                 + "|source=" + sourceHash + "|rfScript=" + rfScriptHash
                 + "|pythonEnvironment=" + pythonEnvironment)
                 .getBytes(StandardCharsets.UTF_8));
@@ -174,7 +189,7 @@ public final class TRBSVUExperiment1IdeMain {
                     validationCheckpoint,
                     new TRBSVUFinalCheckpoint(queryOutput.resolve("solve_checkpoints"),
                             queryOutput.resolve("oos_checkpoints"), queryHash, queryProtocol,
-                            replication, "1"));
+                            replication, "1"), kernelGrid, rfLeafGrid);
             TRBSVUExperiment1Runner.Result result = runner.run(instance, Set.of(method));
             writeResult(queryOutput, replication, instance, method, result);
             Files.writeString(queryOutput.resolve("query_metadata.txt"),
@@ -267,11 +282,18 @@ public final class TRBSVUExperiment1IdeMain {
 
     static void aggregateContextualChoices(Path input, Path output, Set<Integer> replications)
             throws Exception {
+        aggregateContextualChoices(input, output, replications, CONTEXTUAL_METHODS);
+    }
+
+    static void aggregateContextualChoices(Path input, Path output, Set<Integer> replications,
+                                           List<String> methods) throws Exception {
+        if (methods.isEmpty() || !CONTEXTUAL_METHODS.containsAll(methods))
+            throw new IllegalArgumentException("Expected contextual method families.");
         for (int replication : replications) {
             String name = String.format(Locale.ROOT, "rep_%03d", replication);
             Path replicationOutput = output.resolve(name);
             ContextualChoice chosen = null;
-            for (String method : CONTEXTUAL_METHODS) {
+            for (String method : methods) {
                 Path candidateFile = replicationOutput.resolve(safe(method)).resolve("queries")
                         .resolve("query_000").resolve("validation")
                         .resolve("context_candidate.csv");
@@ -292,6 +314,13 @@ public final class TRBSVUExperiment1IdeMain {
             snapshotReplicationInput(input, output, replication);
             System.out.println("Experiment 1 contextual C* aggregated for " + name + ": " + chosen);
         }
+    }
+
+    static double[] candidateGrid(String property, double[] fallback, boolean integer) {
+        String value = System.getProperty(property);
+        double[] values = value == null ? fallback : Arrays.stream(value.split(",", -1))
+                .mapToDouble(Double::parseDouble).toArray();
+        return TRBSVUExperiment1Runner.checkedGrid(values, integer);
     }
 
     /** Preserves the frozen input provenance even when only a method subset is run. */

@@ -179,6 +179,16 @@ public final class TRBSVUSyntheticDemandGenerator {
             }
             return result;
         }
+
+        public double[] volatilityParameters(double lower, double upper) {
+            if (!Double.isFinite(lower) || !Double.isFinite(upper)
+                    || lower < 0 || upper < lower)
+                throw new IllegalArgumentException("Invalid CV interval.");
+            double[] result = new double[laneCount()];
+            for (int j = 0; j < result.length; j++)
+                result[j] = lower + (upper - lower) * volatilityQuantile[j];
+            return result;
+        }
     }
 
     public static final class Replication {
@@ -622,18 +632,36 @@ public final class TRBSVUSyntheticDemandGenerator {
             int queryCount, int oosCount, long contextSeed,
             long historyNoiseSeed, long oosNoiseSeed,
             ContextDistribution contextDistribution) {
-        if (parameters == null || distribution == null || regime == null
+        if (parameters == null || regime == null)
+            throw new IllegalArgumentException("Parameters and volatility regime are required.");
+        return generateMultiQueryWithLinearTrend(parameters, distribution,
+                parameters.volatilityParameters(regime), queryCount, oosCount, contextSeed,
+                historyNoiseSeed, oosNoiseSeed, contextDistribution);
+    }
+
+    /** Explicit lane CVs; preserves the existing context and noise draw sequence. */
+    public static MultiQueryReplication generateMultiQueryWithLinearTrend(
+            Parameters parameters, Distribution distribution, double[] laneCv,
+            int queryCount, int oosCount, long contextSeed,
+            long historyNoiseSeed, long oosNoiseSeed,
+            ContextDistribution contextDistribution) {
+        if (parameters == null || distribution == null || laneCv == null
                 || contextDistribution == null || queryCount <= 0 || oosCount <= 0) {
             throw new IllegalArgumentException(
                     "Parameters, DGP cell, query count and OOS count are required.");
         }
+        if (laneCv.length != parameters.laneCount())
+            throw new IllegalArgumentException("One CV per lane is required.");
+        for (double value : laneCv)
+            if (!Double.isFinite(value) || value < 0)
+                throw new IllegalArgumentException("Lane CV must be finite and nonnegative.");
         int h = parameters.historicalPeriods();
         Random contextRandom = new Random(contextSeed);
         Random historyRandom = new Random(historyNoiseSeed);
         Random oosRandom = new Random(oosNoiseSeed);
         Random historyCommonRandom = new Random(historyNoiseSeed ^ COMMON_NOISE_SALT);
         Random oosCommonRandom = new Random(oosNoiseSeed ^ COMMON_NOISE_SALT);
-        double[] cv = parameters.volatilityParameters(regime);
+        double[] cv = laneCv.clone();
         List<Sample> history = new ArrayList<>(h);
         for (int t = 0; t < h; t++) {
             CovariateVector context = contextWithTrend(
