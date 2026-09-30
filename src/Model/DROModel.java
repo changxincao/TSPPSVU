@@ -290,7 +290,6 @@ public class DROModel {
 			solution.optimizerTimeSec = optimizerTimeSec;
 			solution.certifiedOptimal = Double.isFinite(bestBound)
 					&& Double.isFinite(relativeGap) && relativeGap <= cfg.tol;
-			M.dispose();
 			return solution;
 		}
 	}
