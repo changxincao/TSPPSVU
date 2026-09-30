@@ -111,6 +111,23 @@ $runner = Join-Path $TaskRoot (Join-Path 'scripts' $RunnerName)
 if (-not (Test-Path -LiteralPath $runner -PathType Leaf)) {
     throw "Remote runner does not exist: $runner"
 }
+$expectedClassMajor = 65 # Java 21
+$classRoot = Join-Path $TaskRoot 'bin'
+$incompatibleClasses = [System.Collections.Generic.List[string]]::new()
+foreach ($classFile in Get-ChildItem -LiteralPath $classRoot -Filter '*.class' -File -Recurse) {
+    $bytes = [System.IO.File]::ReadAllBytes($classFile.FullName)
+    if ($bytes.Length -lt 8) {
+        $incompatibleClasses.Add("$($classFile.FullName) (truncated)")
+        continue
+    }
+    $major = ([int]$bytes[6] -shl 8) + [int]$bytes[7]
+    if ($major -gt $expectedClassMajor) {
+        $incompatibleClasses.Add("$($classFile.FullName) (major=$major)")
+    }
+}
+if ($incompatibleClasses.Count -gt 0) {
+    throw "Java 21 compatibility check failed:`n$($incompatibleClasses -join [Environment]::NewLine)"
+}
 $powershell = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
 $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$runner`" " +
     "-TaskRoot `"$TaskRoot`" -ExperimentRoot `"$ExperimentRoot`""
