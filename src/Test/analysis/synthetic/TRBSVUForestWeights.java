@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit;
 
 /** Fixed 500-tree RF-CSAA adapter; external Python implements only leaf weights. */
 public final class TRBSVUForestWeights implements TRBSVUExperiment1Runner.ForestWeights {
+    private static final int MAX_FIT_ATTEMPTS = 3;
     private final String python;
     private final Path script;
     private final int trees;
@@ -89,18 +90,37 @@ public final class TRBSVUForestWeights implements TRBSVUExperiment1Runner.Forest
                 }
                 writeRow(writer, query.values(), new double[0]);
             }
-            Process process = new ProcessBuilder(python, script.toString(), input.toString(),
-                    output.toString(), Long.toString(seed & 0xffff_ffffL), Integer.toString(trees),
-                    Integer.toString(minSamplesLeaf))
-                    .redirectErrorStream(true).start();
-            boolean ended = process.waitFor(120, TimeUnit.SECONDS);
-            if (!ended) {
-                process.destroyForcibly();
-                throw new IllegalStateException("RF fit exceeded 120 seconds.");
+            StringBuilder failures = new StringBuilder();
+            boolean succeeded = false;
+            for (int attempt = 1; attempt <= MAX_FIT_ATTEMPTS; attempt++) {
+                Files.deleteIfExists(output);
+                Process process = new ProcessBuilder(python, script.toString(), input.toString(),
+                        output.toString(), Long.toString(seed & 0xffff_ffffL), Integer.toString(trees),
+                        Integer.toString(minSamplesLeaf))
+                        .redirectErrorStream(true).start();
+                boolean ended = process.waitFor(120, TimeUnit.SECONDS);
+                if (!ended) {
+                    process.destroyForcibly();
+                    process.waitFor(5, TimeUnit.SECONDS);
+                    failures.append("attempt ").append(attempt).append(": timeout after 120 seconds");
+                } else {
+                    String diagnostics = new String(process.getInputStream().readAllBytes(),
+                            StandardCharsets.UTF_8).trim();
+                    if (process.exitValue() == 0) {
+                        succeeded = true;
+                        break;
+                    }
+                    failures.append("attempt ").append(attempt).append(": exit=")
+                            .append(process.exitValue()).append(" diagnostics=").append(diagnostics);
+                }
+                if (attempt < MAX_FIT_ATTEMPTS) {
+                    failures.append(System.lineSeparator());
+                    Thread.sleep(1000L * attempt);
+                }
             }
-            String diagnostics = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            if (process.exitValue() != 0)
-                throw new IllegalStateException("RF fit failed: " + diagnostics);
+            if (!succeeded)
+                throw new IllegalStateException("RF fit failed after " + MAX_FIT_ATTEMPTS
+                        + " attempts:" + System.lineSeparator() + failures);
             String[] fields = Files.readString(output, StandardCharsets.UTF_8).trim().split(",");
             if (fields.length != training.size()) throw new IllegalStateException("RF weight count mismatch.");
             double[] values = new double[fields.length];
