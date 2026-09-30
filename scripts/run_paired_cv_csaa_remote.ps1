@@ -1,5 +1,7 @@
 param([Parameter(Mandatory=$true)][string]$TaskRoot,
       [Parameter(Mandatory=$true)][string]$ExperimentRoot,
+      [ValidateSet('cv030050','cv040060','cv010030','cv050070')]
+      [string[]]$Cells=@('cv030050','cv040060','cv010030'),
       [ValidateRange(1,4)][int]$MaxParallel=4)
 $ErrorActionPreference='Stop'
 $control=Join-Path $ExperimentRoot 'control'
@@ -25,7 +27,7 @@ function Event($task,$state,$code) {
 }
 # Each independent method task includes rolling validation, then all forty paired queries.
 # No solver starts during generation. Resume always lets the Java worker verify its checkpoint protocol.
-foreach($cell in @('cv030050','cv040060','cv010030')) {
+foreach($cell in $Cells) {
     foreach($rep in 0..4) {
         foreach($method in @('CSAA-Exp','CSAA-Tri','RF-CSAA','SAA-All','D')) {
             $queue.Enqueue([pscustomobject]@{cell=$cell;rep=$rep;method=$method;attempt=0;
@@ -76,7 +78,7 @@ while($queue.Count -gt 0 -or $running.Count -gt 0) {
         ConvertTo-Json | Set-Content -LiteralPath (Join-Path $control 'status.json') -Encoding UTF8
 }
 # Selection uses validation costs only; it is never based on forty-query OOS outcomes.
-foreach($cell in @('cv030050','cv040060','cv010030')) {
+foreach($cell in $Cells) {
     foreach($rep in 0..4) {
         $output=Join-Path $ExperimentRoot "$cell\experiment1"
         $repRoot=Join-Path $output ('rep_{0:D3}' -f $rep)
