@@ -1,4 +1,4 @@
-param([string]$TaskRoot, [string]$ExperimentRoot)
+param([string]$TaskRoot, [string]$ExperimentRoot, [ValidateRange(1, 4)][int]$MaxParallel = 4)
 $ErrorActionPreference = 'Stop'
 $java = 'D:\Java\jdk-21\bin\java.exe'
 $native = 'D:\software\IBM\ILOG\CPLEX_Studio2211\cplex\bin\x64_win64;D:\ccx\TSPP_SVU\lib'
@@ -55,9 +55,9 @@ foreach ($rep in 0..24) {
     }
 }
 $initial = $queue.Count
-"queued=$initial parallel=2 solverThreads=4 output=$output" | Set-Content (Join-Path $control 'plan.txt')
+"queued=$initial parallel=$MaxParallel solverThreads=4 output=$output" | Set-Content (Join-Path $control 'plan.txt')
 while ($queue.Count -gt 0 -or $running.Count -gt 0) {
-    while ($queue.Count -gt 0 -and $running.Count -lt 2) {
+    while ($queue.Count -gt 0 -and $running.Count -lt $MaxParallel) {
         $task = $queue.Dequeue()
         if (Test-Path -LiteralPath (Join-Path $task.target 'complete.txt')) {
             Add-Event $task 'SKIPPED_COMPLETE' ''
@@ -105,7 +105,7 @@ while ($queue.Count -gt 0 -or $running.Count -gt 0) {
         [void]$running.Remove($item)
         $item.process.Dispose()
     }
-    @("state=RUNNING", "updated=$([DateTime]::Now.ToString('o'))", "queued=$($queue.Count)", "running=$($running.Count)", 'parallel=2', 'solverThreads=4') |
+    @("state=RUNNING", "updated=$([DateTime]::Now.ToString('o'))", "queued=$($queue.Count)", "running=$($running.Count)", "parallel=$MaxParallel", 'solverThreads=4') |
         Set-Content -LiteralPath (Join-Path $control 'status.txt')
 }
 @('state=FINISHED',"ended=$([DateTime]::Now.ToString('o'))", "initialTasks=$initial") | Set-Content (Join-Path $control 'status.txt')
