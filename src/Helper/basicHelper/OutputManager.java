@@ -21,6 +21,19 @@ public class OutputManager {
     public final Path logsDir;
     public final Path resultsDir;
 
+    /** Explicit task-local directory; avoids historical tag-based shared log paths. */
+    public static OutputManager atDirectory(Path directory) throws IOException {
+        return new OutputManager(directory, directory.resolve("logs"), directory.resolve("results"));
+    }
+
+    private OutputManager(Path root, Path logs, Path results) throws IOException {
+        this.root = root;
+        this.logsDir = logs;
+        this.resultsDir = results;
+        Files.createDirectories(logsDir);
+        Files.createDirectories(resultsDir);
+    }
+
     public OutputManager(Path inputFile) throws IOException {
         String base = stripExt(inputFile.getFileName().toString());
         String ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
