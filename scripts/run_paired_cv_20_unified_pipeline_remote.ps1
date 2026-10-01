@@ -47,16 +47,11 @@ try {
             -FirstSeed 20261020 -ReplicationCount 20 -MaxParallel $MaxParallel -SkipCompleted
         if ($LASTEXITCODE -ne 0) { throw "Baseline stage failed for $cell" }
 
-        Write-Status 'RUNNING' 'OOS_SELECTED_C_CHI2' $cell `
-            'this cell baselines complete; select best CSAA by each replication 40-query OOS Mean'
-        & powershell -NoProfile -ExecutionPolicy Bypass -File `
-            (Join-Path $TaskRoot 'scripts\run_paired_cv_oos_selected_dro_remote.ps1') `
-            -TaskRoot $TaskRoot -ExperimentRoot $ExperimentRoot -Cell $cell `
-            -ReplicationCount 20 -MaxParallel $MaxParallel -SolverThreads 4 `
-            -LimitSeconds 14400 -LambdaGrid '0.1,0.25,0.5,1'
-        if ($LASTEXITCODE -ne 0) { throw "DRO stage failed for $cell" }
+        # Finish every CV cell's baselines before the user reviews CSAA results.
+        # DRO is deliberately not launched by this pipeline.
     }
-    Write-Status 'FINISHED' '' '' 'all four CV cells and 20 replications completed'
+    Write-Status 'FINISHED' 'BASELINES_ONLY' '' `
+        'all four CV cells baselines completed; DRO awaits user approval'
 } catch {
     Write-Status 'FAILED' '' '' $_.Exception.Message
     throw

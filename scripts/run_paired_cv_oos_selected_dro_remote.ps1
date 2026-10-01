@@ -28,6 +28,7 @@ $queue=[System.Collections.Generic.Queue[object]]::new()
 $running=[System.Collections.Generic.List[object]]::new()
 $failed=[System.Collections.Generic.List[object]]::new()
 $selectionRows=[System.Collections.Generic.List[object]]::new()
+$replicationData=[System.Collections.Generic.List[object]]::new()
 $events=Join-Path $control 'events.csv'
 
 function Read-One([string]$path){
@@ -59,7 +60,7 @@ function Write-Event($task,[string]$state,$code){
     [pscustomobject]@{time=[DateTime]::Now.ToString('o');cell=$Cell;rep=$task.rep;method='C-Chi2';attempt=$task.attempt;state=$state;exitCode=$code} | Export-Csv -LiteralPath $events -Append -NoTypeInformation -Encoding UTF8
 }
 function Write-Status([string]$state){
-    $json=[pscustomobject]@{state=$state;cell=$Cell;phase='OOS_SELECTED_C_CHI2_DIAGNOSTIC';selection='BEST_40_QUERY_OOS_MEAN';formalTrainingOnly=$false;updated=[DateTime]::Now.ToString('o');queued=$queue.Count;running=$running.Count;failed=$failed.Count;parallel=$MaxParallel;solverThreads=$SolverThreads;lambdaGrid=$LambdaGrid} | ConvertTo-Json
+    $json=[pscustomobject]@{state=$state;cell=$Cell;phase='OOS_SELECTED_C_CHI2_DIAGNOSTIC';selection='CELL_GLOBAL_BEST_OOS_MEAN';contextMethod=$globalWinner;formalTrainingOnly=$false;updated=[DateTime]::Now.ToString('o');queued=$queue.Count;running=$running.Count;failed=$failed.Count;parallel=$MaxParallel;solverThreads=$SolverThreads;lambdaGrid=$LambdaGrid} | ConvertTo-Json
     for($attempt=1;$attempt-le40;$attempt++){try{Set-Content -LiteralPath (Join-Path $control 'status.json') -Value $json -Encoding UTF8 -ErrorAction Stop;return}catch [System.IO.IOException]{if($attempt-eq40){throw};Start-Sleep -Milliseconds 250}}
 }
 
@@ -82,10 +83,25 @@ foreach($rep in 0..($ReplicationCount-1)){
     }
     $oosWinner=$methods | Sort-Object @{Expression={$scores[$_]};Ascending=$true},@{Expression={$_};Ascending=$true} | Select-Object -First 1
     $validationWinner=$methods | Sort-Object @{Expression={$validationScores[$_]};Ascending=$true},@{Expression={$_};Ascending=$true} | Select-Object -First 1
-    $selectionDir=Join-Path $repRoot 'oos_selection';New-Item -ItemType Directory -Force -Path $selectionDir | Out-Null
+    $replicationData.Add([pscustomobject]@{rep=$rep;repName=$repName;repRoot=$repRoot;scores=$scores;choices=$choices;validationScores=$validationScores;perRepWinner=$oosWinner;validationWinner=$validationWinner})
+}
+# Select one method for the entire CV cell; its hyperparameters remain replication-specific.
+$globalScores=[ordered]@{};$globalValidationScores=[ordered]@{}
+foreach($method in $methods){
+    $globalScores[$method]=($replicationData | ForEach-Object {$_.scores[$method]} | Measure-Object -Average).Average
+    $globalValidationScores[$method]=($replicationData | ForEach-Object {$_.validationScores[$method]} | Measure-Object -Average).Average
+}
+$globalWinner=$methods | Sort-Object @{Expression={$globalScores[$_]};Ascending=$true},@{Expression={$_};Ascending=$true} | Select-Object -First 1
+$globalValidationWinner=$methods | Sort-Object @{Expression={$globalValidationScores[$_]};Ascending=$true},@{Expression={$_};Ascending=$true} | Select-Object -First 1
+@($methods | ForEach-Object {[pscustomobject]@{cell=$Cell;method=$_;replications=$ReplicationCount;query_count_per_replication=40;oos_mean=$globalScores[$_];validation_cost=$globalValidationScores[$_];selected=($_ -eq $globalWinner)}}) | Export-Csv -LiteralPath (Join-Path $control 'global_csaa_selection.csv') -NoTypeInformation -Encoding UTF8
+foreach($data in $replicationData){
+    $rep=$data.rep;$repName=$data.repName;$repRoot=$data.repRoot
+    $scores=$data.scores;$choices=$data.choices;$validationScores=$data.validationScores
+    $validationWinner=$data.validationWinner;$oosWinner=$globalWinner
+    $selectionDir=Join-Path $repRoot 'global_oos_selection';New-Item -ItemType Directory -Force -Path $selectionDir | Out-Null
     $selectedFile=Join-Path $selectionDir 'experiment1_selected_context_oos.csv';Copy-Item -LiteralPath $choices[$oosWinner] -Destination $selectedFile -Force
-    @('selectionProtocol=BEST_40_QUERY_OOS_MEAN','formalTrainingOnly=false','purpose=DIAGNOSTIC_REQUESTED_BY_USER',"oosWinner=$oosWinner","validationWinner=$validationWinner",('winnersAgree='+($oosWinner -eq $validationWinner)),'queryCount=40',"lambdaGrid=$LambdaGrid") | Set-Content -LiteralPath (Join-Path $selectionDir 'selection_protocol.txt') -Encoding UTF8
-    $selectionRows.Add([pscustomobject]@{cell=$Cell;replication=$rep;oos_winner=$oosWinner;validation_winner=$validationWinner;winners_agree=($oosWinner -eq $validationWinner);oos_mean_exp=$scores['CSAA-Exp'];oos_mean_tri=$scores['CSAA-Tri'];oos_mean_rf=$scores['RF-CSAA'];validation_cost_exp=$validationScores['CSAA-Exp'];validation_cost_tri=$validationScores['CSAA-Tri'];validation_cost_rf=$validationScores['RF-CSAA'];selected_context_file=$selectedFile})
+    @('selectionProtocol=CELL_GLOBAL_BEST_OOS_MEAN','formalTrainingOnly=false','purpose=DIAGNOSTIC_REQUESTED_BY_USER',"oosWinner=$oosWinner","perRepOosWinner=$($data.perRepWinner)","validationWinner=$validationWinner","globalValidationWinner=$globalValidationWinner",('winnersAgree='+($oosWinner -eq $validationWinner)),'queryCount=40',"replicationCount=$ReplicationCount",'hyperparameters=PER_REPLICATION_VALIDATION_SELECTED',"lambdaGrid=$LambdaGrid") | Set-Content -LiteralPath (Join-Path $selectionDir 'selection_protocol.txt') -Encoding UTF8
+    $selectionRows.Add([pscustomobject]@{cell=$Cell;replication=$rep;oos_winner=$oosWinner;per_rep_oos_winner=$data.perRepWinner;global_validation_winner=$globalValidationWinner;validation_winner=$validationWinner;winners_agree=($oosWinner -eq $validationWinner);oos_mean_exp=$scores['CSAA-Exp'];oos_mean_tri=$scores['CSAA-Tri'];oos_mean_rf=$scores['RF-CSAA'];validation_cost_exp=$validationScores['CSAA-Exp'];validation_cost_tri=$validationScores['CSAA-Tri'];validation_cost_rf=$validationScores['RF-CSAA'];selected_context_file=$selectedFile})
     $target=Join-Path $stage ('primary\C-Chi2\{0}' -f $repName)
     $queue.Enqueue([pscustomobject]@{rep=$rep;attempt=0;target=$target;selected=$selectedFile;input=(Join-Path $cellRoot "input\$repName")})
 }
