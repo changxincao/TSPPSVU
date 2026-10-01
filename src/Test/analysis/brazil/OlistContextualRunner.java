@@ -19,7 +19,7 @@ import java.util.*;
 
 /** IDE entry point: default only prepares/audits inputs; pass 'run' to solve. */
 public final class OlistContextualRunner {
-    public enum Method { EXP, RF }
+    public enum Method { D, SAA, EXP, RF }
     public static Path INPUT = Path.of(System.getProperty("olist.input", OlistContextualData.DEFAULT_INPUT.toString()));
     public static Path SNAPSHOT = System.getProperty("olist.instance") == null ? null : Path.of(System.getProperty("olist.instance"));
     public static Path OUTPUT = Path.of("analysis_runs/olist_exp_rf_max_20261001");
@@ -29,7 +29,7 @@ public final class OlistContextualRunner {
     public static int THREADS = Integer.getInteger("olist.threads", 4), LIMIT_SECONDS = Integer.getInteger("olist.limit", 14400);
     public static int START_TRIAL = 0, TRIAL_COUNT = 51;
     public static boolean PREPARE_ONLY = true;
-    public static Method[] METHODS = Arrays.stream(System.getProperty("olist.methods", "EXP,RF").split(","))
+    public static Method[] METHODS = Arrays.stream(System.getProperty("olist.methods", "D,SAA,EXP,RF").split(","))
             .map(String::trim).map(Method::valueOf).toArray(Method[]::new);
     // Pilot grid: concentrated through nearly uniform weights; expand only after reviewing validation.
     public static double[] BANDWIDTH = {0.1, 0.25, 0.5, 1, 2, 5};
@@ -38,7 +38,7 @@ public final class OlistContextualRunner {
             + "\tparameter\tstatus\tcertified_optimal\tobjective\tbest_bound\trelative_gap"
             + "\tmodel_build_solve_sec\toptimizer_sec\tselected_count\ty_binary\tess\tpositive_samples"
             + "\trealized_cost\ttransport_cost\tspot_cost\tmqc_cost\ttotal_demand\tcontracted_quantity"
-            + "\tspot_quantity\tmqc_shortfall\tspot_share\tcapacity_utilization\tlane_capacity_utilization\n";
+            + "\tspot_quantity\tmqc_shortfall\tspot_share\tcapacity_utilization\tlane_capacity_utilization\tscenario_count\n";
 
     private OlistContextualRunner() { }
 
@@ -92,8 +92,15 @@ public final class OlistContextualRunner {
         Files.createDirectories(directory);
         Files.deleteIfExists(directory.resolve("complete.txt"));
         Files.deleteIfExists(directory.resolve("failure.txt"));
-        List<Candidate> valid = new ArrayList<>();
         StringBuilder candidates = new StringBuilder("lag\tparameter\tcompleted_origins\tvalid\tmean_cost\tsample_sd\n");
+        if (isBaseline(method)) {
+            // k=1 is only a metadata/window carrier; neither baseline uses context or tunes k.
+            atomic(directory.resolve("candidates.tsv"), candidates.toString());
+            atomic(directory.resolve("selection.tsv"), "lag\tparameter\tvalidation_mean\tvalidation_sd\n1\t0.0\tNaN\tNaN\n");
+            finishTask(data, forest, test, method, 1, 0, directory);
+            return;
+        }
+        List<Candidate> valid = new ArrayList<>();
         double[] grid = method == Method.EXP ? BANDWIDTH : Arrays.stream(LEAF).asDoubleStream().toArray();
         for (int lag = 1; lag <= 3; lag++) for (double parameter : grid) {
             List<Double> costs = new ArrayList<>();
@@ -134,20 +141,29 @@ public final class OlistContextualRunner {
         Candidate best = valid.get(0);
         atomic(directory.resolve("selection.tsv"), "lag\tparameter\tvalidation_mean\tvalidation_sd\n"
                 + best.lag() + "\t" + best.parameter() + "\t" + best.mean() + "\t" + best.sd() + "\n");
-        Result result = solveOne(data, forest, data.window(test, best.lag(), 50), method,
-                best.lag(), best.parameter(), directory.resolve("final"));
+        finishTask(data, forest, test, method, best.lag(), best.parameter(), directory);
+    }
+
+    private static boolean isBaseline(Method method) { return method == Method.D || method == Method.SAA; }
+
+    private static void finishTask(OlistContextualData data, TRBSVUForestWeights forest, int test,
+                                   Method method, int lag, double parameter, Path directory) throws Exception {
+        Result result = solveOne(data, forest, data.window(test, lag, 50), method,
+                lag, parameter, directory.resolve("final"));
         atomic(directory.resolve("final_result.tsv"), HEADER + result.row());
         atomic(directory.resolve("complete.txt"), "finished=" + java.time.Instant.now() + "\n");
         System.out.printf(Locale.ROOT, "TASK_DONE week=%d method=%s lag=%d parameter=%g realized=%.10f%n",
-                test, method, best.lag(), best.parameter(), result.cost());
+                test, method, lag, parameter, result.cost());
     }
 
     private static Result solveOne(OlistContextualData data, TRBSVUForestWeights forest,
                                     OlistContextualData.Window window, Method method,
                                     int lag, double parameter, Path directory) throws Exception {
         Files.createDirectories(directory);
+        int scenarios = method == Method.D ? 1 : window.training().size();
         Path checkpoint = directory.resolve("result.tsv");
-        if (Files.exists(checkpoint) && tableComplete(directory.resolve("weights.tsv"), window.training().size() + 1)
+        if (Files.exists(checkpoint) && tableComplete(directory.resolve("weights.tsv"), scenarios + 1)
+                && tableComplete(directory.resolve("model_scenarios.tsv"), scenarios + 1)
                 && tableComplete(directory.resolve("max_scaling.tsv"), window.target().theta.dim() + 1)
                 && tableComplete(directory.resolve("lane_oos.tsv"), data.market.J + 1)
                 && tableComplete(directory.resolve("carrier_oos.tsv"), data.market.I + 1)
@@ -155,9 +171,10 @@ public final class OlistContextualRunner {
             List<String> saved = Files.readAllLines(checkpoint);
             if (saved.size() == 2 && (saved.get(0) + "\n").equals(HEADER)) {
                 String[] values = saved.get(1).split("\t", -1);
-                if (values.length == 29 && Integer.parseInt(values[0]) == window.target().period.tIndex
+                if (values.length == 30 && Integer.parseInt(values[0]) == window.target().period.tIndex
                         && Integer.parseInt(values[1]) == window.startWeek()
                         && Integer.parseInt(values[2]) == window.endWeek()
+                        && Integer.parseInt(values[3]) == window.training().size() && Integer.parseInt(values[29]) == scenarios
                         && Integer.parseInt(values[4]) == lag && values[5].equals(method.name())
                         && Double.parseDouble(values[6]) == parameter && Double.isFinite(Double.parseDouble(values[18])))
                     return new Result(Double.parseDouble(values[18]), saved.get(1) + "\n");
@@ -165,10 +182,13 @@ public final class OlistContextualRunner {
             throw new IllegalStateException("Incomplete or inconsistent checkpoint: " + checkpoint);
         }
         OlistContextualData.Scaled scaled = OlistContextualData.scale(window);
-        List<Sample> weighted = method == Method.RF
-                ? forest.weights(scaled.training(), scaled.query(), RF_SEED, (int) parameter)
-                : TRBSVUScenarioWeights.kernel(scaled.training(), scaled.query(),
-                        TRBSVUScenarioWeights.Kernel.EXPONENTIAL, parameter);
+        List<Sample> weighted = switch (method) {
+            case D -> TRBSVUScenarioWeights.arithmeticMean(scaled.training());
+            case SAA -> TRBSVUScenarioWeights.equal(scaled.training());
+            case RF -> forest.weights(scaled.training(), scaled.query(), RF_SEED, (int) parameter);
+            case EXP -> TRBSVUScenarioWeights.kernel(scaled.training(), scaled.query(),
+                    TRBSVUScenarioWeights.Kernel.EXPONENTIAL, parameter);
+        };
         double sum = 0;
         for (Sample sample : weighted) {
             // Preserve exact zeros; apply the previously frozen positive-weight floor.
@@ -185,6 +205,15 @@ public final class OlistContextualRunner {
             if (sample.weight > 0) positive++;
         }
         atomic(directory.resolve("weights.tsv"), weights.toString());
+        StringBuilder demands = new StringBuilder("sample_id\tweight");
+        for (int j = 0; j < data.market.J; j++) demands.append("\tlane_").append(j);
+        demands.append('\n');
+        for (Sample sample : weighted) {
+            demands.append(sample.id).append('\t').append(sample.weight);
+            for (double demand : sample.demand()) demands.append('\t').append(demand);
+            demands.append('\n');
+        }
+        atomic(directory.resolve("model_scenarios.tsv"), demands.toString());
         StringBuilder scale = new StringBuilder("feature\ttraining_max\tquery_raw\tquery_scaled\n");
         for (int k = 0; k < scaled.maxima().length; k++)
             scale.append(k).append('\t').append(scaled.maxima()[k]).append('\t')
@@ -256,7 +285,7 @@ public final class OlistContextualRunner {
         long count = Arrays.stream(solution.y).filter(x -> x > 0.5).count();
         String row = String.join("\t", Integer.toString(window.target().period.tIndex),
                 Integer.toString(window.startWeek()), Integer.toString(window.endWeek()),
-                Integer.toString(weighted.size()), Integer.toString(lag), method.name(), Double.toString(parameter),
+                Integer.toString(window.training().size()), Integer.toString(lag), method.name(), Double.toString(parameter),
                 solution.solverStatus, Boolean.toString(solution.certifiedOptimal), Double.toString(solution.objValue),
                 Double.toString(solution.bestBound), Double.toString(solution.relativeGap), Double.toString(elapsed),
                 Double.toString(solution.optimizerTimeSec), Long.toString(count), encode(solution.y),
@@ -265,20 +294,21 @@ public final class OlistContextualRunner {
                 Double.toString(totalDemand), Double.toString(contracted), Double.toString(spot), Double.toString(shortfall),
                 Double.toString(totalDemand > 0 ? spot / totalDemand : 0),
                 Double.toString(selectedCapacity > 0 ? contracted / selectedCapacity : 0),
-                Double.toString(activeLanes > 0 ? laneUtilization / activeLanes : 0)) + "\n";
+                Double.toString(activeLanes > 0 ? laneUtilization / activeLanes : 0), Integer.toString(weighted.size())) + "\n";
         atomic(checkpoint, HEADER + row);
         return new Result(recourse.objValue, row);
     }
 
     private static void prepare(OlistContextualData data, String environment) throws Exception {
         Files.createDirectories(OUTPUT);
-        String protocol = "OLIST_EXP_RF_MAX_ROLLING15_V2\ninputSha256=" + hash(Files.readAllBytes(SNAPSHOT == null ? INPUT : SNAPSHOT))
+        String protocol = "OLIST_BASELINES_EXP_RF_MAX_ROLLING15_V3\ninputSha256=" + hash(Files.readAllBytes(SNAPSHOT == null ? INPUT : SNAPSHOT))
                 + "\ncodeSha256=" + codeHash() + "\nrfScriptSha256=" + hash(Files.readAllBytes(RF_SCRIPT))
                 + "\npython=" + PYTHON + "\npythonEnvironment=" + environment
                 + "\nmarketSeed=" + MARKET_SEED + "\nrfSeed=" + RF_SEED + "\nthreads=" + THREADS
                 + "\nlimit=" + LIMIT_SECONDS + "\ngap=1e-4\nrfTrees=500\nselection=2..12\n"
                 + "market=current_factory_50pct_coverage_mqc015035_spot23_minH\n"
                 + "procurementCalibration=ALL_WEEKS_RETROSPECTIVE\nvalidation=35_rolling_15\nfinalHistory=50\n"
+                + "baselineD=MEAN_OF_50\nbaselineSAA=ALL_50_EQUAL\nbaselineValidation=NONE\n"
                 + "scaling=TRAINING_MAX_NO_CLIPPING\nB=" + Arrays.toString(BANDWIDTH) + "\nleaf=" + Arrays.toString(LEAF) + "\n";
         Path file = OUTPUT.resolve("protocol.txt");
         if (Files.exists(file)) {
@@ -314,9 +344,54 @@ public final class OlistContextualRunner {
         int lag = Integer.parseInt(selection[0]);
         double parameter = Double.parseDouble(selection[1]);
         if (lag < 1 || lag > 3) return false;
+        if (!selectionComplete(directory, method, selection)) return false;
+        int scenarios = method == Method.D ? 1 : 50;
+        Path finalDir = directory.resolve("final");
+        if (!tableComplete(finalDir.resolve("result.tsv"), 2)
+                || !tableComplete(finalDir.resolve("weights.tsv"), scenarios + 1)
+                || !tableComplete(finalDir.resolve("model_scenarios.tsv"), scenarios + 1)
+                || !tableComplete(finalDir.resolve("max_scaling.tsv"), lag * data.market.J + 1)
+                || !tableComplete(finalDir.resolve("lane_oos.tsv"), data.market.J + 1)
+                || !tableComplete(finalDir.resolve("carrier_oos.tsv"), data.market.I + 1)
+                || !tableComplete(finalDir.resolve("incumbent.tsv"), 2)
+                || !Files.exists(finalDir.resolve("logs/cplex.log"))) return false;
+        List<String> rows = Files.readAllLines(finalDir.resolve("result.tsv"));
+        if (!rows.equals(Files.readAllLines(directory.resolve("final_result.tsv")))) return false;
+        String[] f = rows.get(1).split("\t", -1);
+        if (f.length != 30 || Integer.parseInt(f[0]) != week || !f[5].equals(method.name())
+                || Integer.parseInt(f[4]) != lag || Double.parseDouble(f[6]) != parameter
+                || Integer.parseInt(f[1]) != week - 50 || Integer.parseInt(f[2]) != week - 1
+                || Integer.parseInt(f[3]) != 50 || Integer.parseInt(f[29]) != scenarios || !f[15].matches("[01]{15}")
+                || !Double.isFinite(Double.parseDouble(f[18]))) return false;
+        if (isBaseline(method)) return true; // No nonexistent validation origins are required for D/SAA.
+        Path origins = directory.resolve("validation/k" + lag + "_p" + parameter + "/origins.tsv");
+        if (!tableComplete(origins, 16)) return false;
+        List<String> originRows = Files.readAllLines(origins);
+        List<Double> costs = new ArrayList<>();
+        for (int v = 0; v < 15; v++) {
+            String[] origin = originRows.get(v + 1).split("\t");
+            if (origin.length != 30 || Integer.parseInt(origin[0]) != week - 15 + v
+                    || Integer.parseInt(origin[1]) != week - 15 + v - 35
+                    || Integer.parseInt(origin[2]) != week - 15 + v - 1
+                    || Integer.parseInt(origin[3]) != 35 || Integer.parseInt(origin[29]) != 35 || Integer.parseInt(origin[4]) != lag
+                    || !origin[5].equals(method.name()) || Double.parseDouble(origin[6]) != parameter
+                    || !Double.isFinite(Double.parseDouble(origin[18]))) return false;
+            costs.add(Double.parseDouble(origin[18]));
+        }
+        double mean = costs.stream().mapToDouble(Double::doubleValue).average().orElseThrow();
+        return Math.abs(mean - Double.parseDouble(selection[2])) <= 1e-10 * Math.max(1, mean)
+                && Math.abs(sampleSd(costs, mean) - Double.parseDouble(selection[3])) <= 1e-10 * Math.max(1, mean);
+    }
+
+    private static boolean selectionComplete(Path directory, Method method, String[] selection) throws Exception {
+        int lag = Integer.parseInt(selection[0]);
+        double parameter = Double.parseDouble(selection[1]);
+        Path candidateFile = directory.resolve("candidates.tsv");
+        if (isBaseline(method)) return lag == 1 && parameter == 0
+                && Double.isNaN(Double.parseDouble(selection[2])) && Double.isNaN(Double.parseDouble(selection[3]))
+                && tableComplete(candidateFile, 1);
         // A final result alone cannot certify that the whole current grid was evaluated.
         double[] grid = method == Method.EXP ? BANDWIDTH : Arrays.stream(LEAF).asDoubleStream().toArray();
-        Path candidateFile = directory.resolve("candidates.tsv");
         if (!tableComplete(candidateFile, 3 * grid.length + 1)) return false;
         List<Candidate> valid = new ArrayList<>();
         Set<String> seen = new HashSet<>();
@@ -340,42 +415,8 @@ public final class OlistContextualRunner {
                 .thenComparingDouble(Candidate::parameter).thenComparingInt(Candidate::lag));
         if (valid.isEmpty()) return false;
         Candidate best = valid.get(0);
-        if (best.lag() != lag || best.parameter() != parameter
-                || best.mean() != Double.parseDouble(selection[2])
-                || best.sd() != Double.parseDouble(selection[3])) return false;
-        Path finalDir = directory.resolve("final");
-        if (!tableComplete(finalDir.resolve("result.tsv"), 2)
-                || !tableComplete(finalDir.resolve("weights.tsv"), 51)
-                || !tableComplete(finalDir.resolve("max_scaling.tsv"), lag * data.market.J + 1)
-                || !tableComplete(finalDir.resolve("lane_oos.tsv"), data.market.J + 1)
-                || !tableComplete(finalDir.resolve("carrier_oos.tsv"), data.market.I + 1)
-                || !tableComplete(finalDir.resolve("incumbent.tsv"), 2)
-                || !Files.exists(finalDir.resolve("logs/cplex.log"))) return false;
-        List<String> rows = Files.readAllLines(finalDir.resolve("result.tsv"));
-        if (!rows.equals(Files.readAllLines(directory.resolve("final_result.tsv")))) return false;
-        String[] f = rows.get(1).split("\t", -1);
-        if (f.length != 29 || Integer.parseInt(f[0]) != week || !f[5].equals(method.name())
-                || Integer.parseInt(f[4]) != lag || Double.parseDouble(f[6]) != parameter
-                || Integer.parseInt(f[1]) != week - 50 || Integer.parseInt(f[2]) != week - 1
-                || Integer.parseInt(f[3]) != 50 || !f[15].matches("[01]{15}")
-                || !Double.isFinite(Double.parseDouble(f[18]))) return false;
-        Path origins = directory.resolve("validation/k" + lag + "_p" + parameter + "/origins.tsv");
-        if (!tableComplete(origins, 16)) return false;
-        List<String> originRows = Files.readAllLines(origins);
-        List<Double> costs = new ArrayList<>();
-        for (int v = 0; v < 15; v++) {
-            String[] origin = originRows.get(v + 1).split("\t");
-            if (origin.length != 29 || Integer.parseInt(origin[0]) != week - 15 + v
-                    || Integer.parseInt(origin[1]) != week - 15 + v - 35
-                    || Integer.parseInt(origin[2]) != week - 15 + v - 1
-                    || Integer.parseInt(origin[3]) != 35 || Integer.parseInt(origin[4]) != lag
-                    || !origin[5].equals(method.name()) || Double.parseDouble(origin[6]) != parameter
-                    || !Double.isFinite(Double.parseDouble(origin[18]))) return false;
-            costs.add(Double.parseDouble(origin[18]));
-        }
-        double mean = costs.stream().mapToDouble(Double::doubleValue).average().orElseThrow();
-        return Math.abs(mean - Double.parseDouble(selection[2])) <= 1e-10 * Math.max(1, mean)
-                && Math.abs(sampleSd(costs, mean) - Double.parseDouble(selection[3])) <= 1e-10 * Math.max(1, mean);
+        return best.lag() == lag && best.parameter() == parameter
+                && best.mean() == Double.parseDouble(selection[2]) && best.sd() == Double.parseDouble(selection[3]);
     }
 
     private static String pythonEnvironment(boolean required) throws Exception {

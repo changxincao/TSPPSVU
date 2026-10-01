@@ -53,12 +53,12 @@ try {
             "-Dolist.rfScript=$(Join-Path $Root 'scripts/rf_leaf_weights.py')",
             "-Dolist.threads=$($cfg.solverThreads)", "-Dolist.limit=$($cfg.limitSeconds)")
         $output = Join-Path $Root "results/$($market.market)"
-        # Prepare shared immutable metadata once, before the two method processes start.
+        # Prepare shared immutable metadata once, before the four method processes start.
         $prepare = @("-Xmx$($cfg.heap)") + $properties + @("-Djava.library.path=$($cfg.cplexNative)", '-cp', $cp,
             'Test.analysis.brazil.OlistContextualRunner', 'prepare', $output)
         $code = Invoke-Java $prepare
         if ($code -ne 0) { throw "Protocol preparation failed: $($market.market)" }
-        foreach ($method in @('EXP', 'RF')) {
+        foreach ($method in @('D', 'SAA', 'EXP', 'RF')) {
             $arguments = @("-Xmx$($cfg.heap)") + $properties + @("-Dolist.methods=$method",
                 "-Djava.library.path=$($cfg.cplexNative)", '-cp', $cp,
                 'Test.analysis.brazil.OlistContextualRunner', 'run', $output, '0', '51')
@@ -67,7 +67,7 @@ try {
         }
     }
     Write-Atomic (Join-Path $control 'launch_plan.json') (ConvertTo-Json -InputObject @($tasks | Select-Object market,method,arguments) -Depth 5)
-    if ($CheckOnly) { Event 'CHECK_ONLY_PASS five inputs, Java, RF dependencies, protocol and ten launch commands; no solves'; return }
+    if ($CheckOnly) { Event "CHECK_ONLY_PASS five inputs, Java, RF dependencies, protocol and $($tasks.Count) launch commands; no solves"; return }
     function Save-State {
         Write-Atomic (Join-Path $control 'status.json') (ConvertTo-Json -InputObject @($tasks | Select-Object market,method,state,attempt,pid,exitCode,started,finished) -Depth 5)
     }
@@ -109,5 +109,5 @@ try {
         Save-State
         if (@($tasks | Where-Object state -eq 'RUNNING').Count) { Start-Sleep -Seconds 5 }
     }
-    Event "QUEUE_FINISHED complete=$(@($tasks | Where-Object state -eq 'COMPLETE').Count)/10 failed=$(@($tasks | Where-Object state -eq 'FAILED').Count)"
+    Event "QUEUE_FINISHED complete=$(@($tasks | Where-Object state -eq 'COMPLETE').Count)/$($tasks.Count) failed=$(@($tasks | Where-Object state -eq 'FAILED').Count)"
 } finally { $lock.Dispose() }

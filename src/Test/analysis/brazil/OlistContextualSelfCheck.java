@@ -116,7 +116,8 @@ public final class OlistContextualSelfCheck {
             java.nio.file.Path root = java.nio.file.Path.of(args.length > 1 ? args[1] : "tmp/olist_pipeline_selfcheck");
             java.nio.file.Files.createDirectories(root);
             StringBuilder fixture = new StringBuilder("weekIndex,A,B\n");
-            for (int week = 0; week < 54; week++) fixture.append(week).append(",20,30\n");
+            for (int week = 0; week < 54; week++) fixture.append(week).append(',')
+                    .append(20 + week % 5).append(',').append(30 + week % 7).append('\n');
             OlistContextualRunner.atomic(root.resolve("fixture.csv"), fixture.toString());
             OlistContextualRunner.INPUT = root.resolve("fixture.csv");
             OlistContextualRunner.OUTPUT = root.resolve("outputs");
@@ -124,8 +125,11 @@ public final class OlistContextualSelfCheck {
             OlistContextualRunner.LEAF = new int[]{2};
             OlistContextualRunner.TRIAL_COUNT = 1;
             OlistContextualRunner.LIMIT_SECONDS = 30;
+            OlistContextualRunner.METHODS = OlistContextualRunner.Method.values();
             OlistContextualRunner.main(new String[]{"run"});
-            for (String method : List.of("EXP", "RF")) {
+            for (String method : List.of("D", "SAA", "EXP", "RF")) {
+                boolean baseline = method.equals("D") || method.equals("SAA");
+                int scenarioCount = method.equals("D") ? 1 : 50;
                 var task = root.resolve("outputs/trial_000/" + method);
                 require(java.nio.file.Files.exists(task.resolve("complete.txt")), "End-to-end completion");
                 var fixtureData = OlistContextualData.loadSnapshot(root.resolve("outputs/input_snapshot.tsv"));
@@ -142,32 +146,81 @@ public final class OlistContextualSelfCheck {
                 String savedSelection = java.nio.file.Files.readString(selectionFile);
                 try {
                     String[] selected = savedSelection.lines().toList().get(1).split("\t");
-                    selected[2] = Double.toString(Double.parseDouble(selected[2]) + 100);
+                    selected[2] = baseline ? "0.0" : Double.toString(Double.parseDouble(selected[2]) + 100);
                     OlistContextualRunner.atomic(selectionFile, savedSelection.lines().toList().get(0)
                             + "\n" + String.join("\t", selected) + "\n");
                     require(!OlistContextualRunner.taskComplete(task, 53,
                             OlistContextualRunner.Method.valueOf(method), fixtureData), "Validation mean audit");
                 } finally { OlistContextualRunner.atomic(selectionFile, savedSelection); }
-                var candidateFile = task.resolve("candidates.tsv");
-                String savedCandidates = java.nio.file.Files.readString(candidateFile);
-                try {
-                    // Keep the marker and final result: an omitted or misranked candidate still invalidates completion.
-                    var candidateRows = savedCandidates.lines().toList();
-                    OlistContextualRunner.atomic(candidateFile,
-                            String.join("\n", candidateRows.subList(0, candidateRows.size() - 1)) + "\n");
-                    require(!OlistContextualRunner.taskComplete(task, 53,
-                            OlistContextualRunner.Method.valueOf(method), fixtureData), "Missing grid candidate audit");
-                    String[] other = candidateRows.get(candidateRows.size() - 1).split("\t");
-                    other[4] = "0.0";
-                    OlistContextualRunner.atomic(candidateFile,
-                            String.join("\n", candidateRows.subList(0, candidateRows.size() - 1))
-                                    + "\n" + String.join("\t", other) + "\n");
-                    require(!OlistContextualRunner.taskComplete(task, 53,
-                            OlistContextualRunner.Method.valueOf(method), fixtureData), "Selection must match grid ranking");
-                } finally { OlistContextualRunner.atomic(candidateFile, savedCandidates); }
-                require(java.nio.file.Files.readAllLines(task.resolve("final/result.tsv")).get(1).split("\t", -1).length == 29,
+                if (!baseline) {
+                    var candidateFile = task.resolve("candidates.tsv");
+                    String savedCandidates = java.nio.file.Files.readString(candidateFile);
+                    try {
+                        // Keep the marker and final result: an omitted or misranked candidate still invalidates completion.
+                        var candidateRows = savedCandidates.lines().toList();
+                        OlistContextualRunner.atomic(candidateFile,
+                                String.join("\n", candidateRows.subList(0, candidateRows.size() - 1)) + "\n");
+                        require(!OlistContextualRunner.taskComplete(task, 53,
+                                OlistContextualRunner.Method.valueOf(method), fixtureData), "Missing grid candidate audit");
+                        String[] other = candidateRows.get(candidateRows.size() - 1).split("\t");
+                        other[4] = "0.0";
+                        OlistContextualRunner.atomic(candidateFile,
+                                String.join("\n", candidateRows.subList(0, candidateRows.size() - 1))
+                                        + "\n" + String.join("\t", other) + "\n");
+                        require(!OlistContextualRunner.taskComplete(task, 53,
+                                OlistContextualRunner.Method.valueOf(method), fixtureData), "Selection must match grid ranking");
+                    } finally { OlistContextualRunner.atomic(candidateFile, savedCandidates); }
+                } else {
+                    require(java.nio.file.Files.readAllLines(task.resolve("candidates.tsv")).size() == 1,
+                            "Baselines have no validation grid");
+                    require(!java.nio.file.Files.exists(root.resolve("outputs/validation_pool/" + method)),
+                            "Baselines must not run origin solves");
+                }
+                String[] result = java.nio.file.Files.readAllLines(task.resolve("final/result.tsv")).get(1).split("\t", -1);
+                require(result.length == 30,
                         "Checkpoint schema");
-                require(java.nio.file.Files.readAllLines(task.resolve("final/weights.tsv")).size() == 51, "Final 50 weights");
+                require(Integer.parseInt(result[3]) == 50 && Integer.parseInt(result[29]) == scenarioCount,
+                        "Historical observations versus model scenarios");
+                require(java.nio.file.Files.readAllLines(task.resolve("final/weights.tsv")).size() == scenarioCount + 1,
+                        "Final scenario weights");
+                var scenariosFile = task.resolve("final/model_scenarios.tsv");
+                var scenarioRows = java.nio.file.Files.readAllLines(scenariosFile);
+                require(scenarioRows.size() == scenarioCount + 1, "Saved model inputs");
+                var history = fixtureData.window(53, 1, 50).training();
+                if (method.equals("D")) {
+                    String[] meanRow = scenarioRows.get(1).split("\t");
+                    for (int j = 0; j < 2; j++) {
+                        final int lane = j;
+                        double mean = history.stream().mapToDouble(s -> s.demand()[lane] / 50).sum();
+                        require(Math.abs(Double.parseDouble(meanRow[2 + j]) - mean) < 1e-10, "D uses past50 lane mean");
+                    }
+                } else if (method.equals("SAA")) {
+                    for (int s = 0; s < 50; s++) {
+                        String[] row = scenarioRows.get(s + 1).split("\t");
+                        require(Math.abs(Double.parseDouble(row[1]) - .02) < 1e-12, "SAA equal weight");
+                        for (int j = 0; j < 2; j++) require(Double.parseDouble(row[2 + j]) == history.get(s).demand()[j],
+                                "SAA uses every past50 scenario");
+                    }
+                }
+                if (baseline) {
+                    double[] y = new double[fixtureData.market.I];
+                    for (int i = 0; i < y.length; i++) y[i] = result[15].charAt(i) - '0';
+                    double expected = 0;
+                    for (String scenario : scenarioRows.subList(1, scenarioRows.size())) {
+                        String[] fields = scenario.split("\t");
+                        double[] demand = {Double.parseDouble(fields[2]), Double.parseDouble(fields[3])};
+                        expected += Double.parseDouble(fields[1]) * Test.BatchRunner.RecourseEvaluator
+                                .evaluate(fixtureData.market, y, demand, true).objValue;
+                    }
+                    require(Math.abs(Double.parseDouble(result[9]) - expected) < 1e-7 * Math.max(1, expected),
+                            "Baseline objective equals weighted fixed-y recourse");
+                }
+                String savedScenarios = java.nio.file.Files.readString(scenariosFile);
+                try {
+                    OlistContextualRunner.atomic(scenariosFile, scenarioRows.get(0) + "\n");
+                    require(!OlistContextualRunner.taskComplete(task, 53,
+                            OlistContextualRunner.Method.valueOf(method), fixtureData), "Missing model inputs invalidate marker");
+                } finally { OlistContextualRunner.atomic(scenariosFile, savedScenarios); }
                 var before = java.nio.file.Files.getLastModifiedTime(task.resolve("final/logs/cplex.log"));
                 OlistContextualRunner.METHODS = new OlistContextualRunner.Method[]{OlistContextualRunner.Method.valueOf(method)};
                 OlistContextualRunner.main(new String[]{"run"});
