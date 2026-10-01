@@ -2,6 +2,7 @@ param([Parameter(Mandatory=$true)][string]$TaskRoot,
       [Parameter(Mandatory=$true)][string]$ExperimentRoot,
       [ValidateSet('cv030050','cv040060','cv010030','cv050070')]
       [string[]]$Cells=@('cv030050','cv040060','cv010030'),
+      [switch]$SkipCompleted,
       [ValidateRange(1,4)][int]$MaxParallel=4)
 $ErrorActionPreference='Stop'
 $control=Join-Path $ExperimentRoot 'control'
@@ -20,18 +21,48 @@ $queue=[System.Collections.Generic.Queue[object]]::new()
 $running=[System.Collections.Generic.List[object]]::new()
 $failed=[System.Collections.Generic.List[object]]::new()
 $events=Join-Path $control 'events.csv'
+function Write-Status($value) {
+    $path=Join-Path $control 'status.json'
+    $json=$value | ConvertTo-Json
+    for($attempt=1;$attempt -le 40;$attempt++) {
+        try {
+            Set-Content -LiteralPath $path -Value $json -Encoding UTF8 -ErrorAction Stop
+            return
+        } catch [System.IO.IOException] {
+            if($attempt -eq 40) {throw}
+            Start-Sleep -Milliseconds 250
+        }
+    }
+}
 function Event($task,$state,$code) {
     [pscustomobject]@{time=[DateTime]::Now.ToString('o');cell=$task.cell;rep=$task.rep;
         method=$task.method;attempt=$task.attempt;state=$state;exitCode=$code} |
         Export-Csv -LiteralPath $events -Append -NoTypeInformation -Encoding UTF8
+}
+function Complete-Method([string]$directory) {
+    if (-not (Test-Path -LiteralPath (Join-Path $directory 'complete.txt'))) {return $false}
+    foreach ($q in 0..39) {
+        $query=Join-Path $directory ('queries\query_{0:D3}' -f $q)
+        foreach ($file in @('query_metadata.txt','validation\summary.csv','validation\details.csv',
+                            'solve\final_solve.csv','solve\final_weights.csv',
+                            'oos\summary.csv','oos\draws.csv')) {
+            $path=Join-Path $query $file
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Item -LiteralPath $path).Length -eq 0) {
+                return $false
+            }
+        }
+    }
+    return $true
 }
 # Each independent method task includes rolling validation, then all forty paired queries.
 # No solver starts during generation. Resume always lets the Java worker verify its checkpoint protocol.
 foreach($cell in $Cells) {
     foreach($rep in 0..4) {
         foreach($method in @('CSAA-Exp','CSAA-Tri','RF-CSAA','SAA-All','D')) {
+            $target=Join-Path $ExperimentRoot "$cell\experiment1\rep_$('{0:D3}' -f $rep)\$method"
+            if ($SkipCompleted -and (Complete-Method $target)) {continue}
             $queue.Enqueue([pscustomobject]@{cell=$cell;rep=$rep;method=$method;attempt=0;
-                target=(Join-Path $ExperimentRoot "$cell\experiment1\rep_$('{0:D3}' -f $rep)\$method")})
+                target=$target})
         }
     }
 }
@@ -73,9 +104,8 @@ while($queue.Count -gt 0 -or $running.Count -gt 0) {
         [void]$running.Remove($item)
         $item.process.Dispose()
     }
-    [pscustomobject]@{state='RUNNING';updated=[DateTime]::Now.ToString('o');queued=$queue.Count;
-        running=$running.Count;failed=$failed.Count;parallel=$MaxParallel;solverThreads=4} |
-        ConvertTo-Json | Set-Content -LiteralPath (Join-Path $control 'status.json') -Encoding UTF8
+    Write-Status ([pscustomobject]@{state='RUNNING';updated=[DateTime]::Now.ToString('o');queued=$queue.Count;
+        running=$running.Count;failed=$failed.Count;parallel=$MaxParallel;solverThreads=4})
 }
 # Selection uses validation costs only; it is never based on forty-query OOS outcomes.
 foreach($cell in $Cells) {
@@ -94,7 +124,6 @@ foreach($cell in $Cells) {
     }
 }
 $failed | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $control 'failed_tasks.json') -Encoding UTF8
-[pscustomobject]@{state=$(if($failed.Count -eq 0){'FINISHED'}else{'PARTIAL'});
-    ended=[DateTime]::Now.ToString('o');failed=$failed.Count;running=0;queued=0} |
-    ConvertTo-Json | Set-Content -LiteralPath (Join-Path $control 'status.json') -Encoding UTF8
+Write-Status ([pscustomobject]@{state=$(if($failed.Count -eq 0){'FINISHED'}else{'PARTIAL'});
+    ended=[DateTime]::Now.ToString('o');failed=$failed.Count;running=0;queued=0})
 Stop-Transcript | Out-Null
