@@ -8,7 +8,9 @@
 2. 检查而不求解：`powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_olist_batch.ps1 -CheckOnly`
 3. 远程后台启动：`powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_olist_detached.ps1`
 
-后台调度器由远程本机WMI服务创建，不作为SSH shell的子进程；关闭SSH或控制电脑不会停止它。若系统不允许WMI创建进程，入口明确报错，不宣称启动成功。远程电脑本身关机仍会停止。重启后重新启动会审计已有文件、只补未完成部分。若上次调度器退出但Java worker仍运行，入口拒绝重复启动，先等待其结束。配置变化会拒绝复用旧结果，必须使用新结果目录。
+后台调度器使用Windows原生CreateProcessW及BREAKAWAY_FROM_JOB，脱离SSH会话的job；关闭SSH或控制电脑不会停止它。无需WMI/CIM权限。启动API失败时明确报错，不宣称启动成功。远程电脑本身关机仍会停止。重启后重新启动会审计已有文件、只补未完成部分。若上次调度器退出但Java worker仍运行，入口通过Windows原生API读取命令行，拒绝重复启动。配置变化会拒绝复用旧结果，必须使用新结果目录。
+
+等待旧RF-DRO的25组全部完成后启动：`powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_olist_detached.ps1 -PreviousStage '旧实验的experiment2_rf_center_20261001目录'`。等待器在远程机器执行，每60秒检查旧队列FINISHED、零运行/等待、25个完成标记及1000个query的必需输出；输出不齐不会启动。新实验目录保存control/wait_status.json及launcher.json。等待器和求解调度器各有排他锁。
 
 ## 输入和实验协议
 

@@ -35,10 +35,12 @@ try {
     if (!(Test-Path -LiteralPath (Join-Path $cfg.cplexNative 'cplex2211.dll'))) { throw 'CPLEX native DLL missing' }
     if ($cfg.maxParallel -lt 1 -or $cfg.solverThreads -lt 1 -or $cfg.limitSeconds -lt 1 -or $cfg.maxAttempts -lt 1) { throw 'Invalid runtime settings' }
     # Refuse duplicate schedulers/workers after interruption; never kill unrelated Java processes.
-    $orphans = @(Get-CimInstance Win32_Process -Filter "Name='java.exe'" | Where-Object {
-        $_.CommandLine -and $_.CommandLine.Contains($Root) -and $_.CommandLine.Contains('OlistContextualRunner')
+    . (Join-Path $PSScriptRoot 'olist_windows_process.ps1')
+    $orphans = @(Get-Process java -ErrorAction SilentlyContinue | Where-Object {
+        $command = [OlistWindowsProcess]::CommandLine($_.Id)
+        $command.Contains($Root) -and $command.Contains('OlistContextualRunner')
     })
-    if ($orphans.Count) { throw "Existing Olist workers still running (PID $($orphans.ProcessId -join ',')); do not launch duplicates." }
+    if ($orphans.Count) { throw "Existing Olist workers still running (PID $($orphans.Id -join ',')); do not launch duplicates." }
     $cp = (Join-Path $Root 'runtime/classes') + ';' + $cfg.cplexJar + ';' + $cfg.mosekJar
     $base = @("-Xmx$($cfg.heap)", "-Djava.library.path=$($cfg.cplexNative)", '-cp', $cp)
     $code = Invoke-Java ($base + @('Test.analysis.brazil.OlistContextualBatchMain', 'check', $Root))
@@ -81,6 +83,7 @@ try {
         foreach ($task in @($tasks | Where-Object state -eq 'RUNNING')) {
             $task.process.Refresh()
             if (!$task.process.HasExited) { continue }
+            $task.process.WaitForExit()
             $task.exitCode = $task.process.ExitCode
             $task.process.Dispose()
             $task.process = $null
@@ -99,6 +102,7 @@ try {
             $quoted = @($task.arguments | ForEach-Object { '"' + $_ + '"' })
             try {
                 $task.process = Start-Process -FilePath $cfg.java -ArgumentList $quoted -WorkingDirectory $Root -WindowStyle Hidden -PassThru -RedirectStandardOutput "$stem.stdout.log" -RedirectStandardError "$stem.stderr.log"
+                $heldHandle = $task.process.Handle
                 $task.pid=$task.process.Id; $task.state='RUNNING'; $task.started=Get-Date -Format o
                 Event "START $($task.market) $($task.method) pid=$($task.pid)"
             } catch {

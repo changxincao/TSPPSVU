@@ -62,7 +62,7 @@ try {
         if ($major -gt 65) { throw "Not Java21 compatible: $($file.FullName) major=$major" }
     }
     Copy-Item -LiteralPath 'analysis/trb_svu/rf_leaf_weights.py' -Destination (Join-Path $Bundle 'scripts/rf_leaf_weights.py')
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'run_olist_batch.ps1'), (Join-Path $PSScriptRoot 'start_olist_detached.ps1') -Destination (Join-Path $Bundle 'scripts')
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'run_olist_batch.ps1'), (Join-Path $PSScriptRoot 'start_olist_detached.ps1'), (Join-Path $PSScriptRoot 'run_olist_after_stage.ps1'), (Join-Path $PSScriptRoot 'olist_windows_process.ps1') -Destination (Join-Path $Bundle 'scripts')
     & "$JavaHome/bin/java.exe" -cp $portableCp Test.analysis.brazil.OlistContextualBatchMain prepare $Bundle
     if ($LASTEXITCODE -ne 0) { throw 'Frozen market preparation failed' }
     & "$JavaHome/bin/java.exe" -cp $portableCp Test.analysis.brazil.OlistContextualBatchMain check $Bundle
