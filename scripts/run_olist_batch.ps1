@@ -7,9 +7,18 @@ New-Item -ItemType Directory -Force -Path $control | Out-Null
 # The lock is released by the OS even after a scheduler crash.
 $lock = [IO.File]::Open((Join-Path $control 'scheduler.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
 function Write-Atomic($Path, $Text) {
-    [IO.File]::WriteAllText("$Path.tmp", $Text, (New-Object Text.UTF8Encoding($false)))
-    if (Test-Path -LiteralPath $Path) { [IO.File]::Replace("$Path.tmp", $Path, $null) }
-    else { [IO.File]::Move("$Path.tmp", $Path) }
+    for ($attempt = 0; ; $attempt++) {
+        try {
+            [IO.File]::WriteAllText("$Path.tmp", $Text, (New-Object Text.UTF8Encoding($false)))
+            if (Test-Path -LiteralPath $Path) { [IO.File]::Replace("$Path.tmp", $Path, [NullString]::Value) }
+            else { [IO.File]::Move("$Path.tmp", $Path) }
+            return
+        } catch {
+            $cause = $_.Exception.GetBaseException()
+            if ($attempt -ge 3 -or !($cause -is [IO.IOException] -or $cause -is [UnauthorizedAccessException])) { throw }
+            Start-Sleep -Milliseconds (100 * ($attempt + 1))
+        }
+    }
 }
 function Event($Message) {
     Add-Content -LiteralPath (Join-Path $control 'events.log') -Value ((Get-Date -Format o) + ' ' + $Message)
@@ -24,7 +33,7 @@ try {
         if (!(Test-Path -LiteralPath $file)) { throw "Runtime file missing: $file" }
     }
     if (!(Test-Path -LiteralPath (Join-Path $cfg.cplexNative 'cplex2211.dll'))) { throw 'CPLEX native DLL missing' }
-    if ($cfg.maxParallel -lt 1 -or $cfg.solverThreads -lt 1 -or $cfg.limitSeconds -lt 1) { throw 'Invalid runtime settings' }
+    if ($cfg.maxParallel -lt 1 -or $cfg.solverThreads -lt 1 -or $cfg.limitSeconds -lt 1 -or $cfg.maxAttempts -lt 1) { throw 'Invalid runtime settings' }
     # Refuse duplicate schedulers/workers after interruption; never kill unrelated Java processes.
     $orphans = @(Get-CimInstance Win32_Process -Filter "Name='java.exe'" | Where-Object {
         $_.CommandLine -and $_.CommandLine.Contains($Root) -and $_.CommandLine.Contains('OlistContextualRunner')
@@ -93,7 +102,8 @@ try {
                 $task.pid=$task.process.Id; $task.state='RUNNING'; $task.started=Get-Date -Format o
                 Event "START $($task.market) $($task.method) pid=$($task.pid)"
             } catch {
-                $task.state='FAILED'; $task.finished=Get-Date -Format o; Event "LAUNCH_FAILED $($task.market) $($task.method): $_"
+                $task.state = if ($task.attempt -lt $cfg.maxAttempts) { 'PENDING' } else { 'FAILED' }
+                $task.finished=Get-Date -Format o; Event "LAUNCH_FAILED $($task.market) $($task.method) next=$($task.state): $_"
             }
         }
         Save-State

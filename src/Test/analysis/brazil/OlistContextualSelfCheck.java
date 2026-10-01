@@ -33,6 +33,36 @@ public final class OlistContextualSelfCheck {
             require(count == 12 && min == data.market.h[i], "Coverage/min penalty");
             require(data.market.p[i] >= .15 * demand && data.market.p[i] <= .35 * demand, "MQC scale");
         }
+        if (args.length > 0 && args[0].equals("weight-grid")) {
+            double[] grid = {.1, .25, .5, .8, .9, 1, 2, 3, 5, 10, 30, 50, 100};
+            System.out.println("B\twindows\tess_min\tess_median\ttv_uniform_median\ttv_uniform_max");
+            for (double b : grid) {
+                List<Double> ess = new java.util.ArrayList<>(), tv = new java.util.ArrayList<>();
+                // All 65 distinct validation origins, not duplicated across outer test weeks.
+                for (int origin = 38; origin <= 102; origin++) for (int lag = 1; lag <= 3; lag++) {
+                    var scaledWindow = OlistContextualData.scale(data.window(origin, lag, 35));
+                    var weights = TRBSVUScenarioWeights.kernel(scaledWindow.training(), scaledWindow.query(),
+                            TRBSVUScenarioWeights.Kernel.EXPONENTIAL, b);
+                    double total = 0, squares = 0, deviation = 0;
+                    for (var sample : weights) {
+                        if (sample.weight > 0) sample.weight = Math.max(1e-8, sample.weight);
+                        total += sample.weight;
+                    }
+                    for (var sample : weights) {
+                        double p = sample.weight / total;
+                        squares += p * p;
+                        deviation += Math.abs(p - 1.0 / weights.size());
+                    }
+                    ess.add(1 / squares);
+                    tv.add(deviation / 2);
+                }
+                ess.sort(Double::compare); tv.sort(Double::compare);
+                System.out.printf(java.util.Locale.ROOT, "%g\t%d\t%.6f\t%.6f\t%.6f\t%.6f%n",
+                        b, ess.size(), ess.get(0), ess.get(ess.size() / 2),
+                        tv.get(tv.size() / 2), tv.get(tv.size() - 1));
+            }
+            return; // Diagnostic only: no RF training, MIP or holdout-cost evaluation.
+        }
         int checks = 0;
         for (int test = 53; test < 104; test++) for (int lag = 1; lag <= 3; lag++) {
             var full = data.window(test, lag, 50);
@@ -118,6 +148,23 @@ public final class OlistContextualSelfCheck {
                     require(!OlistContextualRunner.taskComplete(task, 53,
                             OlistContextualRunner.Method.valueOf(method), fixtureData), "Validation mean audit");
                 } finally { OlistContextualRunner.atomic(selectionFile, savedSelection); }
+                var candidateFile = task.resolve("candidates.tsv");
+                String savedCandidates = java.nio.file.Files.readString(candidateFile);
+                try {
+                    // Keep the marker and final result: an omitted or misranked candidate still invalidates completion.
+                    var candidateRows = savedCandidates.lines().toList();
+                    OlistContextualRunner.atomic(candidateFile,
+                            String.join("\n", candidateRows.subList(0, candidateRows.size() - 1)) + "\n");
+                    require(!OlistContextualRunner.taskComplete(task, 53,
+                            OlistContextualRunner.Method.valueOf(method), fixtureData), "Missing grid candidate audit");
+                    String[] other = candidateRows.get(candidateRows.size() - 1).split("\t");
+                    other[4] = "0.0";
+                    OlistContextualRunner.atomic(candidateFile,
+                            String.join("\n", candidateRows.subList(0, candidateRows.size() - 1))
+                                    + "\n" + String.join("\t", other) + "\n");
+                    require(!OlistContextualRunner.taskComplete(task, 53,
+                            OlistContextualRunner.Method.valueOf(method), fixtureData), "Selection must match grid ranking");
+                } finally { OlistContextualRunner.atomic(candidateFile, savedCandidates); }
                 require(java.nio.file.Files.readAllLines(task.resolve("final/result.tsv")).get(1).split("\t", -1).length == 29,
                         "Checkpoint schema");
                 require(java.nio.file.Files.readAllLines(task.resolve("final/weights.tsv")).size() == 51, "Final 50 weights");

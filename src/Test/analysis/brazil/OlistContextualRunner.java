@@ -31,7 +31,8 @@ public final class OlistContextualRunner {
     public static boolean PREPARE_ONLY = true;
     public static Method[] METHODS = Arrays.stream(System.getProperty("olist.methods", "EXP,RF").split(","))
             .map(String::trim).map(Method::valueOf).toArray(Method[]::new);
-    public static double[] BANDWIDTH = {0.1, 0.25, 0.5, 0.8, 0.9, 1, 2, 3, 5, 10, 30, 50, 100};
+    // Pilot grid: concentrated through nearly uniform weights; expand only after reviewing validation.
+    public static double[] BANDWIDTH = {0.1, 0.25, 0.5, 1, 2, 5};
     public static int[] LEAF = {1, 2, 5, 10};
     private static final String HEADER = "target_week\ttrain_start\ttrain_end\ttraining_size\tlag\tmethod"
             + "\tparameter\tstatus\tcertified_optimal\tobjective\tbest_bound\trelative_gap"
@@ -113,6 +114,8 @@ public final class OlistContextualRunner {
                 } catch (Exception error) {
                     atomic(step.resolve("failure.txt"), error.toString() + "\n");
                     System.err.println("ORIGIN_FAILED " + step + " " + error);
+                    // Output failure is not evidence that a bandwidth is statistically invalid.
+                    if (error instanceof java.io.IOException) throw error;
                     break;
                 }
             }
@@ -225,6 +228,8 @@ public final class OlistContextualRunner {
                 + "\t" + elapsed + "\t" + solution.optimizerTimeSec + "\n");
         // Single observed week is the holdout; no fabricated 1000 conditional OOS draws.
         var recourse = Test.BatchRunner.RecourseEvaluator.evaluate(data.market, solution.y, window.target().demand(), true);
+        if (!Double.isFinite(recourse.objValue))
+            throw new IllegalStateException("Realized-demand recourse has no finite solution; incumbent retained.");
         double totalDemand = Arrays.stream(window.target().demand()).sum();
         double contracted = Arrays.stream(recourse.carrierAssignedQty).sum();
         double spot = Arrays.stream(recourse.laneSpotQty).sum();
@@ -309,6 +314,35 @@ public final class OlistContextualRunner {
         int lag = Integer.parseInt(selection[0]);
         double parameter = Double.parseDouble(selection[1]);
         if (lag < 1 || lag > 3) return false;
+        // A final result alone cannot certify that the whole current grid was evaluated.
+        double[] grid = method == Method.EXP ? BANDWIDTH : Arrays.stream(LEAF).asDoubleStream().toArray();
+        Path candidateFile = directory.resolve("candidates.tsv");
+        if (!tableComplete(candidateFile, 3 * grid.length + 1)) return false;
+        List<Candidate> valid = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (String row : Files.readAllLines(candidateFile).subList(1, 3 * grid.length + 1)) {
+            String[] fields = row.split("\t", -1);
+            if (fields.length != 6) return false;
+            int candidateLag = Integer.parseInt(fields[0]), count = Integer.parseInt(fields[2]);
+            double candidateParameter = Double.parseDouble(fields[1]);
+            if (candidateLag < 1 || candidateLag > 3 || count < 0 || count > 15
+                    || Arrays.stream(grid).noneMatch(p -> p == candidateParameter)
+                    || !seen.add(candidateLag + ":" + candidateParameter)
+                    || !(fields[3].equals("true") || fields[3].equals("false"))
+                    || Boolean.parseBoolean(fields[3]) != (count == 15)) return false;
+            if (count == 15) {
+                double mean = Double.parseDouble(fields[4]), sd = Double.parseDouble(fields[5]);
+                if (!Double.isFinite(mean) || !Double.isFinite(sd) || sd < 0) return false;
+                valid.add(new Candidate(candidateLag, candidateParameter, mean, sd));
+            }
+        }
+        valid.sort(Comparator.comparingDouble(Candidate::mean).thenComparingDouble(Candidate::sd)
+                .thenComparingDouble(Candidate::parameter).thenComparingInt(Candidate::lag));
+        if (valid.isEmpty()) return false;
+        Candidate best = valid.get(0);
+        if (best.lag() != lag || best.parameter() != parameter
+                || best.mean() != Double.parseDouble(selection[2])
+                || best.sd() != Double.parseDouble(selection[3])) return false;
         Path finalDir = directory.resolve("final");
         if (!tableComplete(finalDir.resolve("result.tsv"), 2)
                 || !tableComplete(finalDir.resolve("weights.tsv"), 51)
@@ -359,20 +393,28 @@ public final class OlistContextualRunner {
 
     private static String codeHash() throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        Map<String, Class<?>> classes = new TreeMap<>();
         for (Class<?> type : List.of(OlistContextualRunner.class, OlistContextualData.class,
                 Test.analysis.synthetic.TRBSVUProcurementGenerator.class, TRBSVUForestWeights.class,
                 TRBSVUScenarioWeights.class, TRBSVUSolveMethods.class, SAAModel.class,
                 Test.BatchRunner.class, Helper.calculateHelper.StandardScaler.class,
                 Helper.basicHelper.SampleBuilder.class, Helper.basicHelper.Config.class,
+                Basic.Data.class, Basic.PeriodData.class, Solution.class,
                 Basic.ProcurementParams.class, Basic.Sample.class, Basic.CovariateVector.class,
                 Helper.calculateHelper.WeightCalculator.class, OutputManager.class,
-                Helper.basicHelper.WeeklyWideLoader.class)) {
+                Helper.basicHelper.WeeklyWideLoader.class)) collectClasses(type, classes);
+        for (Class<?> type : classes.values()) {
             try (InputStream stream = type.getResourceAsStream("/" + type.getName().replace('.', '/') + ".class")) {
                 if (stream == null) throw new IllegalStateException("Class unavailable: " + type);
                 digest.update(stream.readAllBytes());
             }
         }
         return HexFormat.of().formatHex(digest.digest());
+    }
+
+    private static void collectClasses(Class<?> type, Map<String, Class<?>> classes) {
+        if (classes.putIfAbsent(type.getName(), type) == null)
+            for (Class<?> nested : type.getDeclaredClasses()) collectClasses(nested, classes);
     }
 
     private static String hash(byte[] bytes) throws Exception {
@@ -394,8 +436,17 @@ public final class OlistContextualRunner {
     static void atomic(Path file, String text) throws Exception {
         Files.createDirectories(file.toAbsolutePath().getParent());
         Path temporary = file.resolveSibling(file.getFileName() + ".tmp");
-        Files.writeString(temporary, text, StandardCharsets.UTF_8);
-        try { Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE); }
-        catch (AtomicMoveNotSupportedException error) { Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING); }
+        for (int attempt = 0; ; attempt++) {
+            try {
+                Files.writeString(temporary, text, StandardCharsets.UTF_8);
+                try { Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE); }
+                catch (AtomicMoveNotSupportedException error) { Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING); }
+                return;
+            } catch (AccessDeniedException error) {
+                // Windows scanners/readers may briefly hold the destination; never swallow a persistent error.
+                if (attempt >= 3) throw error;
+                Thread.sleep(100L * (attempt + 1));
+            }
+        }
     }
 }
