@@ -20,15 +20,17 @@ import java.util.*;
 /** IDE entry point: default only prepares/audits inputs; pass 'run' to solve. */
 public final class OlistContextualRunner {
     public enum Method { EXP, RF }
-    public static Path INPUT = OlistContextualData.DEFAULT_INPUT;
+    public static Path INPUT = Path.of(System.getProperty("olist.input", OlistContextualData.DEFAULT_INPUT.toString()));
+    public static Path SNAPSHOT = System.getProperty("olist.instance") == null ? null : Path.of(System.getProperty("olist.instance"));
     public static Path OUTPUT = Path.of("analysis_runs/olist_exp_rf_max_20261001");
-    public static Path PYTHON = Path.of(".venv-rsome/Scripts/python.exe").toAbsolutePath();
-    public static Path RF_SCRIPT = Path.of("analysis/trb_svu/rf_leaf_weights.py").toAbsolutePath();
-    public static long MARKET_SEED = 20261020, RF_SEED = 20261020;
-    public static int THREADS = 4, LIMIT_SECONDS = 14400;
+    public static Path PYTHON = Path.of(System.getProperty("olist.python", ".venv-rsome/Scripts/python.exe")).toAbsolutePath();
+    public static Path RF_SCRIPT = Path.of(System.getProperty("olist.rfScript", "analysis/trb_svu/rf_leaf_weights.py")).toAbsolutePath();
+    public static long MARKET_SEED = Long.getLong("olist.marketSeed", 20261020), RF_SEED = Long.getLong("olist.rfSeed", 20261020);
+    public static int THREADS = Integer.getInteger("olist.threads", 4), LIMIT_SECONDS = Integer.getInteger("olist.limit", 14400);
     public static int START_TRIAL = 0, TRIAL_COUNT = 51;
     public static boolean PREPARE_ONLY = true;
-    public static Method[] METHODS = {Method.EXP, Method.RF};
+    public static Method[] METHODS = Arrays.stream(System.getProperty("olist.methods", "EXP,RF").split(","))
+            .map(String::trim).map(Method::valueOf).toArray(Method[]::new);
     public static double[] BANDWIDTH = {0.1, 0.25, 0.5, 0.8, 0.9, 1, 2, 3, 5, 10, 30, 50, 100};
     public static int[] LEAF = {1, 2, 5, 10};
     private static final String HEADER = "target_week\ttrain_start\ttrain_end\ttraining_size\tlag\tmethod"
@@ -46,7 +48,9 @@ public final class OlistContextualRunner {
         if (args.length > 1) OUTPUT = Path.of(args[1]);
         if (args.length > 2) START_TRIAL = Integer.parseInt(args[2]);
         if (args.length > 3) TRIAL_COUNT = Integer.parseInt(args[3]);
-        OlistContextualData data = new OlistContextualData(INPUT, MARKET_SEED);
+        OlistContextualData data = SNAPSHOT == null ? new OlistContextualData(INPUT, MARKET_SEED)
+                : OlistContextualData.loadSnapshot(SNAPSHOT);
+        if (data.marketSeed != MARKET_SEED) throw new IllegalArgumentException("Snapshot/market seed mismatch.");
         if (START_TRIAL < 0 || TRIAL_COUNT < 1 || THREADS < 1 || LIMIT_SECONDS < 1)
             throw new IllegalArgumentException("Invalid execution settings.");
         for (double b : BANDWIDTH) if (!Double.isFinite(b) || b <= 0) throw new IllegalArgumentException("Invalid B.");
@@ -62,18 +66,21 @@ public final class OlistContextualRunner {
             return;
         }
         TRBSVUForestWeights forest = new TRBSVUForestWeights(PYTHON.toString(), RF_SCRIPT);
+        int failed = 0;
         for (int trial = START_TRIAL; trial < end; trial++) {
             int test = OlistContextualData.FIRST_TEST + trial;
             for (Method method : METHODS) {
                 Path directory = OUTPUT.resolve(String.format("trial_%03d/%s", trial, method));
                 try { runMethod(data, forest, test, method, directory); }
                 catch (Exception error) {
+                    failed++;
                     atomic(directory.resolve("failure.txt"), error.toString() + "\n");
                     System.err.println("TASK_FAILED " + directory + " " + error);
                     // One failed method/week must not stop later tasks.
                 }
             }
         }
+        if (failed > 0) throw new IllegalStateException(failed + " method/week tasks failed; saved successes remain reusable.");
     }
 
     private record Candidate(int lag, double parameter, double mean, double sd) { }
@@ -260,7 +267,7 @@ public final class OlistContextualRunner {
 
     private static void prepare(OlistContextualData data, String environment) throws Exception {
         Files.createDirectories(OUTPUT);
-        String protocol = "OLIST_EXP_RF_MAX_ROLLING15_V1\ninputSha256=" + hash(Files.readAllBytes(INPUT))
+        String protocol = "OLIST_EXP_RF_MAX_ROLLING15_V2\ninputSha256=" + hash(Files.readAllBytes(SNAPSHOT == null ? INPUT : SNAPSHOT))
                 + "\ncodeSha256=" + codeHash() + "\nrfScriptSha256=" + hash(Files.readAllBytes(RF_SCRIPT))
                 + "\npython=" + PYTHON + "\npythonEnvironment=" + environment
                 + "\nmarketSeed=" + MARKET_SEED + "\nrfSeed=" + RF_SEED + "\nthreads=" + THREADS
@@ -269,8 +276,19 @@ public final class OlistContextualRunner {
                 + "procurementCalibration=ALL_WEEKS_RETROSPECTIVE\nvalidation=35_rolling_15\nfinalHistory=50\n"
                 + "scaling=TRAINING_MAX_NO_CLIPPING\nB=" + Arrays.toString(BANDWIDTH) + "\nleaf=" + Arrays.toString(LEAF) + "\n";
         Path file = OUTPUT.resolve("protocol.txt");
-        if (Files.exists(file) && !Files.readString(file).equals(protocol))
-            throw new IllegalStateException("Protocol changed; use a new output directory. " + file);
+        if (Files.exists(file)) {
+            if (!Files.readString(file).equals(protocol))
+                throw new IllegalStateException("Protocol changed; use a new output directory. " + file);
+            if (Files.exists(OUTPUT.resolve("rolling_plan.tsv")) && Files.exists(OUTPUT.resolve("input_snapshot.tsv"))) {
+                Path expected = Files.createTempFile(OUTPUT, "snapshot_verify_", ".tsv");
+                try {
+                    data.saveSnapshot(expected);
+                    if (!Arrays.equals(Files.readAllBytes(expected), Files.readAllBytes(OUTPUT.resolve("input_snapshot.tsv"))))
+                        throw new IllegalStateException("Prepared numerical snapshot differs from solve input.");
+                } finally { Files.deleteIfExists(expected); }
+                return;
+            }
+        }
         atomic(file, protocol);
         StringBuilder plan = new StringBuilder("trial\ttest_week\tfinal_start\tfinal_end\tvalidation_start\tvalidation_end\n");
         for (int test = OlistContextualData.FIRST_TEST; test < data.weekly.periods.size(); test++)
@@ -278,23 +296,52 @@ public final class OlistContextualRunner {
                     .append(test - 50).append('\t').append(test - 1).append('\t').append(test - 15)
                     .append('\t').append(test - 1).append('\n');
         atomic(OUTPUT.resolve("rolling_plan.tsv"), plan.toString());
-        // One readable snapshot containing actual weekly demands plus the fixed procurement market.
-        StringBuilder snapshot = new StringBuilder("type\tindex1\tindex2\tvalues\n");
-        for (int j = 0; j < data.market.J; j++) snapshot.append("LANE\t").append(j).append("\t-1\t")
-                .append(data.weekly.laneNames.get(j)).append('\t').append(data.baselineDemand[j]).append('\t').append(data.market.e[j]).append('\n');
-        for (int i = 0; i < data.market.I; i++) {
-            snapshot.append("CARRIER\t").append(i).append("\t-1\t").append(data.market.p[i]).append('\t')
-                    .append(data.market.h[i]).append('\t').append(data.market.M[i]).append('\n');
-            for (int j = 0; j < data.market.J; j++) snapshot.append("PAIR\t").append(i).append('\t').append(j)
-                    .append('\t').append(data.market.eligible[i][j]).append('\t').append(data.market.q[i][j]).append('\t')
-                    .append(data.market.eligible[i][j] ? data.market.r[i][j] : "NA").append('\n');
+        data.saveSnapshot(OUTPUT.resolve("input_snapshot.tsv"));
+    }
+
+    /** Check actual final outputs, not just an old complete marker. */
+    public static boolean taskComplete(Path directory, int week, Method method, OlistContextualData data) throws Exception {
+        if (!Files.exists(directory.resolve("complete.txt")) || Files.exists(directory.resolve("failure.txt"))
+                || !tableComplete(directory.resolve("selection.tsv"), 2)
+                || !tableComplete(directory.resolve("final_result.tsv"), 2)) return false;
+        String[] selection = Files.readAllLines(directory.resolve("selection.tsv")).get(1).split("\t");
+        if (selection.length != 4) return false;
+        int lag = Integer.parseInt(selection[0]);
+        double parameter = Double.parseDouble(selection[1]);
+        if (lag < 1 || lag > 3) return false;
+        Path finalDir = directory.resolve("final");
+        if (!tableComplete(finalDir.resolve("result.tsv"), 2)
+                || !tableComplete(finalDir.resolve("weights.tsv"), 51)
+                || !tableComplete(finalDir.resolve("max_scaling.tsv"), lag * data.market.J + 1)
+                || !tableComplete(finalDir.resolve("lane_oos.tsv"), data.market.J + 1)
+                || !tableComplete(finalDir.resolve("carrier_oos.tsv"), data.market.I + 1)
+                || !tableComplete(finalDir.resolve("incumbent.tsv"), 2)
+                || !Files.exists(finalDir.resolve("logs/cplex.log"))) return false;
+        List<String> rows = Files.readAllLines(finalDir.resolve("result.tsv"));
+        if (!rows.equals(Files.readAllLines(directory.resolve("final_result.tsv")))) return false;
+        String[] f = rows.get(1).split("\t", -1);
+        if (f.length != 29 || Integer.parseInt(f[0]) != week || !f[5].equals(method.name())
+                || Integer.parseInt(f[4]) != lag || Double.parseDouble(f[6]) != parameter
+                || Integer.parseInt(f[1]) != week - 50 || Integer.parseInt(f[2]) != week - 1
+                || Integer.parseInt(f[3]) != 50 || !f[15].matches("[01]{15}")
+                || !Double.isFinite(Double.parseDouble(f[18]))) return false;
+        Path origins = directory.resolve("validation/k" + lag + "_p" + parameter + "/origins.tsv");
+        if (!tableComplete(origins, 16)) return false;
+        List<String> originRows = Files.readAllLines(origins);
+        List<Double> costs = new ArrayList<>();
+        for (int v = 0; v < 15; v++) {
+            String[] origin = originRows.get(v + 1).split("\t");
+            if (origin.length != 29 || Integer.parseInt(origin[0]) != week - 15 + v
+                    || Integer.parseInt(origin[1]) != week - 15 + v - 35
+                    || Integer.parseInt(origin[2]) != week - 15 + v - 1
+                    || Integer.parseInt(origin[3]) != 35 || Integer.parseInt(origin[4]) != lag
+                    || !origin[5].equals(method.name()) || Double.parseDouble(origin[6]) != parameter
+                    || !Double.isFinite(Double.parseDouble(origin[18]))) return false;
+            costs.add(Double.parseDouble(origin[18]));
         }
-        for (var period : data.weekly.periods) {
-            snapshot.append("DEMAND\t").append(period.tIndex).append("\t-1");
-            for (double d : period.demandSum) snapshot.append('\t').append(d);
-            snapshot.append('\n');
-        }
-        atomic(OUTPUT.resolve("input_snapshot.tsv"), snapshot.toString());
+        double mean = costs.stream().mapToDouble(Double::doubleValue).average().orElseThrow();
+        return Math.abs(mean - Double.parseDouble(selection[2])) <= 1e-10 * Math.max(1, mean)
+                && Math.abs(sampleSd(costs, mean) - Double.parseDouble(selection[3])) <= 1e-10 * Math.max(1, mean);
     }
 
     private static String pythonEnvironment(boolean required) throws Exception {

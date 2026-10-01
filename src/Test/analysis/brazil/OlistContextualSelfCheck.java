@@ -98,6 +98,26 @@ public final class OlistContextualSelfCheck {
             for (String method : List.of("EXP", "RF")) {
                 var task = root.resolve("outputs/trial_000/" + method);
                 require(java.nio.file.Files.exists(task.resolve("complete.txt")), "End-to-end completion");
+                var fixtureData = OlistContextualData.loadSnapshot(root.resolve("outputs/input_snapshot.tsv"));
+                require(OlistContextualRunner.taskComplete(task, 53,
+                        OlistContextualRunner.Method.valueOf(method), fixtureData), "Complete output audit");
+                var weightsFile = task.resolve("final/weights.tsv");
+                String savedWeights = java.nio.file.Files.readString(weightsFile);
+                try {
+                    OlistContextualRunner.atomic(weightsFile, "sample_id\tweek\tweight\n");
+                    require(!OlistContextualRunner.taskComplete(task, 53,
+                            OlistContextualRunner.Method.valueOf(method), fixtureData), "Marker cannot hide missing weights");
+                } finally { OlistContextualRunner.atomic(weightsFile, savedWeights); }
+                var selectionFile = task.resolve("selection.tsv");
+                String savedSelection = java.nio.file.Files.readString(selectionFile);
+                try {
+                    String[] selected = savedSelection.lines().toList().get(1).split("\t");
+                    selected[2] = Double.toString(Double.parseDouble(selected[2]) + 100);
+                    OlistContextualRunner.atomic(selectionFile, savedSelection.lines().toList().get(0)
+                            + "\n" + String.join("\t", selected) + "\n");
+                    require(!OlistContextualRunner.taskComplete(task, 53,
+                            OlistContextualRunner.Method.valueOf(method), fixtureData), "Validation mean audit");
+                } finally { OlistContextualRunner.atomic(selectionFile, savedSelection); }
                 require(java.nio.file.Files.readAllLines(task.resolve("final/result.tsv")).get(1).split("\t", -1).length == 29,
                         "Checkpoint schema");
                 require(java.nio.file.Files.readAllLines(task.resolve("final/weights.tsv")).size() == 51, "Final 50 weights");
