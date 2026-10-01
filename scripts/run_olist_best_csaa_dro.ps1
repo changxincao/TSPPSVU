@@ -47,7 +47,8 @@ try {
     $env:Path = "$($cfg.cplexNative);$lib;$(Split-Path $cfg.java -Parent);$env:Path"
     $env:OPENBLAS_NUM_THREADS = '1'; $env:MKL_NUM_THREADS = '1'; $env:OMP_NUM_THREADS = '4'
     $cp = (Join-Path $Root 'runtime/classes') + ';' + $cfg.cplexJar + ';' + $cfg.mosekJar
-    $common = @('-Xmx2g', "-Djava.library.path=$native", '-cp', $cp,
+    $trend = if ($cfg.includeTrend -eq $true) { 'true' } else { 'false' }
+    $common = @('-Xmx2g', "-Dolist.includeTrend=$trend", "-Djava.library.path=$native", '-cp', $cp,
         'Test.analysis.brazil.OlistBestCsaaDroRunner')
     . (Join-Path $PSScriptRoot 'olist_windows_process.ps1')
     $existing = @(Get-Process java -ErrorAction SilentlyContinue | Where-Object {

@@ -42,7 +42,8 @@ try {
     })
     if ($orphans.Count) { throw "Existing Olist workers still running (PID $($orphans.Id -join ',')); do not launch duplicates." }
     $cp = (Join-Path $Root 'runtime/classes') + ';' + $cfg.cplexJar + ';' + $cfg.mosekJar
-    $base = @("-Xmx$($cfg.heap)", "-Djava.library.path=$($cfg.cplexNative)", '-cp', $cp)
+    $trend = if ($cfg.includeTrend -eq $true) { 'true' } else { 'false' }
+    $base = @("-Xmx$($cfg.heap)", "-Dolist.includeTrend=$trend", "-Djava.library.path=$($cfg.cplexNative)", '-cp', $cp)
     $code = Invoke-Java ($base + @('Test.analysis.brazil.OlistContextualBatchMain', 'check', $Root))
     if ($code -ne 0) { throw 'Frozen inputs failed audit' }
     & $cfg.python -c 'import sys,numpy,sklearn; print(sys.version); print(numpy.__version__,sklearn.__version__)'
@@ -51,6 +52,7 @@ try {
     $tasks = @()
     foreach ($market in $markets) {
         $properties = @("-Dolist.instance=$(Join-Path $Root $market.instance)", "-Dolist.marketSeed=$($market.market_seed)",
+            "-Dolist.includeTrend=$trend",
             "-Dolist.rfSeed=$($market.rf_seed)", "-Dolist.python=$($cfg.python)",
             "-Dolist.rfScript=$(Join-Path $Root 'scripts/rf_leaf_weights.py')",
             "-Dolist.threads=$($cfg.solverThreads)", "-Dolist.limit=$($cfg.limitSeconds)")

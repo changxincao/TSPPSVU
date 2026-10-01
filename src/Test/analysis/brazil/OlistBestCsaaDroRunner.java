@@ -168,6 +168,7 @@ public final class OlistBestCsaaDroRunner {
 
     private static void prepareProtocol(Path base, Path out, String market, String method) throws Exception {
         String protocol = "OLIST_GLOBAL_OOS_CSAA_CHI2_V1\nmethod=" + method + "\nformalTrainingOnly=false\n"
+                + "includeTrend=" + OlistContextualData.INCLUDE_TREND + "\n"
                 + "lambdaGrid=" + Arrays.toString(LAMBDA) + "\nthreads=4\nlimitSec=14400\nvalidation=15x35\nfinal=50\n"
                 + "inputSha256=" + sha(base.resolve("inputs/" + market + "/instance.tsv")) + "\n"
                 + "baselineProtocolSha256=" + sha(base.resolve("results/" + market + "/protocol.txt")) + "\n";

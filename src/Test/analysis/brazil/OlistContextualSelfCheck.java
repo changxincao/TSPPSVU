@@ -14,8 +14,11 @@ import java.util.List;
 /** Checks actual Olist data/windows and max/RF/Exp weights, with an optional tiny native smoke test. */
 public final class OlistContextualSelfCheck {
     public static void main(String[] args) throws Exception {
-        OlistContextualData data = new OlistContextualData(OlistContextualData.DEFAULT_INPUT, 20261020);
-        OlistContextualData repeated = new OlistContextualData(OlistContextualData.DEFAULT_INPUT, 20261020);
+        String snapshot = System.getProperty("olist.instance");
+        OlistContextualData data = snapshot == null ? new OlistContextualData(OlistContextualData.DEFAULT_INPUT, 20261020)
+                : OlistContextualData.loadSnapshot(java.nio.file.Path.of(snapshot));
+        OlistContextualData repeated = snapshot == null ? new OlistContextualData(OlistContextualData.DEFAULT_INPUT, 20261020)
+                : OlistContextualData.loadSnapshot(java.nio.file.Path.of(snapshot));
         require(data.weekly.periods.size() == 104 && data.market.J == 23, "Olist dimensions");
         require(data.market.I == 15 && data.market.alpha == 2 && data.market.beta == 12, "Market dimensions");
         require(Arrays.deepEquals(data.market.q, repeated.market.q)
@@ -67,6 +70,18 @@ public final class OlistContextualSelfCheck {
         for (int test = 53; test < 104; test++) for (int lag = 1; lag <= 3; lag++) {
             var full = data.window(test, lag, 50);
             require(full.startWeek() == test - 50 && full.endWeek() == test - 1, "Final window");
+            require(full.target().theta.dim() == lag * data.market.J + (OlistContextualData.INCLUDE_TREND ? 1 : 0),
+                    "Explicit context dimension");
+            if (OlistContextualData.INCLUDE_TREND) {
+                int trend = full.target().theta.dim() - 1;
+                require(full.target().theta.values()[trend] == test + 1.0, "Target chronological trend");
+                for (var sample : full.training()) require(sample.theta.values()[trend] == sample.period.tIndex + 1.0,
+                        "Training chronological trend");
+                var previous = data.window(test - 1, lag, 35);
+                // The same physical historical week must have the same trend in overlapping windows.
+                require(previous.target().theta.values()[trend] == full.training().get(49).theta.values()[trend],
+                        "Trend does not reset between windows");
+            }
             for (int origin = test - 15; origin < test; origin++) {
                 var window = data.window(origin, lag, 35);
                 require(window.training().size() == 35 && window.endWeek() < origin, "Rolling origin");
@@ -75,6 +90,14 @@ public final class OlistContextualSelfCheck {
                     require(window.target().theta.values()[23 * k + j]
                             == data.weekly.periods.get(origin - 1 - k).demandSum[j], "Past-only context");
                 var scaled = OlistContextualData.scale(window);
+                if (OlistContextualData.INCLUDE_TREND) {
+                    int trend = scaled.query().dim() - 1;
+                    require(scaled.maxima()[trend] == origin, "Trend scale from preceding training only");
+                    require(Math.abs(scaled.query().values()[trend] - (origin + 1.0) / origin) < 1e-12,
+                            "Chronological query beyond training maximum is not clipped");
+                    for (var sample : scaled.training()) require(sample.theta.values()[trend] <= 1.0,
+                            "Historical trend scaled to at most one");
+                }
                 for (int k = 0; k < scaled.maxima().length; k++) {
                     double max = 0;
                     for (var sample : window.training()) max = Math.max(max, sample.theta.values()[k]);

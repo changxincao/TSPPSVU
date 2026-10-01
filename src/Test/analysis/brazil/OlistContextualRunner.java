@@ -308,6 +308,7 @@ public final class OlistContextualRunner {
                 + "\nlimit=" + LIMIT_SECONDS + "\ngap=1e-4\nrfTrees=500\nselection=2..12\n"
                 + "market=current_factory_50pct_coverage_mqc015035_spot23_minH\n"
                 + "procurementCalibration=ALL_WEEKS_RETROSPECTIVE\nvalidation=35_rolling_15\nfinalHistory=50\n"
+                + "includeTrend=" + OlistContextualData.INCLUDE_TREND + "\ntrendFeature=DETERMINISTIC_ONE_BASED_WEEK_TRAINING_MAX\n"
                 + "baselineD=MEAN_OF_50\nbaselineSAA=ALL_50_EQUAL\nbaselineValidation=NONE\n"
                 + "scaling=TRAINING_MAX_NO_CLIPPING\nB=" + Arrays.toString(BANDWIDTH) + "\nleaf=" + Arrays.toString(LEAF) + "\n";
         Path file = OUTPUT.resolve("protocol.txt");
@@ -350,7 +351,7 @@ public final class OlistContextualRunner {
         if (!tableComplete(finalDir.resolve("result.tsv"), 2)
                 || !tableComplete(finalDir.resolve("weights.tsv"), scenarios + 1)
                 || !tableComplete(finalDir.resolve("model_scenarios.tsv"), scenarios + 1)
-                || !tableComplete(finalDir.resolve("max_scaling.tsv"), lag * data.market.J + 1)
+                || !tableComplete(finalDir.resolve("max_scaling.tsv"), lag * data.market.J + (OlistContextualData.INCLUDE_TREND ? 1 : 0) + 1)
                 || !tableComplete(finalDir.resolve("lane_oos.tsv"), data.market.J + 1)
                 || !tableComplete(finalDir.resolve("carrier_oos.tsv"), data.market.I + 1)
                 || !tableComplete(finalDir.resolve("incumbent.tsv"), 2)

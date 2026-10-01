@@ -24,6 +24,7 @@ public final class OlistContextualData {
             + "聚合需求表_日度与周度/按purchase时间_五大区23OD_周度宽表_10供应商实验输入.csv");
     public static final int HISTORY = 50, VALIDATION_ORIGINS = 15, VALIDATION_TRAINING = 35;
     public static final int MAX_LAG = 3, FIRST_TEST = HISTORY + MAX_LAG;
+    public static final boolean INCLUDE_TREND = Boolean.getBoolean("olist.includeTrend");
     public final WeeklyWideLoader.Result weekly;
     public final double[] baselineDemand;
     public final ProcurementParams market;
@@ -172,7 +173,15 @@ public final class OlistContextualData {
         config.featureFlags.includeFreightIndex = false;
         config.featureFlags.includeConsumptionIndex = false;
         config.featureFlags.includeWEIIndex = false;
-        return SampleBuilder.buildFromPeriods(weekly.periods, weekly.laneNames, config).samples;
+        List<Sample> samples = SampleBuilder.buildFromPeriods(weekly.periods, weekly.laneNames, config).samples;
+        if (INCLUDE_TREND) for (Sample sample : samples) {
+            double[] context = Arrays.copyOf(sample.theta.values(), sample.theta.dim() + 1);
+            // Calendar information known before demand occurs; never reset time per rolling window.
+            // Training-max scaling makes t and t/104 exactly equivalent up to floating-point rounding.
+            context[context.length - 1] = sample.period.tIndex + 1.0;
+            sample.theta = new CovariateVector(context);
+        }
+        return samples;
     }
 
     public record Window(List<Sample> training, Sample target, int startWeek, int endWeek) { }
