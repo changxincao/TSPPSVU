@@ -251,7 +251,7 @@ public class DROModel {
 
 			// params
 			M.setSolverParam("numThreads", cfg.threads);
-			M.setSolverParam("mioMaxTime", cfg.timeLimitSeconds);
+			if (!cfg.unlimitedRobustSolveTime) M.setSolverParam("mioMaxTime", cfg.timeLimitSeconds);
 			
 //			int[] yV=new int[] {1,3,4,6,8,11};
 //			for(int i:yV) {

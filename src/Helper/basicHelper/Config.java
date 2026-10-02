@@ -57,6 +57,8 @@ public class Config {
     // stdout to the run-specific log file, avoiding shared-file collisions.
     public boolean writeSolverLogToConsole = false;
     public int timeLimitSeconds = 3600;
+    // Opt-in for paired RCSAA/chi-square experiments; other callers remain time-limited.
+    public boolean unlimitedRobustSolveTime = false;
     public int threads = 4;
     public SolveMode solveMode=SolveMode.CSAA;
     

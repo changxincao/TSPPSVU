@@ -2,6 +2,7 @@ package Test.analysis.synthetic;
 
 import Basic.Sample;
 import Model.Solution;
+import Model.SolverTerminationException;
 import Test.analysis.synthetic.TRBSVUExperiment1Runner.ContextualChoice;
 import Test.analysis.synthetic.TRBSVUExperiment1Runner.WeightResult;
 import Test.analysis.synthetic.TRBSVUSolveMethods.Method;
@@ -27,6 +28,27 @@ public final class TRBSVUExperiment4Runner {
     private final TRBSVUExperiment1Runner contextual;
     private final TRBSVUFinalCheckpoint checkpoint;
 
+    /** Frozen-weight comparison does not need a contextual fitter or validation runner. */
+    public TRBSVUExperiment4Runner(Settings settings, TRBSVUFinalCheckpoint checkpoint) {
+        if (settings == null) throw new IllegalArgumentException("Settings are required");
+        if (!settings.compactDual() || !settings.switchedCompactDual() || settings.repairCuts())
+            throw new IllegalArgumentException("Decision comparison requires switched compact without repair");
+        this.settings = settings;
+        this.contextual = null;
+        this.checkpoint = checkpoint;
+    }
+
+    /** One model on already frozen weights: no fitting, CV, recourse diagnostics, or OOS. */
+    public Solution solveDecisionOnly(TRBSVUSyntheticCase instance, List<Sample> frozenWeights,
+                                       double lambda, Method method) throws Exception {
+        if (instance == null || frozenWeights == null || frozenWeights.isEmpty()
+                || !Double.isFinite(lambda) || lambda <= 0
+                || (method != Method.RCSAA && method != Method.CHI_SQUARED))
+            throw new IllegalArgumentException("Invalid paired comparison input");
+        String name = key(method == Method.RCSAA ? "RCSAA" : "C-Chi2", lambda);
+        return restoreOrSolve(name, lambda, instance, frozenWeights, method);
+    }
+
     public TRBSVUExperiment4Runner(Settings settings,
                                    TRBSVUExperiment1Runner contextual,
                                    TRBSVUFinalCheckpoint checkpoint) {
@@ -39,7 +61,7 @@ public final class TRBSVUExperiment4Runner {
 
     public Result runOne(TRBSVUSyntheticCase instance, ContextualChoice choice,
                          double lambda) throws Exception {
-        if (instance == null || choice == null || !(lambda > 0.0))
+        if (instance == null || choice == null || !(lambda > 0.0) || contextual == null)
             throw new IllegalArgumentException("Invalid Experiment 4 input.");
         WeightResult reference = contextual.contextualWeightResult(instance, instance.history,
                 instance.testContext, choice);
@@ -72,10 +94,19 @@ public final class TRBSVUExperiment4Runner {
     private Solution restoreOrSolve(String name, double lambda, TRBSVUSyntheticCase instance,
                                     List<Sample> weights, Method method) throws Exception {
         Solution solution = checkpoint == null ? null : checkpoint.load(name, lambda).orElse(null);
+        System.out.println("EXPERIMENT4_SOLVE method=" + name + " restored=" + (solution != null));
         if (solution == null) {
             long started = System.nanoTime();
-            solution = TRBSVUSolveMethods.solve(instance.params, instance.lanes, weights,
-                    instance.testContext, method, lambda, settings);
+            try {
+                solution = TRBSVUSolveMethods.solve(instance.params, instance.lanes, weights,
+                        instance.testContext, method, lambda, settings);
+            } catch (SolverTerminationException ex) {
+                solution = new Solution(Double.NaN, null, 0.0);
+                solution.solverStatus = ex.solverStatus;
+                solution.bestBound = ex.bestBound;
+                solution.nodeCount = ex.nodeCount;
+                solution.relativeGap = Double.NaN;
+            }
             solution.solveTimeSec = (System.nanoTime() - started) / 1.0e9;
             if (checkpoint != null) checkpoint.save(name, lambda, solution);
         }
@@ -96,24 +127,47 @@ public final class TRBSVUExperiment4Runner {
 
     private static Certificate certificate(TRBSVUSyntheticCase instance, List<Sample> weights,
                                            double[] selection, double lambda) throws Exception {
-        double mean = 0.0, minimum = Double.POSITIVE_INFINITY;
         double[] values = new double[weights.size()];
         for (int s = 0; s < weights.size(); s++) {
             values[s] = TRBSVUSolveMethods.realizedCost(instance.params, selection,
                     weights.get(s).demand());
-            mean += weights.get(s).weight * values[s];
-            minimum = Math.min(minimum, values[s]);
         }
+        return certificateFromCosts(values, weights.stream().mapToDouble(s -> s.weight).toArray(), lambda);
+    }
+
+    /** Matches the shared solve adapter, DROModel canonicalization, and defensive solver floor. */
+    static List<Sample> comparisonReference(List<Sample> frozen) {
+        List<Sample> reference = TRBSVUScenarioWeights.copyWithWeights(frozen,
+                frozen.stream().mapToDouble(s -> s.weight).toArray(), true);
+        return formalRobustWeights(formalRobustWeights(reference));
+    }
+
+    static Certificate certificateFromCosts(double[] values, double[] weights, double lambda) {
+        if (values.length == 0 || values.length != weights.length || !Double.isFinite(lambda) || lambda <= 0)
+            throw new IllegalArgumentException("Invalid certificate data");
+        double mean = 0, mass = 0, minimum = Double.POSITIVE_INFINITY, maximum = Double.NEGATIVE_INFINITY;
+        for (int s = 0; s < values.length; s++) {
+            if (!Double.isFinite(weights[s]) || weights[s] < 0 || !Double.isFinite(values[s]))
+                throw new IllegalArgumentException("Nonfinite cost/weight");
+            if (weights[s] == 0) continue;
+            mean += weights[s] * values[s]; mass += weights[s];
+            minimum = Math.min(minimum, values[s]); maximum = Math.max(maximum, values[s]);
+        }
+        if (Math.abs(mass - 1) > 1e-10) throw new IllegalArgumentException("Certificate weights must sum to one");
+        mean /= mass;
         double variance = 0.0;
-        for (int s = 0; s < weights.size(); s++) {
+        for (int s = 0; s < weights.length; s++) {
             double difference = values[s] - mean;
-            variance += weights.get(s).weight * difference * difference;
+            variance += weights[s] / mass * difference * difference;
         }
         double sd = Math.sqrt(Math.max(0.0, variance));
+        if (!Double.isFinite(mean) || !Double.isFinite(sd))
+            throw new IllegalArgumentException("Certificate statistics overflow");
         double denominator = mean - minimum;
-        double ratio = denominator > 1e-12 ? sd / denominator : Double.POSITIVE_INFINITY;
+        if (maximum == minimum) return new Certificate(minimum, 0, minimum, 0, Double.POSITIVE_INFINITY, true);
+        double ratio = sd / denominator;
         return new Certificate(mean, sd, minimum, denominator, ratio,
-                ratio + 1e-9 >= lambda);
+                lambda * denominator <= sd);
     }
 
     /** Exact RCSAA and chi-square use the same pruned/floored reference distribution. */

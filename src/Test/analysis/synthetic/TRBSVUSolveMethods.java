@@ -36,10 +36,15 @@ public final class TRBSVUSolveMethods {
         }
 
         public Settings {
-            if (threads < 1 || timeLimitSeconds < 1 || !(tolerance > 0.0)
+            if (threads < 1 || timeLimitSeconds < 0 || !(tolerance > 0.0)
                     || rcsaaVariant == null) throw new IllegalArgumentException("Invalid solver settings.");
             if (switchedCompactDual && !compactDual)
                 throw new IllegalArgumentException("Switched compact requires compact dual.");
+        }
+
+        /** Zero is an explicit unlimited sentinel, supported only by the paired robust models. */
+        public static Settings unlimitedRobust(int threads) {
+            return new Settings(threads, 0, 1e-4, RCSAASolverVariant.LBBD_PRIMAL_EXACT, false, true, true);
         }
     }
 
@@ -64,6 +69,10 @@ public final class TRBSVUSolveMethods {
                                  Method method, double robustness,
                                  Settings settings) throws Exception {
         if (weighted.isEmpty()) throw new IllegalArgumentException("No training scenarios.");
+        if (settings.timeLimitSeconds() == 0 && (method != Method.CHI_SQUARED && method != Method.RCSAA
+                || method == Method.RCSAA && (!settings.switchedCompactDual() || settings.repairCuts()
+                || settings.rcsaaVariant() != RCSAASolverVariant.LBBD_PRIMAL_EXACT)))
+            throw new IllegalArgumentException("Unlimited time is supported only for chi-square and switched-compact RCSAA");
         // The original Sample objects and weights belong to the case, not to any method.
         List<Sample> samples = TRBSVUScenarioWeights.copyWithWeights(weighted,
                 weighted.stream().mapToDouble(s -> s.weight).toArray(),
@@ -71,9 +80,10 @@ public final class TRBSVUSolveMethods {
         Data data = new Data(lanes, samples, query.copy(), params);
         Config config = config(settings);
         System.out.printf(Locale.ROOT,
-                "SOLVE_BEGIN method=%s robustness=%.17g scenarios=%d positiveWeights=%d ess=%.10f threads=%d limitSec=%d rcsaaVariant=%s repair=%s compact=%s switched=%s%n",
+                "SOLVE_BEGIN method=%s robustness=%.17g scenarios=%d positiveWeights=%d ess=%.10f threads=%d limitSec=%s rcsaaVariant=%s repair=%s compact=%s switched=%s%n",
                 method, robustness, samples.size(), TRBSVUExperiment1Runner.positiveCount(samples),
-                TRBSVUExperiment1Runner.ess(samples), settings.threads(), settings.timeLimitSeconds(),
+                TRBSVUExperiment1Runner.ess(samples), settings.threads(),
+                settings.timeLimitSeconds() == 0 ? "UNLIMITED" : Integer.toString(settings.timeLimitSeconds()),
                 settings.rcsaaVariant(), settings.repairCuts(), settings.compactDual(),
                 settings.switchedCompactDual());
         try {
@@ -224,6 +234,7 @@ public final class TRBSVUSolveMethods {
         config.enforceDemandEquality = true;
         config.threads = settings.threads();
         config.timeLimitSeconds = settings.timeLimitSeconds();
+        config.unlimitedRobustSolveTime = settings.timeLimitSeconds() == 0;
         config.tol = settings.tolerance();
         config.writeSolverLogToConsole = true;
         return config;

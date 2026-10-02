@@ -41,7 +41,8 @@ final class RCSAALBBDPrimalExactSolver {
         try (Master master = new Master(p, samples, pi, cfg)) {
             totalCuts = master.cutCounter;
             for (int iter = 1; iter <= cfg.maxBendersIter; iter++) {
-                double remainingSeconds = cfg.timeLimitSeconds - secondsBetween(t0, System.nanoTime());
+                double remainingSeconds = cfg.unlimitedRobustSolveTime ? Double.POSITIVE_INFINITY
+                        : cfg.timeLimitSeconds - secondsBetween(t0, System.nanoTime());
                 if (remainingSeconds <= 0.0) {
                     return incompleteSolution(bestUpperBound, bestY, globalLowerBound,
                             secondsBetween(t0, System.nanoTime()), iter - 1,
@@ -112,7 +113,7 @@ final class RCSAALBBDPrimalExactSolver {
                 }
 
                 if (!mr.certifiedOptimal
-                        || secondsBetween(t0, System.nanoTime()) >= cfg.timeLimitSeconds) {
+                        || !cfg.unlimitedRobustSolveTime && secondsBetween(t0, System.nanoTime()) >= cfg.timeLimitSeconds) {
                     return incompleteSolution(bestUpperBound, bestY, globalLowerBound,
                             secondsBetween(t0, System.nanoTime()), iter,
                             totalCuts, totalNodes, totalOptimizerTimeSec, mr.status);
@@ -398,11 +399,11 @@ final class RCSAALBBDPrimalExactSolver {
             }
             model.objective(ObjectiveSense.Minimize, Expr.add(mu, Expr.mul(cfg.lambda, rho)));
             model.setSolverParam("numThreads", cfg.threads);
-            model.setSolverParam("mioMaxTime", cfg.timeLimitSeconds);
+            if (!cfg.unlimitedRobustSolveTime) model.setSolverParam("mioMaxTime", cfg.timeLimitSeconds);
         }
 
         Result solve(double maxTimeSeconds) throws SolutionError {
-            model.setSolverParam("mioMaxTime", Math.max(1e-3, maxTimeSeconds));
+            if (Double.isFinite(maxTimeSeconds)) model.setSolverParam("mioMaxTime", Math.max(1e-3, maxTimeSeconds));
             long optimizerStart = System.nanoTime();
             model.solve();
             double optimizerTimeSec = secondsBetween(optimizerStart, System.nanoTime());
