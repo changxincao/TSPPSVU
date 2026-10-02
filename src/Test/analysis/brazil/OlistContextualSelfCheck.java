@@ -74,13 +74,20 @@ public final class OlistContextualSelfCheck {
                     "Explicit context dimension");
             if (OlistContextualData.INCLUDE_TREND) {
                 int trend = full.target().theta.dim() - 1;
-                require(full.target().theta.values()[trend] == test + 1.0, "Target chronological trend");
-                for (var sample : full.training()) require(sample.theta.values()[trend] == sample.period.tIndex + 1.0,
+                require(full.target().theta.values()[trend] == OlistContextualData.trendValue(test), "Target chronological trend");
+                for (var sample : full.training()) require(sample.theta.values()[trend] == OlistContextualData.trendValue(sample.period.tIndex),
                         "Training chronological trend");
                 var previous = data.window(test - 1, lag, 35);
                 // The same physical historical week must have the same trend in overlapping windows.
                 require(previous.target().theta.values()[trend] == full.training().get(49).theta.values()[trend],
                         "Trend does not reset between windows");
+                if (OlistContextualData.FIXED_TREND_104) {
+                    var finalScaled = OlistContextualData.scale(full);
+                    require(finalScaled.query().values()[trend] == (test + 1.0) / 104, "Final query fixed trend");
+                    require(finalScaled.maxima()[trend] == 1.0, "No final trend max scaling");
+                    for (int s = 0; s < 50; s++)
+                        require(finalScaled.training().get(s).theta.values()[trend] == full.training().get(s).theta.values()[trend], "Final training fixed trend");
+                }
             }
             for (int origin = test - 15; origin < test; origin++) {
                 var window = data.window(origin, lag, 35);
@@ -92,13 +99,20 @@ public final class OlistContextualSelfCheck {
                 var scaled = OlistContextualData.scale(window);
                 if (OlistContextualData.INCLUDE_TREND) {
                     int trend = scaled.query().dim() - 1;
-                    require(scaled.maxima()[trend] == origin, "Trend scale from preceding training only");
-                    require(Math.abs(scaled.query().values()[trend] - (origin + 1.0) / origin) < 1e-12,
+                    require(scaled.maxima()[trend] == (OlistContextualData.FIXED_TREND_104 ? 1 : origin), "Trend scale policy");
+                    require(Math.abs(scaled.query().values()[trend] - (OlistContextualData.FIXED_TREND_104
+                            ? (origin + 1.0) / 104 : (origin + 1.0) / origin)) < 1e-12,
                             "Chronological query beyond training maximum is not clipped");
                     for (var sample : scaled.training()) require(sample.theta.values()[trend] <= 1.0,
                             "Historical trend scaled to at most one");
                 }
                 for (int k = 0; k < scaled.maxima().length; k++) {
+                    if (OlistContextualData.INCLUDE_TREND && OlistContextualData.FIXED_TREND_104 && k == scaled.maxima().length - 1) {
+                        require(scaled.query().values()[k] == window.target().theta.values()[k], "Query fixed trend unchanged");
+                        for (int s = 0; s < window.training().size(); s++)
+                            require(scaled.training().get(s).theta.values()[k] == window.training().get(s).theta.values()[k], "Training fixed trend unchanged");
+                        continue;
+                    }
                     double max = 0;
                     for (var sample : window.training()) max = Math.max(max, sample.theta.values()[k]);
                     require(scaled.maxima()[k] == (max < 1e-12 ? 1 : max), "Training-only maximum");

@@ -26,6 +26,11 @@ public final class OlistContextualData {
     public static final int HISTORY = 50, VALIDATION_ORIGINS = 15, VALIDATION_TRAINING = 35;
     public static final int MAX_LAG = 3, FIRST_TEST = HISTORY + MAX_LAG;
     public static final boolean INCLUDE_TREND = Boolean.getBoolean("olist.includeTrend");
+    public static final boolean FIXED_TREND_104 = Boolean.getBoolean("olist.fixedTrend104");
+
+    public static double trendValue(int zeroBasedWeek) {
+        return (zeroBasedWeek + 1.0) / (FIXED_TREND_104 ? 104.0 : 1.0);
+    }
     public final WeeklyWideLoader.Result weekly;
     public final double[] baselineDemand;
     public final ProcurementParams market;
@@ -203,7 +208,7 @@ public final class OlistContextualData {
             double[] context = Arrays.copyOf(sample.theta.values(), sample.theta.dim() + 1);
             // Calendar information known before demand occurs; never reset time per rolling window.
             // Training-max scaling makes t and t/104 exactly equivalent up to floating-point rounding.
-            context[context.length - 1] = sample.period.tIndex + 1.0;
+            context[context.length - 1] = trendValue(sample.period.tIndex);
             sample.theta = new CovariateVector(context);
         }
         return samples;
@@ -232,7 +237,18 @@ public final class OlistContextualData {
         scaler.fit(training, dimension);
         for (Sample sample : training)
             sample.theta = new CovariateVector(scaler.transform(sample.theta.values()));
-        return new Scaled(training,
-                new CovariateVector(scaler.transform(window.target().theta.values())), maxima);
+        double[] query = scaler.transform(window.target().theta.values());
+        if (INCLUDE_TREND && FIXED_TREND_104) {
+            int trend = dimension - 1;
+            // Keep the fixed calendar encoding; only demand features use window maxima.
+            for (int i = 0; i < training.size(); i++) {
+                double[] values = training.get(i).theta.values().clone();
+                values[trend] = window.training().get(i).theta.values()[trend];
+                training.get(i).theta = new CovariateVector(values);
+            }
+            query[trend] = window.target().theta.values()[trend];
+            maxima[trend] = 1.0; // Effective divisor: no additional scaling.
+        }
+        return new Scaled(training, new CovariateVector(query), maxima);
     }
 }

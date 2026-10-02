@@ -16,14 +16,15 @@ public final class OlistContextualBatchMain {
             int count = Integer.getInteger("olist.marketCount", 5);
             long seedStart = Long.getLong("olist.seedStart", 20261020L);
             int legacyCarriers = Integer.getInteger("olist.legacyCarriers", 0);
+            Path input = Path.of(System.getProperty("olist.input", OlistContextualData.DEFAULT_INPUT.toString()));
             if (count < 1) throw new IllegalArgumentException("Positive market count required");
             for (int r = 0; r < count; r++) {
                 long seed = Math.addExact(seedStart, r);
                 String name = String.format("market_%03d", r);
                 Path file = root.resolve("inputs/" + name + "/instance.tsv");
                 OlistContextualData generated = legacyCarriers == 0
-                        ? new OlistContextualData(OlistContextualData.DEFAULT_INPUT, seed)
-                        : OlistContextualData.legacyMin(OlistContextualData.DEFAULT_INPUT, seed, legacyCarriers);
+                        ? new OlistContextualData(input, seed)
+                        : OlistContextualData.legacyMin(input, seed, legacyCarriers);
                 Path temp = Files.createTempFile("olist_snapshot_", ".tsv");
                 try {
                     generated.saveSnapshot(temp);

@@ -214,7 +214,8 @@ public final class OlistContextualRunner {
             demands.append('\n');
         }
         atomic(directory.resolve("model_scenarios.tsv"), demands.toString());
-        StringBuilder scale = new StringBuilder("feature\ttraining_max\tquery_raw\tquery_scaled\n");
+        StringBuilder scale = new StringBuilder("feature\t"
+                + (OlistContextualData.FIXED_TREND_104 ? "effective_divisor" : "training_max") + "\tquery_raw\tquery_scaled\n");
         for (int k = 0; k < scaled.maxima().length; k++)
             scale.append(k).append('\t').append(scaled.maxima()[k]).append('\t')
                     .append(window.target().theta.values()[k]).append('\t').append(scaled.query().values()[k]).append('\n');
@@ -308,9 +309,11 @@ public final class OlistContextualRunner {
                 + "\nlimit=" + LIMIT_SECONDS + "\ngap=1e-4\nrfTrees=500\nselection=" + data.market.alpha + ".." + data.market.beta + "\n"
                 + "market=" + System.getProperty("olist.marketLabel", "current_factory_50pct_coverage_mqc015035_spot23_minH") + "\n"
                 + "procurementCalibration=ALL_WEEKS_RETROSPECTIVE\nvalidation=35_rolling_15\nfinalHistory=50\n"
-                + "includeTrend=" + OlistContextualData.INCLUDE_TREND + "\ntrendFeature=DETERMINISTIC_ONE_BASED_WEEK_TRAINING_MAX\n"
+                + "includeTrend=" + OlistContextualData.INCLUDE_TREND + "\ntrendFeature="
+                + (OlistContextualData.FIXED_TREND_104 ? "FIXED_ONE_BASED_WEEK_DIV_104_NO_WINDOW_SCALING" : "DETERMINISTIC_ONE_BASED_WEEK_TRAINING_MAX") + "\n"
                 + "baselineD=MEAN_OF_50\nbaselineSAA=ALL_50_EQUAL\nbaselineValidation=NONE\n"
-                + "scaling=TRAINING_MAX_NO_CLIPPING\nB=" + Arrays.toString(BANDWIDTH) + "\nleaf=" + Arrays.toString(LEAF) + "\n";
+                + "scaling=" + (OlistContextualData.FIXED_TREND_104 ? "DEMAND_TRAINING_MAX_FIXED_TREND_NO_CLIPPING" : "TRAINING_MAX_NO_CLIPPING")
+                + "\nB=" + Arrays.toString(BANDWIDTH) + "\nleaf=" + Arrays.toString(LEAF) + "\n";
         Path file = OUTPUT.resolve("protocol.txt");
         if (Files.exists(file)) {
             if (!Files.readString(file).equals(protocol))

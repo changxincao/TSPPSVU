@@ -16,7 +16,10 @@ import java.util.*;
 
 /** Separate diagnostic stage: one globally OOS-selected CSAA family, historical-only lambda CV. */
 public final class OlistBestCsaaDroRunner {
-    private static final double[] LAMBDA = {0.1, 0.25, 0.5, 1};
+    private static final boolean FIXED_RF = Boolean.getBoolean("olist.fixedRf");
+    private static final double[] LAMBDA = parseGrid(System.getProperty("olist.lambdaGrid", "0.1,0.25,0.5,1"));
+    private static Path outputRoot, reuseRoot;
+    private static boolean requireReuse;
     private static final String HEADER = "target_week\ttrain_start\ttrain_end\ttraining_size\tlag\tmethod"
             + "\tparameter\tstatus\tcertified_optimal\tobjective\tbest_bound\trelative_gap"
             + "\tmodel_build_solve_sec\toptimizer_sec\tselected_count\ty_binary\tess\tpositive_samples"
@@ -35,12 +38,22 @@ public final class OlistBestCsaaDroRunner {
             for (int origin = 38; origin < 53; origin++) before.add(origin);
             for (int origin = 39; origin < 54; origin++) after.add(origin);
             after.retainAll(before);
-            if (after.size() != 14 || LAMBDA.length != 4 || Arrays.stream(LAMBDA).anyMatch(x -> x <= 0))
+            if (after.size() != 14 || Arrays.stream(LAMBDA).anyMatch(x -> x <= 0)
+                    || parseGrid("0.01,0.05,0.1,0.25,0.5,1,2,5,10").length != 9)
                 throw new AssertionError("Rolling reuse/lambda grid");
+            for (String bad : List.of("", "0,1", "1,0.5", "1,1", "NaN", "Infinity")) {
+                try { parseGrid(bad); throw new AssertionError("Accepted invalid grid: " + bad); }
+                catch (IllegalArgumentException expected) { }
+            }
             System.out.println("GLOBAL_SELECTION_AND_ROLLING_SELF_CHECK_PASS"); return;
         }
         if (args.length < 3) throw new IllegalArgumentException("select|run|audit|smoke baseRoot outputRoot [market method]");
         Path base = Path.of(args[1]), out = Path.of(args[2]);
+        requireReuse = args[0].equals("reuse-smoke");
+        outputRoot = out.toAbsolutePath().normalize();
+        String previous = System.getProperty("olist.reuseRoot", "");
+        reuseRoot = previous.isBlank() ? null : Path.of(previous).toAbsolutePath().normalize();
+        if (outputRoot.equals(reuseRoot)) throw new IllegalArgumentException("Reuse source must be a separate directory");
         if (args[0].equals("smoke")) out = out.resolve("preflight");
         if (args[0].equals("select")) { select(base, out); return; }
         if (args.length != 5) throw new IllegalArgumentException("market and EXP|RF required");
@@ -53,6 +66,19 @@ public final class OlistBestCsaaDroRunner {
         OlistContextualData data = OlistContextualData.loadSnapshot(base.resolve("inputs/" + market + "/instance.tsv"));
         Path baseline = base.resolve("results/" + market), target = out.resolve("results/" + market);
         prepareProtocol(base, out, market, method);
+        if (args[0].equals("reusecheck")) {
+            if (reuseRoot == null) throw new IllegalArgumentException("No reuse source");
+            System.out.println("REUSE_PROTOCOL_RUNTIME_CHECK_PASS " + market); return;
+        }
+        if (requireReuse) {
+            String[] selected = selection(baseline, 0, method);
+            int lag = Integer.parseInt(selected[0]); double parameter = Double.parseDouble(selected[1]);
+            String key = method + "/k" + lag + "_p" + parameter;
+            solve(data, data.window(38, lag, 35), method, lag, parameter, 0.1,
+                    baseline.resolve("validation_pool/" + key + "/week_038"),
+                    target.resolve("validation_pool/" + key + "/lambda_0.1/week_038"));
+            System.out.println("REUSE_SAVED_VALIDATION_PASS no_optimizer_called"); return;
+        }
         if (args[0].equals("smoke")) {
             String[] selected = selection(baseline, 0, method);
             solve(data, data.window(53, Integer.parseInt(selected[0]), 50), method,
@@ -128,7 +154,7 @@ public final class OlistBestCsaaDroRunner {
                 .skip(1).map(row -> row.split("\t")[0]).toList();
         Map<String, Double> oos = new TreeMap<>(), validation = new TreeMap<>();
         StringBuilder table = new StringBuilder("market\tmethod\tweeks\tmean_realized_cost\tmean_validation_cost\n");
-        for (String method : List.of("EXP", "RF")) {
+        for (String method : FIXED_RF ? List.of("RF") : List.of("EXP", "RF")) {
             double total = 0, totalValidation = 0;
             for (String market : markets) {
                 var data = OlistContextualData.loadSnapshot(base.resolve("inputs/" + market + "/instance.tsv"));
@@ -148,18 +174,27 @@ public final class OlistBestCsaaDroRunner {
         }
         String winner = best(oos), validationWinner = best(validation);
         String result = "method\tselection\tformal_training_only\tmean_realized_cost\tvalidation_winner\n"
-                + winner + "\tGLOBAL_" + markets.size() + "_MARKETS_51_WEEKS_OOS_MEAN\tfalse\t" + oos.get(winner) + "\t" + validationWinner + "\n";
+                + winner + "\t" + (FIXED_RF ? "USER_FIXED_RF\ttrue" : "GLOBAL_" + markets.size() + "_MARKETS_51_WEEKS_OOS_MEAN\tfalse")
+                + "\t" + oos.get(winner) + "\t" + validationWinner + "\n";
         Path selection = out.resolve("global_selection.tsv");
         if (Files.exists(selection) && !Files.readString(selection).equals(result))
             throw new IllegalStateException("Refuse to change a frozen global method");
         OlistContextualRunner.atomic(out.resolve("method_comparison.tsv"), table.toString());
         OlistContextualRunner.atomic(selection, result);
-        System.out.println("GLOBAL_OOS_WINNER=" + winner + " validationWinner=" + validationWinner + " means=" + oos);
+        System.out.println((FIXED_RF ? "USER_FIXED_METHOD=" : "GLOBAL_OOS_WINNER=") + winner + " validationWinner=" + validationWinner + " means=" + oos);
     }
 
     static String best(Map<String, Double> means) {
         return means.entrySet().stream().min(Map.Entry.<String, Double>comparingByValue()
                 .thenComparing(Map.Entry.comparingByKey())).orElseThrow().getKey();
+    }
+
+    private static double[] parseGrid(String text) {
+        double[] grid = Arrays.stream(text.split(",", -1)).map(String::trim).mapToDouble(Double::parseDouble).toArray();
+        for (int i = 0; i < grid.length; i++)
+            if (!Double.isFinite(grid[i]) || grid[i] <= 0 || (i > 0 && grid[i] <= grid[i - 1]))
+                throw new IllegalArgumentException("Lambda grid must be finite, positive and strictly increasing");
+        return grid;
     }
 
     private static String[] selection(Path baseline, int trial, String method) throws Exception {
@@ -168,8 +203,10 @@ public final class OlistBestCsaaDroRunner {
     }
 
     private static void prepareProtocol(Path base, Path out, String market, String method) throws Exception {
-        String protocol = "OLIST_GLOBAL_OOS_CSAA_CHI2_V1\nmethod=" + method + "\nformalTrainingOnly=false\n"
-                + "includeTrend=" + OlistContextualData.INCLUDE_TREND + "\n"
+        if (FIXED_RF && !method.equals("RF")) throw new IllegalArgumentException("Fixed RF route requires RF");
+        String protocol = "OLIST_GLOBAL_OOS_CSAA_CHI2_V1\nmethod=" + method + "\nformalTrainingOnly=" + FIXED_RF + "\n"
+                + (OlistContextualData.FIXED_TREND_104 ? "trendFeature=FIXED_ONE_BASED_WEEK_DIV_104_NO_WINDOW_SCALING\n" : "")
+                + "includeTrend=" + Boolean.getBoolean("olist.includeTrend") + "\n"
                 + "lambdaGrid=" + Arrays.toString(LAMBDA) + "\nthreads=4\nlimitSec=14400\nvalidation=15x35\nfinal=50\n"
                 + "inputSha256=" + sha(base.resolve("inputs/" + market + "/instance.tsv")) + "\n"
                 + "baselineProtocolSha256=" + sha(base.resolve("results/" + market + "/protocol.txt")) + "\n";
@@ -183,6 +220,35 @@ public final class OlistBestCsaaDroRunner {
             }
         }
         protocol += "runtimeSha256=" + HexFormat.of().formatHex(digest.digest()) + "\n";
+        if (reuseRoot != null) {
+            Path oldProtocol = reuseRoot.resolve("results/" + market + "/protocol.txt");
+            List<String> expected = protocol.lines().filter(OlistBestCsaaDroRunner::reuseInvariant).toList();
+            List<String> previousLines = new ArrayList<>(Files.readAllLines(oldProtocol));
+            // The original no-trend deployment predates this explicit protocol field.
+            if (previousLines.stream().noneMatch(line -> line.startsWith("includeTrend="))) {
+                if (Boolean.getBoolean("olist.includeTrend")) throw new IllegalStateException("Old runtime has no trend support");
+                previousLines.add(previousLines.indexOf("formalTrainingOnly=false") + 1, "includeTrend=false");
+            }
+            if (!previousLines.stream().filter(OlistBestCsaaDroRunner::reuseInvariant).toList().equals(expected))
+                throw new IllegalStateException("Reuse input/baseline/protocol mismatch: " + oldProtocol);
+            // Only this orchestration class may change. Solvers, data, evaluation and all dependencies must match.
+            Path oldClasses = reuseRoot.resolve("runtime/classes");
+            MessageDigest oldDigest = MessageDigest.getInstance("SHA-256");
+            try (var paths = Files.walk(oldClasses)) {
+                for (Path old : paths.filter(p -> p.toString().endsWith(".class")).sorted().toList()) {
+                    oldDigest.update(oldClasses.relativize(old).toString().getBytes(StandardCharsets.UTF_8));
+                    oldDigest.update(Files.readAllBytes(old));
+                }
+            }
+            if (!Files.readAllLines(oldProtocol).contains("runtimeSha256=" + HexFormat.of().formatHex(oldDigest.digest())))
+                throw new IllegalStateException("Reuse source runtime no longer matches its saved protocol");
+            if (!runtimeFiles(classes).equals(runtimeFiles(oldClasses)))
+                throw new IllegalStateException("Reuse runtime file set mismatch");
+            for (String relative : runtimeFiles(classes))
+                if (!sha(classes.resolve(relative)).equals(sha(oldClasses.resolve(relative))))
+                    throw new IllegalStateException("Reuse runtime differs: " + relative);
+            protocol += "reuseRoot=" + reuseRoot + "\nreuseProtocolSha256=" + sha(oldProtocol) + "\n";
+        }
         Path file = out.resolve("results/" + market + "/protocol.txt");
         if (Files.exists(file) && !Files.readString(file).equals(protocol)) throw new IllegalStateException("DRO protocol mismatch");
         OlistContextualRunner.atomic(file, protocol);
@@ -212,10 +278,23 @@ public final class OlistBestCsaaDroRunner {
             mass += sample.weight; squares += sample.weight * sample.weight; if (sample.weight > 0) positive++;
         }
         if (Math.abs(mass - 1) > 1e-10) throw new IllegalStateException("Weights not normalized");
+        if (reuseRoot != null && !Files.exists(dir.resolve("incumbent.tsv"))) {
+            Path old = reuseRoot.resolve(outputRoot.relativize(dir.toAbsolutePath().normalize()));
+            if (Files.exists(old.resolve("source_fingerprint.txt"))
+                    && Files.readString(old.resolve("source_fingerprint.txt")).equals(fingerprint)
+                    && solveFilesComplete(old, data, scaled.training().size())) {
+                for (String name : List.of("result.tsv", "incumbent.tsv", "weights.tsv", "model_scenarios.tsv",
+                        "max_scaling.tsv", "lane_oos.tsv", "carrier_oos.tsv", "mosek.log"))
+                    Files.copy(old.resolve(name), dir.resolve(name), StandardCopyOption.REPLACE_EXISTING);
+                OlistContextualRunner.atomic(dir.resolve("reused_from.txt"), old + "\n");
+                System.out.println("DRO_REUSE_SOLVE " + old);
+            }
+        }
         if (solveFilesComplete(dir, data, scaled.training().size())) {
             String row = Files.readAllLines(dir.resolve("result.tsv")).get(1);
             return new Result(Double.parseDouble(row.split("\t")[18]), row + "\n");
         }
+        if (requireReuse) throw new IllegalStateException("Reuse smoke must not invoke an optimizer");
         Files.copy(source.resolve("weights.tsv"), dir.resolve("weights.tsv"), StandardCopyOption.REPLACE_EXISTING);
         Files.copy(source.resolve("model_scenarios.tsv"), dir.resolve("model_scenarios.tsv"), StandardCopyOption.REPLACE_EXISTING);
         Files.copy(source.resolve("max_scaling.tsv"), dir.resolve("max_scaling.tsv"), StandardCopyOption.REPLACE_EXISTING);
@@ -280,7 +359,7 @@ public final class OlistBestCsaaDroRunner {
     private static boolean complete(Path target, Path baseline, int trial, String method, OlistContextualData data) throws Exception {
         Path dir = target.resolve(String.format("trial_%03d", trial));
         if (!Files.exists(dir.resolve("complete.txt")) || Files.exists(dir.resolve("failure.txt"))
-                || !table(dir.resolve("selection.tsv"), 2) || !table(dir.resolve("candidates.tsv"), 5)
+                || !table(dir.resolve("selection.tsv"), 2) || !table(dir.resolve("candidates.tsv"), LAMBDA.length + 1)
                 || !solveFilesComplete(dir.resolve("final"), data, 50)) return false;
         String[] chosen = Files.readAllLines(dir.resolve("selection.tsv")).get(1).split("\t");
         String[] nominal = selection(baseline, trial, method);
@@ -328,6 +407,20 @@ public final class OlistBestCsaaDroRunner {
         return f.length == 31 && f[15].matches("[01]{" + data.market.I + "}") && Double.isFinite(Double.parseDouble(f[18]));
     }
     private static boolean table(Path path, int rows) throws Exception { return Files.exists(path) && Files.readAllLines(path).size() == rows; }
+    private static boolean reuseInvariant(String line) {
+        return !line.startsWith("lambdaGrid=") && !line.startsWith("runtimeSha256=");
+    }
+    private static Set<String> runtimeFiles(Path root) throws Exception {
+        try (var files = Files.walk(root)) {
+            Set<String> names = new TreeSet<>();
+            for (Path file : files.filter(p -> p.toString().endsWith(".class")).toList()) {
+                String name = file.getFileName().toString();
+                if (name.equals("OlistBestCsaaDroRunner.class") || name.startsWith("OlistBestCsaaDroRunner$")) continue;
+                names.add(root.relativize(file).toString());
+            }
+            return names;
+        }
+    }
     private static double sd(List<Double> costs, double mean) { return Math.sqrt(costs.stream().mapToDouble(c -> (c - mean) * (c - mean)).sum() / (costs.size() - 1)); }
     private static String encode(double[] y) { StringBuilder s = new StringBuilder(); for (double v : y) s.append(v > .5 ? '1' : '0'); return s.toString(); }
     private static String sha(Path path) throws Exception { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(path))); }

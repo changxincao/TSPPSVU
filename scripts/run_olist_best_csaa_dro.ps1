@@ -1,14 +1,17 @@
 param([Parameter(Mandatory=$true)][string]$BaseRoot,
-      [Parameter(Mandatory=$true)][string]$Root, [switch]$CheckOnly)
+      [Parameter(Mandatory=$true)][string]$Root, [switch]$CheckOnly,
+      [string]$LambdaGrid='0.1,0.25,0.5,1', [string]$ReuseRoot='', [switch]$FixedRf)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $BaseRoot = (Resolve-Path -LiteralPath $BaseRoot).Path
 $Root = (Resolve-Path -LiteralPath $Root).Path
+$gridValues=@($LambdaGrid.Split(',') | ForEach-Object {[double]::Parse($_,[Globalization.CultureInfo]::InvariantCulture)})
 $cfg = [IO.File]::ReadAllText((Join-Path $BaseRoot 'config.json')) | ConvertFrom-Json
 $markets = @(Import-Csv -LiteralPath (Join-Path $BaseRoot 'inputs/markets.tsv') -Delimiter "`t")
 $baseMethods = if ($cfg.methods) { @($cfg.methods) } else { @('D','SAA','EXP','RF') }
 $requiredBaseTasks = $markets.Count * $baseMethods.Count
-if (!$markets.Count -or 'EXP' -notin $baseMethods -or 'RF' -notin $baseMethods) { throw 'CSAA baseline manifest/methods invalid' }
+if (!$markets.Count -or 'RF' -notin $baseMethods -or (!$FixedRf -and 'EXP' -notin $baseMethods)) { throw 'CSAA baseline manifest/methods invalid' }
+$selectionRule=if($FixedRf){'USER_FIXED_RF'}else{'GLOBAL_OOS_MEAN'}
 $control = Join-Path $Root 'control'
 New-Item -ItemType Directory -Force -Path $control | Out-Null
 $lock = [IO.File]::Open((Join-Path $control 'scheduler.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
@@ -52,7 +55,10 @@ try {
     $env:OPENBLAS_NUM_THREADS = '1'; $env:MKL_NUM_THREADS = '1'; $env:OMP_NUM_THREADS = '4'
     $cp = (Join-Path $Root 'runtime/classes') + ';' + $cfg.cplexJar + ';' + $cfg.mosekJar
     $trend = if ($cfg.includeTrend -eq $true) { 'true' } else { 'false' }
-    $common = @('-Xmx2g', "-Dolist.includeTrend=$trend", "-Djava.library.path=$native", '-cp', $cp,
+    $fixedTrend = if ($cfg.fixedTrend104 -eq $true) { 'true' } else { 'false' }
+    $gridOptions=@("-Dolist.lambdaGrid=$LambdaGrid", "-Dolist.fixedRf=$($FixedRf.IsPresent.ToString().ToLowerInvariant())", "-Dolist.fixedTrend104=$fixedTrend")
+    if($ReuseRoot){$ReuseRoot=(Resolve-Path -LiteralPath $ReuseRoot).Path;$gridOptions+= "-Dolist.reuseRoot=$ReuseRoot"}
+    $common = @('-Xmx2g') + $gridOptions + @("-Dolist.includeTrend=$trend", "-Djava.library.path=$native", '-cp', $cp,
         'Test.analysis.brazil.OlistBestCsaaDroRunner')
     . (Join-Path $PSScriptRoot 'olist_windows_process.ps1')
     $existing = @(Get-Process java -ErrorAction SilentlyContinue | Where-Object {
@@ -66,6 +72,8 @@ try {
         if (!(Test-Path -LiteralPath $file)) { throw "Missing dependency: $file" }
     }
     if ($CheckOnly) {
+        & $cfg.java @common selfcheck
+        if($LASTEXITCODE -ne 0){throw 'DRO grid selfcheck failed'}
         Event 'CHECK_ONLY_PASS independent runtime, MOSEK/CPLEX libraries and process identity; no solves'
         return
     }
@@ -85,7 +93,7 @@ try {
         Write-Atomic (Join-Path $control 'status.json') (ConvertTo-Json -InputObject ([pscustomobject]@{
             state='WAITING_BASELINES';updated=(Get-Date -Format o);completedBaseTasks=$done;
             failedBaseTasks=$failed;requiredBaseTasks=$requiredBaseTasks;parallel=4;solverThreads=4;
-            lambdaGrid=@(0.1,0.25,0.5,1);selection='GLOBAL_OOS_MEAN';formalTrainingOnly=$false}) -Depth 3)
+            lambdaGrid=$gridValues;selection=$selectionRule;formalTrainingOnly=$FixedRf.IsPresent}) -Depth 3)
         if ($failed) { throw 'Baseline task failed: cannot select a global winner from incomplete results' }
         if ($state.Count -ne $requiredBaseTasks) { throw 'Unexpected baseline queue task count' }
         if ($done -lt $requiredBaseTasks) { Start-Sleep -Seconds 30 }
@@ -102,7 +110,7 @@ try {
         Write-Atomic (Join-Path $control 'status.json') (ConvertTo-Json -InputObject ([pscustomobject]@{
             state=$(if(@($tasks | Where-Object state -in @('PENDING','RUNNING')).Count){'RUNNING'}else{'FINISHED'});
             updated=(Get-Date -Format o);contextMethod=$method;parallel=4;solverThreads=4;
-            lambdaGrid=@(0.1,0.25,0.5,1);selection='GLOBAL_OOS_MEAN';formalTrainingOnly=$false;
+            lambdaGrid=$gridValues;selection=$selectionRule;formalTrainingOnly=$FixedRf.IsPresent;
             tasks=@($tasks | Select-Object market,method,state,attempt,pid,exitCode,started,finished)}) -Depth 4)
     }
     foreach ($task in $tasks) {
