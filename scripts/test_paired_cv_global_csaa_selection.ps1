@@ -51,6 +51,39 @@ try {
             throw 'SelectionOnly unexpectedly launched a solver'
         }
     }
+    # Explicit low-CV branches must stay fixed even if OOS favors another family.
+    $root = Join-Path $testRoot 'exp'
+    foreach ($fixedMethod in @('RF-CSAA','CSAA-Tri')) {
+        & $runner -TaskRoot $testRoot -ExperimentRoot $root -Cell cv030050 `
+            -ReplicationCount 2 -ContextMethod $fixedMethod -SelectionOnly
+        $stage = Join-Path $root ("cv030050\experiment2_fixed_csaa\$fixedMethod")
+        $selected = @(Import-Csv -LiteralPath (Join-Path $stage 'control\oos_vs_validation_selection.csv'))
+        if ($selected.Count -ne 2 -or @($selected | Where-Object oos_winner -ne $fixedMethod).Count) {
+            throw 'Fixed context family changed to an OOS winner'
+        }
+        if (@($selected | Where-Object winners_agree -ne 'NOT_APPLICABLE_FIXED_FAMILY').Count) {
+            throw 'Fixed-family diagnostic fabricated agreement of OOS and validation winners'
+        }
+        foreach ($row in $selected) {
+            $source = Join-Path $root ('cv030050\experiment1\rep_{0:D3}\{1}\queries\query_000\validation\context_candidate.csv' -f [int]$row.replication,$fixedMethod)
+            if ((Get-FileHash -LiteralPath $source).Hash -ne (Get-FileHash -LiteralPath $row.selected_context_file).Hash) {
+                throw 'Fixed-family validation parameters changed'
+            }
+            if (-not $row.selected_context_file.StartsWith($stage, [StringComparison]::OrdinalIgnoreCase)) {
+                throw 'Fixed branch selection escaped its isolated output directory'
+            }
+        }
+        $status = Get-Content -LiteralPath (Join-Path $stage 'control\status.json') -Raw | ConvertFrom-Json
+        if ($status.contextMethod -ne $fixedMethod -or $status.selection -ne 'USER_FIXED_CONTEXT_FAMILY') {
+            throw 'Fixed-family status incorrectly labeled'
+        }
+        if (Test-Path -LiteralPath (Join-Path $stage 'primary')) { throw 'SelectionOnly launched a solver' }
+    }
+    $rfFile = Join-Path $root 'cv030050\experiment2_fixed_csaa\RF-CSAA\control\selected_contexts\rep_000\experiment1_selected_context_oos.csv'
+    $triFile = Join-Path $root 'cv030050\experiment2_fixed_csaa\CSAA-Tri\control\selected_contexts\rep_000\experiment1_selected_context_oos.csv'
+    if ((Get-FileHash -LiteralPath $rfFile).Hash -eq (Get-FileHash -LiteralPath $triFile).Hash) {
+        throw 'RF and Tri branches mixed their selected context inputs'
+    }
     # An incomplete baseline must prevent global selection.
     $bad = Join-Path $testRoot 'rf\cv030050\experiment1\rep_001\CSAA-Exp\queries\query_039\oos\summary.csv'
     Move-Item -LiteralPath $bad -Destination ($bad + '.missing-test')
@@ -59,7 +92,7 @@ try {
         & $runner -TaskRoot $testRoot -ExperimentRoot (Join-Path $testRoot 'rf') -Cell cv030050 -ReplicationCount 2 -SelectionOnly
     } catch { $rejected = $_.Exception.Message -like 'Missing or empty CSV:*' }
     if (-not $rejected) { throw 'Incomplete baseline was not rejected' }
-    Write-Output "PASS: one winner per cell, per-rep parameters preserved, no solver launch, missing output rejected. $testRoot"
+    Write-Output "PASS: global auto choice, fixed RF/Tri isolation, per-rep parameters preserved, no solver launch, missing output rejected. $testRoot"
 } finally {
     Set-Location $originalLocation
 }
