@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory = $true)][string]$TaskRoot,
     [Parameter(Mandatory = $true)][string]$ExperimentRoot,
-    [ValidateRange(1, 4)][int]$MaxParallel = 4
+    [ValidateRange(1, 4)][int]$MaxParallel = 4,
+    [switch]$ResumeActiveDro
 )
 $ErrorActionPreference = 'Stop'
 $TaskRoot = (Resolve-Path -LiteralPath $TaskRoot).Path
@@ -23,7 +24,7 @@ $script = Join-Path $PSScriptRoot 'run_paired_cv_best_csaa_dro_after_baselines.p
 $log = Join-Path $control ('scheduler_{0}.log' -f (Get-Date -Format yyyyMMdd_HHmmss_fff))
 $body = '$ErrorActionPreference=''Stop''; try { & ' + (Quote $script) +
     ' -TaskRoot ' + (Quote $TaskRoot) + ' -ExperimentRoot ' + (Quote $ExperimentRoot) +
-    ' -MaxParallel ' + $MaxParallel + ' *>&1 | Tee-Object -FilePath ' + (Quote $log) +
+    ' -MaxParallel ' + $MaxParallel + $(if($ResumeActiveDro){' -ResumeActiveDro'}else{''}) + ' *>&1 | Tee-Object -FilePath ' + (Quote $log) +
     ' } catch { $_ | Out-String | Add-Content -LiteralPath ' + (Quote $log) + '; exit 1 }'
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($body))
 $startedPid = [OlistWindowsProcess]::StartDetached(

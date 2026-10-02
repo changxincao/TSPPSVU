@@ -8,6 +8,7 @@ param([Parameter(Mandatory=$true)][string]$TaskRoot,
       [int]$LimitSeconds=14400,
       [string]$LambdaGrid='0.1,0.25,0.5,1',
       [ValidateSet('AUTO','RF-CSAA','CSAA-Tri','CSAA-Exp')][string]$ContextMethod='AUTO',
+      [string]$ParallelControlFile='',
       [switch]$SelectionOnly)
 $ErrorActionPreference='Stop'
 $java=Join-Path $TaskRoot 'runtime\java\bin\java.exe'
@@ -23,6 +24,8 @@ $stage=if($ContextMethod -eq 'AUTO'){Join-Path $cellRoot 'experiment2_oos_select
 $selectionProtocol=if($ContextMethod -eq 'AUTO'){'CELL_GLOBAL_BEST_OOS_MEAN'}else{'USER_FIXED_CONTEXT_FAMILY'}
 $control=Join-Path $stage 'control'
 New-Item -ItemType Directory -Force -Path $control | Out-Null
+. (Join-Path $PSScriptRoot 'olist_windows_process.ps1')
+$schedulerLock=[IO.File]::Open((Join-Path $control 'scheduler.lock'),[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
 $env:Path="$native;$env:Path"
 $env:MOSEKLM_LICENSE_FILE=Join-Path $TaskRoot 'tmp\mosek.lic'
 $env:OPENBLAS_NUM_THREADS='1';$env:MKL_NUM_THREADS='1';$env:OMP_NUM_THREADS='1'
@@ -113,7 +116,25 @@ foreach($data in $replicationData){
     @("selectionProtocol=$selectionProtocol",'formalTrainingOnly=false','purpose=DIAGNOSTIC_REQUESTED_BY_USER',"contextMethod=$globalWinner","oosWinner=$oosWinner","perRepOosWinner=$perRepDiagnostic","validationWinner=$validationDiagnostic","globalValidationWinner=$globalValidationDiagnostic",('winnersAgree='+$agreement),'queryCount=40',"replicationCount=$ReplicationCount",'hyperparameters=PER_REPLICATION_VALIDATION_SELECTED',"lambdaGrid=$LambdaGrid",('baselineMethodDirectory='+ (Join-Path $repRoot $globalWinner)),('selectedContextSha256='+ (Get-FileHash -LiteralPath $selectedFile).Hash)) | Set-Content -LiteralPath (Join-Path $selectionDir 'selection_protocol.txt') -Encoding UTF8
     $selectionRows.Add([pscustomobject]@{cell=$Cell;replication=$rep;oos_winner=$oosWinner;per_rep_oos_winner=$perRepDiagnostic;global_validation_winner=$globalValidationDiagnostic;validation_winner=$validationDiagnostic;winners_agree=$agreement;oos_mean_exp=$scores['CSAA-Exp'];oos_mean_tri=$scores['CSAA-Tri'];oos_mean_rf=$scores['RF-CSAA'];validation_cost_exp=$validationScores['CSAA-Exp'];validation_cost_tri=$validationScores['CSAA-Tri'];validation_cost_rf=$validationScores['RF-CSAA'];selected_context_file=$selectedFile})
     $target=Join-Path $stage ('primary\C-Chi2\{0}' -f $repName)
-    $queue.Enqueue([pscustomobject]@{rep=$rep;attempt=0;target=$target;selected=$selectedFile;input=(Join-Path $cellRoot "input\$repName")})
+    $task=[pscustomobject]@{rep=$rep;attempt=0;target=$target;selected=$selectedFile;input=(Join-Path $cellRoot "input\$repName")}
+    # On scheduler takeover, retain live optimizers instead of launching duplicates.
+    $active=@(Get-Process java -ErrorAction SilentlyContinue | Where-Object {
+        $_.Path -eq $java -and ([OlistWindowsProcess]::CommandLine($_.Id)).Contains('"'+$target+'"')
+    })
+    if($active.Count -gt 1){throw "Duplicate active workers for $target"}
+    if($active.Count -eq 1){
+        $process=$active[0];$heldHandle=$process.Handle;$task.attempt=1
+        $running.Add([pscustomobject]@{task=$task;process=$process});Write-Event $task 'ADOPTED' $process.Id
+    } else {
+        $complete=Test-Path -LiteralPath (Join-Path $target 'complete.txt')
+        if($complete){foreach($q in 0..39){
+            foreach($relative in @('oos\experiment2_summary.csv','solve\experiment2_final_solves.csv')){
+                $file=Join-Path $target ('queries\query_{0:D3}\{1}' -f $q,$relative)
+                if(-not(Test-Path -LiteralPath $file) -or (Get-Item -LiteralPath $file).Length -eq 0){$complete=$false}
+            }
+        }}
+        if(-not $complete){$queue.Enqueue($task)}
+    }
 }
 $selectionRows | Export-Csv -LiteralPath (Join-Path $control 'oos_vs_validation_selection.csv') -NoTypeInformation -Encoding UTF8
 if($SelectionOnly){
@@ -122,6 +143,10 @@ if($SelectionOnly){
 }
 
 while($queue.Count -gt 0 -or $running.Count -gt 0){
+    if($ParallelControlFile -and (Test-Path -LiteralPath $ParallelControlFile)){
+        $requested=0
+        if([int]::TryParse((Get-Content -LiteralPath $ParallelControlFile -Raw).Trim(),[ref]$requested) -and $requested -ge 1 -and $requested -le 4){$MaxParallel=$requested}
+    }
     while($queue.Count -gt 0 -and $running.Count -lt $MaxParallel){
         $task=$queue.Dequeue();$task.attempt++;New-Item -ItemType Directory -Force -Path $task.target | Out-Null
         $args=@('-Xmx2g',('"-Djava.library.path='+$native+'"'),('"-Dtrb.svu.python='+$python+'"'),'-cp',('"'+$classpath+'"'),'Test.analysis.synthetic.TRBSVUExperiment2IdeMain','--worker',('"'+$task.input+'"'),('"'+$task.selected+'"'),('"'+$task.target+'"'),$task.rep,$SolverThreads,$LimitSeconds,'PRIMARY','C-Chi2',$LambdaGrid)

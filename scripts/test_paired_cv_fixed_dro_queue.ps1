@@ -6,11 +6,20 @@ $experiment = Join-Path $root 'experiment'
 New-Item -ItemType Directory -Force -Path "$task\scripts", "$experiment\control\unified20" | Out-Null
 # Simulate schedulers, not native optimizers. One failed stage must not stop later cells.
 $mock = @'
-param($TaskRoot,$ExperimentRoot,$Cell,$ContextMethod,$ReplicationCount,$MaxParallel,$SolverThreads,$LimitSeconds,$LambdaGrid)
+param($TaskRoot,$ExperimentRoot,$Cell,$ContextMethod,$ReplicationCount,$MaxParallel,$SolverThreads,$LimitSeconds,$LambdaGrid,$ParallelControlFile)
 $ErrorActionPreference='Stop'
 $directory=Join-Path $ExperimentRoot "mock_calls\$Cell\$ContextMethod"
 New-Item -ItemType Directory -Force -Path $directory|Out-Null
 [pscustomobject]@{cell=$Cell;method=$ContextMethod;reps=$ReplicationCount;slots=$MaxParallel;threads=$SolverThreads;limit=$LimitSeconds;lambda=$LambdaGrid}|ConvertTo-Json|Set-Content (Join-Path $directory 'call.json')
+if($Cell-eq'cv010030' -and $ContextMethod-eq'RF-CSAA'){
+    $deadline=[DateTime]::Now.AddSeconds(20)
+    do {
+        Start-Sleep -Milliseconds 250
+        $slots=(Get-Content -LiteralPath $ParallelControlFile -Raw).Trim()
+    } while($slots-ne'4' -and [DateTime]::Now-lt$deadline)
+    if($slots-ne'4'){throw 'Freed TRI slots were not transferred to RF'}
+    Set-Content (Join-Path $directory 'expanded.txt') '4'
+}
 if($Cell-eq'cv030050'){exit 2}
 exit 0
 '@
@@ -23,6 +32,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Mock queue failed unexpectedly' }
 $calls = @(Get-ChildItem -LiteralPath "$experiment\mock_calls" -Recurse -Filter call.json |
     ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json })
 if ($calls.Count -ne 5) { throw "Expected five branches, found $($calls.Count)" }
+if(-not(Test-Path "$experiment\mock_calls\cv010030\RF-CSAA\expanded.txt")){throw 'Dynamic slot transfer failed'}
 foreach ($call in $calls) {
     if ($call.reps -ne 20 -or $call.threads -ne 4 -or $call.limit -ne 14400 -or $call.lambda -ne '0.1,0.25,0.5,1') {
         throw 'Worker settings changed'

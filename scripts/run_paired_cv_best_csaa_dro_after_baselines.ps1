@@ -2,6 +2,7 @@ param(
     [Parameter(Mandatory = $true)][string]$TaskRoot,
     [Parameter(Mandatory = $true)][string]$ExperimentRoot,
     [ValidateRange(1, 4)][int]$MaxParallel = 4,
+    [switch]$ResumeActiveDro,
     [switch]$DryRun
 )
 
@@ -12,6 +13,7 @@ $java = Join-Path $TaskRoot 'runtime\java\bin\java.exe'
 $baselineStatus = Join-Path $ExperimentRoot 'control\unified20\status.json'
 $control = Join-Path $ExperimentRoot 'control\dro20_after_baselines'
 $lambdaGrid = '0.1,0.25,0.5,1'
+. (Join-Path $PSScriptRoot 'olist_windows_process.ps1')
 
 if (-not (Test-Path -LiteralPath $runner -PathType Leaf)) { throw "Missing runner: $runner" }
 if ($DryRun) {
@@ -51,19 +53,36 @@ function Record-Failure([string]$cell, [string]$method, [string]$errorText) {
         Export-Csv -LiteralPath (Join-Path $control 'failed_cells.csv') -Append -NoTypeInformation -Encoding UTF8
 }
 function Run-Branch([string]$cell, [string]$method, [int]$slots) {
+    $slotFile=Join-Path $control ("slots_${cell}_${method}.txt")
+    Set-Content -LiteralPath $slotFile -Value $slots -Encoding ASCII
     $tag = '{0}_{1}_{2}' -f $cell,$method,(Get-Date -Format yyyyMMdd_HHmmss_fff)
     $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $runner + '"'),
         '-TaskRoot', ('"' + $TaskRoot + '"'), '-ExperimentRoot', ('"' + $ExperimentRoot + '"'),
         '-Cell', $cell, '-ContextMethod', $method, '-ReplicationCount', 20,
-        '-MaxParallel', $slots, '-SolverThreads', 4, '-LimitSeconds', 14400, '-LambdaGrid', $lambdaGrid)
+        '-MaxParallel', $slots, '-SolverThreads', 4, '-LimitSeconds', 14400, '-LambdaGrid', $lambdaGrid,
+        '-ParallelControlFile', ('"'+$slotFile+'"'))
     $process = Start-Process -FilePath 'powershell.exe' -ArgumentList ($arguments -join ' ') `
         -WorkingDirectory $TaskRoot -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput (Join-Path $control "$tag.stdout.log") `
         -RedirectStandardError (Join-Path $control "$tag.stderr.log")
     $heldHandle = $process.Handle
-    [pscustomobject]@{ process = $process; cell = $cell; method = $method; slots = $slots }
+    [pscustomobject]@{ process = $process; cell = $cell; method = $method; slots = $slots; slotFile=$slotFile }
 }
 function Wait-Branches($branches) {
+    while($true){
+        $live=@($branches | Where-Object {-not $_.process.HasExited})
+        if($live.Count -eq 0){break}
+        if($live.Count -eq 1 -and $live[0].slots -ne $MaxParallel){
+            # An exited scheduler may leave native workers alive: do not steal their slots.
+            $remainingRoot=Join-Path $ExperimentRoot ($live[0].cell+'\experiment2_fixed_csaa\'+$live[0].method+'\')
+            $otherWorkers=@(Active-Solvers | Where-Object {-not ([OlistWindowsProcess]::CommandLine($_.Id)).Contains($remainingRoot)})
+            if($otherWorkers.Count -eq 0){
+                Set-Content -LiteralPath $live[0].slotFile -Value $MaxParallel -Encoding ASCII
+                $live[0].slots=$MaxParallel
+            }
+        }
+        Start-Sleep -Seconds 2
+    }
     foreach ($branch in $branches) {
         try {
             $branch.process.WaitForExit()
@@ -81,7 +100,17 @@ try {
     while ($true) {
         try { $status = Get-Content -LiteralPath $baselineStatus -Raw -Encoding UTF8 | ConvertFrom-Json }
         catch { Start-Sleep -Seconds 5; continue }
-        if ($status.state -in @('FINISHED', 'FAILED', 'PARTIAL') -and @(Active-Solvers).Count -eq 0) { break }
+        if ($status.state -in @('FINISHED', 'FAILED', 'PARTIAL')) {
+            $active=@(Active-Solvers)
+            if($active.Count -eq 0){break}
+            if($ResumeActiveDro){
+                foreach($p in $active){
+                    $line=[OlistWindowsProcess]::CommandLine($p.Id)
+                    if(-not $line.Contains('Test.analysis.synthetic.TRBSVUExperiment2IdeMain') -or -not $line.Contains($ExperimentRoot+'\cv010030\experiment2_fixed_csaa\')){throw "Refuse takeover of unrelated worker $($p.Id)"}
+                }
+                break
+            }
+        }
         Start-Sleep -Seconds 30
     }
     foreach ($cell in $cells) {
