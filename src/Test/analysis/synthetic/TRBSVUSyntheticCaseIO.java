@@ -51,6 +51,15 @@ public final class TRBSVUSyntheticCaseIO {
     }
 
     public static TRBSVUSyntheticCase loadText(Path file) throws IOException {
+        return loadText(file, true);
+    }
+
+    /** Computation-only experiments deliberately have no OOS observations. */
+    public static TRBSVUSyntheticCase loadTextForSolve(Path file) throws IOException {
+        return loadText(file, false);
+    }
+
+    private static TRBSVUSyntheticCase loadText(Path file, boolean requireOos) throws IOException {
         List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
         if (lines.isEmpty() || !TEXT_HEADER.equals(lines.get(0)))
             throw new IOException("Unknown human-readable synthetic-case format: " + file);
@@ -160,7 +169,7 @@ public final class TRBSVUSyntheticCaseIO {
         }
         if (!ended || seeds == null || carrierNames == null || testContext == null
                 || carrierNames.contains(null) || laneNames.contains(null)
-                || history.isEmpty() || oos.isEmpty())
+                || history.isEmpty() || (requireOos && oos.isEmpty()))
             throw new IOException("Incomplete human-readable synthetic case: " + file);
         for (int i = 0; i < carrierCount; i++)
             for (int j = 0; j < laneCount; j++)
