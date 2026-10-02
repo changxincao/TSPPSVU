@@ -124,12 +124,13 @@ public final class OlistBestCsaaDroRunner {
 
     private static void select(Path base, Path out) throws Exception {
         OlistContextualBatchMain.main(new String[]{"check", base.toString()});
+        List<String> markets = Files.readAllLines(base.resolve("inputs/markets.tsv")).stream()
+                .skip(1).map(row -> row.split("\t")[0]).toList();
         Map<String, Double> oos = new TreeMap<>(), validation = new TreeMap<>();
         StringBuilder table = new StringBuilder("market\tmethod\tweeks\tmean_realized_cost\tmean_validation_cost\n");
         for (String method : List.of("EXP", "RF")) {
             double total = 0, totalValidation = 0;
-            for (int r = 0; r < 5; r++) {
-                String market = String.format("market_%03d", r);
+            for (String market : markets) {
                 var data = OlistContextualData.loadSnapshot(base.resolve("inputs/" + market + "/instance.tsv"));
                 double sum = 0, validationSum = 0;
                 for (int trial = 0; trial < 51; trial++) {
@@ -143,11 +144,11 @@ public final class OlistBestCsaaDroRunner {
                 table.append(market).append('\t').append(method).append("\t51\t").append(sum / 51)
                         .append('\t').append(validationSum / 51).append('\n');
             }
-            oos.put(method, total / 5); validation.put(method, totalValidation / 5);
+            oos.put(method, total / markets.size()); validation.put(method, totalValidation / markets.size());
         }
         String winner = best(oos), validationWinner = best(validation);
         String result = "method\tselection\tformal_training_only\tmean_realized_cost\tvalidation_winner\n"
-                + winner + "\tGLOBAL_5_MARKETS_51_WEEKS_OOS_MEAN\tfalse\t" + oos.get(winner) + "\t" + validationWinner + "\n";
+                + winner + "\tGLOBAL_" + markets.size() + "_MARKETS_51_WEEKS_OOS_MEAN\tfalse\t" + oos.get(winner) + "\t" + validationWinner + "\n";
         Path selection = out.resolve("global_selection.tsv");
         if (Files.exists(selection) && !Files.readString(selection).equals(result))
             throw new IllegalStateException("Refuse to change a frozen global method");

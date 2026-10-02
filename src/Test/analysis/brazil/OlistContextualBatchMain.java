@@ -13,11 +13,17 @@ public final class OlistContextualBatchMain {
             StringBuilder manifest = new StringBuilder("market\tmarket_seed\trf_seed\tinstance\tsha256\n");
             byte[] firstDemands = null;
             Set<String> hashes = new HashSet<>();
-            for (int r = 0; r < 5; r++) {
-                long seed = 20261020L + r;
+            int count = Integer.getInteger("olist.marketCount", 5);
+            long seedStart = Long.getLong("olist.seedStart", 20261020L);
+            int legacyCarriers = Integer.getInteger("olist.legacyCarriers", 0);
+            if (count < 1) throw new IllegalArgumentException("Positive market count required");
+            for (int r = 0; r < count; r++) {
+                long seed = Math.addExact(seedStart, r);
                 String name = String.format("market_%03d", r);
                 Path file = root.resolve("inputs/" + name + "/instance.tsv");
-                OlistContextualData generated = new OlistContextualData(OlistContextualData.DEFAULT_INPUT, seed);
+                OlistContextualData generated = legacyCarriers == 0
+                        ? new OlistContextualData(OlistContextualData.DEFAULT_INPUT, seed)
+                        : OlistContextualData.legacyMin(OlistContextualData.DEFAULT_INPUT, seed, legacyCarriers);
                 Path temp = Files.createTempFile("olist_snapshot_", ".tsv");
                 try {
                     generated.saveSnapshot(temp);
@@ -39,13 +45,15 @@ public final class OlistContextualBatchMain {
                 } finally { Files.deleteIfExists(temp); }
             }
             OlistContextualRunner.atomic(root.resolve("inputs/markets.tsv"), manifest.toString());
-            System.out.println("PREPARED_5_MARKETS identical_104x23_demands snapshot_roundtrip=PASS no_solves");
+            System.out.println("PREPARED_MARKETS=" + count + " identical_104x23_demands snapshot_roundtrip=PASS no_solves");
         } else if (args[0].equals("check")) {
             List<String> rows = Files.readAllLines(root.resolve("inputs/markets.tsv"));
-            if (rows.size() != 6) throw new IllegalStateException("Expected five markets");
+            if (rows.size() < 2) throw new IllegalStateException("Empty market manifest");
             byte[] first = null;
+            Set<String> names = new HashSet<>();
             for (String row : rows.subList(1, rows.size())) {
                 String[] f = row.split("\t");
+                if (f.length != 5 || !names.add(f[0])) throw new IllegalStateException("Duplicate/bad market row");
                 Path file = root.resolve(f[3]);
                 var data = OlistContextualData.loadSnapshot(file);
                 if (!sha(file).equals(f[4]) || data.marketSeed != Long.parseLong(f[1]))
@@ -54,7 +62,7 @@ public final class OlistContextualBatchMain {
                 if (first == null) first = demands;
                 else if (!Arrays.equals(first, demands)) throw new IllegalStateException("Unpaired actual demands");
             }
-            System.out.println("BATCH_INPUT_CHECK_PASS markets=5");
+            System.out.println("BATCH_INPUT_CHECK_PASS markets=" + (rows.size() - 1));
         } else if (args[0].equals("audit") && args.length == 4) {
             var data = OlistContextualData.loadSnapshot(root.resolve("inputs/" + args[2] + "/instance.tsv"));
             var method = OlistContextualRunner.Method.valueOf(args[3]);

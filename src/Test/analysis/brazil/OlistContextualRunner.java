@@ -305,8 +305,8 @@ public final class OlistContextualRunner {
                 + "\ncodeSha256=" + codeHash() + "\nrfScriptSha256=" + hash(Files.readAllBytes(RF_SCRIPT))
                 + "\npython=" + PYTHON + "\npythonEnvironment=" + environment
                 + "\nmarketSeed=" + MARKET_SEED + "\nrfSeed=" + RF_SEED + "\nthreads=" + THREADS
-                + "\nlimit=" + LIMIT_SECONDS + "\ngap=1e-4\nrfTrees=500\nselection=2..12\n"
-                + "market=current_factory_50pct_coverage_mqc015035_spot23_minH\n"
+                + "\nlimit=" + LIMIT_SECONDS + "\ngap=1e-4\nrfTrees=500\nselection=" + data.market.alpha + ".." + data.market.beta + "\n"
+                + "market=" + System.getProperty("olist.marketLabel", "current_factory_50pct_coverage_mqc015035_spot23_minH") + "\n"
                 + "procurementCalibration=ALL_WEEKS_RETROSPECTIVE\nvalidation=35_rolling_15\nfinalHistory=50\n"
                 + "includeTrend=" + OlistContextualData.INCLUDE_TREND + "\ntrendFeature=DETERMINISTIC_ONE_BASED_WEEK_TRAINING_MAX\n"
                 + "baselineD=MEAN_OF_50\nbaselineSAA=ALL_50_EQUAL\nbaselineValidation=NONE\n"
@@ -362,7 +362,7 @@ public final class OlistContextualRunner {
         if (f.length != 30 || Integer.parseInt(f[0]) != week || !f[5].equals(method.name())
                 || Integer.parseInt(f[4]) != lag || Double.parseDouble(f[6]) != parameter
                 || Integer.parseInt(f[1]) != week - 50 || Integer.parseInt(f[2]) != week - 1
-                || Integer.parseInt(f[3]) != 50 || Integer.parseInt(f[29]) != scenarios || !f[15].matches("[01]{15}")
+                || Integer.parseInt(f[3]) != 50 || Integer.parseInt(f[29]) != scenarios || !f[15].matches("[01]{" + data.market.I + "}")
                 || !Double.isFinite(Double.parseDouble(f[18]))) return false;
         if (isBaseline(method)) return true; // No nonexistent validation origins are required for D/SAA.
         Path origins = directory.resolve("validation/k" + lag + "_p" + parameter + "/origins.tsv");

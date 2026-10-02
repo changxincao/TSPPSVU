@@ -5,6 +5,7 @@ import Basic.ProcurementParams;
 import Basic.PeriodData;
 import Basic.Sample;
 import Helper.basicHelper.Config;
+import Helper.basicHelper.InstanceGenerator;
 import Helper.basicHelper.SampleBuilder;
 import Helper.basicHelper.WeeklyWideLoader;
 import Helper.calculateHelper.StandardScaler;
@@ -31,6 +32,16 @@ public final class OlistContextualData {
     public final long marketSeed;
 
     public OlistContextualData(Path input, long marketSeed) throws Exception {
+        this(input, marketSeed, 0);
+    }
+
+    /** Legacy market, with exactly one parameter replacement: h_i=min eligible r_ij. */
+    public static OlistContextualData legacyMin(Path input, long seed, int carriers) throws Exception {
+        if (carriers != 10 && carriers != 15) throw new IllegalArgumentException("Legacy pilot requires 10 or 15 carriers");
+        return new OlistContextualData(input, seed, carriers);
+    }
+
+    private OlistContextualData(Path input, long marketSeed, int legacyCarriers) throws Exception {
         this.marketSeed = marketSeed;
         // The legacy loader substitutes zero for malformed numbers. Do not silently do that here.
         List<String> lines = Files.readAllLines(input);
@@ -54,10 +65,24 @@ public final class OlistContextualData {
         for (var period : weekly.periods)
             for (int j = 0; j < baselineDemand.length; j++)
                 baselineDemand[j] += period.demandSum[j] / weekly.periods.size();
-        ProcurementParams original = TRBSVUProcurementGenerator.generate(15, baselineDemand, marketSeed);
-        // Current Medium/Moderate pilot uses 80% upper selection, not the factory's 70% default.
-        market = new ProcurementParams(original.carriers, original.J, original.e, original.p,
-                original.h, original.q, original.r, original.eligible, original.alpha, 12);
+        if (legacyCarriers > 0) {
+            Config cfg = new Config(); cfg.seed = Math.toIntExact(marketSeed);
+            ProcurementParams original = InstanceGenerator.generate(legacyCarriers, baselineDemand,
+                    new InstanceGenerator.GenConfig(), cfg);
+            double[] minPenalty = new double[original.I];
+            for (int i = 0; i < original.I; i++) {
+                minPenalty[i] = Double.POSITIVE_INFINITY;
+                for (int j = 0; j < original.J; j++) if (original.eligible[i][j])
+                    minPenalty[i] = Math.min(minPenalty[i], original.r[i][j]);
+            }
+            market = new ProcurementParams(original.carriers, original.J, original.e, original.p,
+                    minPenalty, original.q, original.r, original.eligible, original.alpha, original.beta);
+        } else {
+            ProcurementParams original = TRBSVUProcurementGenerator.generate(15, baselineDemand, marketSeed);
+            // Current Medium/Moderate pilot uses 80% upper selection, not the factory's 70% default.
+            market = new ProcurementParams(original.carriers, original.J, original.e, original.p,
+                    original.h, original.q, original.r, original.eligible, original.alpha, 12);
+        }
     }
 
     private OlistContextualData(WeeklyWideLoader.Result weekly, double[] baseline,
@@ -97,7 +122,7 @@ public final class OlistContextualData {
         int carriers = Integer.parseInt(header[1]), lanes = Integer.parseInt(header[2]), weeks = Integer.parseInt(header[3]);
         int alpha = Integer.parseInt(header[4]), beta = Integer.parseInt(header[5]);
         long seed = Long.parseLong(header[6]);
-        if (carriers != 15 || lanes < 1 || weeks <= FIRST_TEST || alpha != 2 || beta != 12)
+        if (carriers < 1 || lanes < 1 || weeks <= FIRST_TEST || alpha < 1 || alpha > beta || beta > carriers)
             throw new IllegalArgumentException("Unexpected frozen market dimensions/bounds.");
         String[] names = new String[lanes];
         double[] baseline = new double[lanes], spot = new double[lanes];

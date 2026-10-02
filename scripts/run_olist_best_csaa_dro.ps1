@@ -5,6 +5,10 @@ $ProgressPreference = 'SilentlyContinue'
 $BaseRoot = (Resolve-Path -LiteralPath $BaseRoot).Path
 $Root = (Resolve-Path -LiteralPath $Root).Path
 $cfg = [IO.File]::ReadAllText((Join-Path $BaseRoot 'config.json')) | ConvertFrom-Json
+$markets = @(Import-Csv -LiteralPath (Join-Path $BaseRoot 'inputs/markets.tsv') -Delimiter "`t")
+$baseMethods = if ($cfg.methods) { @($cfg.methods) } else { @('D','SAA','EXP','RF') }
+$requiredBaseTasks = $markets.Count * $baseMethods.Count
+if (!$markets.Count -or 'EXP' -notin $baseMethods -or 'RF' -notin $baseMethods) { throw 'CSAA baseline manifest/methods invalid' }
 $control = Join-Path $Root 'control'
 New-Item -ItemType Directory -Force -Path $control | Out-Null
 $lock = [IO.File]::Open((Join-Path $control 'scheduler.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
@@ -80,18 +84,18 @@ try {
         $failed = @($state | Where-Object state -eq 'FAILED').Count
         Write-Atomic (Join-Path $control 'status.json') (ConvertTo-Json -InputObject ([pscustomobject]@{
             state='WAITING_BASELINES';updated=(Get-Date -Format o);completedBaseTasks=$done;
-            failedBaseTasks=$failed;requiredBaseTasks=20;parallel=4;solverThreads=4;
+            failedBaseTasks=$failed;requiredBaseTasks=$requiredBaseTasks;parallel=4;solverThreads=4;
             lambdaGrid=@(0.1,0.25,0.5,1);selection='GLOBAL_OOS_MEAN';formalTrainingOnly=$false}) -Depth 3)
         if ($failed) { throw 'Baseline task failed: cannot select a global winner from incomplete results' }
-        if ($state.Count -ne 20) { throw 'Unexpected baseline queue task count' }
-        if ($done -lt 20) { Start-Sleep -Seconds 60 }
-    } while ($done -lt 20)
+        if ($state.Count -ne $requiredBaseTasks) { throw 'Unexpected baseline queue task count' }
+        if ($done -lt $requiredBaseTasks) { Start-Sleep -Seconds 30 }
+    } while ($done -lt $requiredBaseTasks)
     & $cfg.java @common select $BaseRoot $Root
     if ($LASTEXITCODE -ne 0) { throw 'Global selection/full-output audit failed' }
     $method = ([IO.File]::ReadAllLines((Join-Path $Root 'global_selection.tsv'))[1] -split "`t")[0]
-    Event "GLOBAL_SELECTED $method all five markets; no per-market family selection"
-    $tasks = @(foreach ($r in 0..4) {
-        [pscustomobject]@{market=('market_{0:D3}' -f $r);method=$method;state='PENDING';attempt=0;
+    Event "GLOBAL_SELECTED $method all $($markets.Count) markets; no per-market family selection"
+    $tasks = @(foreach ($market in $markets) {
+        [pscustomobject]@{market=$market.market;method=$method;state='PENDING';attempt=0;
             pid=0;exitCode=$null;started=$null;finished=$null;process=$null}
     })
     function Save-State {
@@ -139,7 +143,7 @@ try {
         Save-State
         if (@($tasks | Where-Object state -eq 'RUNNING').Count) { Start-Sleep -Seconds 5 }
     }
-    Event "QUEUE_FINISHED complete=$(@($tasks | Where-Object state -eq 'COMPLETE').Count)/5 failed=$(@($tasks | Where-Object state -eq 'FAILED').Count)"
+    Event "QUEUE_FINISHED complete=$(@($tasks | Where-Object state -eq 'COMPLETE').Count)/$($markets.Count) failed=$(@($tasks | Where-Object state -eq 'FAILED').Count)"
 } catch {
     Write-Atomic (Join-Path $control 'scheduler_failure.json') (ConvertTo-Json -InputObject ([pscustomobject]@{
         state='FAILED';updated=(Get-Date -Format o);error=$_.Exception.Message}))

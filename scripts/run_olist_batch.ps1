@@ -49,11 +49,14 @@ try {
     & $cfg.python -c 'import sys,numpy,sklearn; print(sys.version); print(numpy.__version__,sklearn.__version__)'
     if ($LASTEXITCODE -ne 0) { throw 'RF dependencies unavailable' }
     $markets = Import-Csv -LiteralPath (Join-Path $Root 'inputs/markets.tsv') -Delimiter "`t"
+    $methods = if ($cfg.methods) { @($cfg.methods) } else { @('D','SAA','EXP','RF') }
+    if (!$methods.Count -or @($methods | Where-Object { $_ -notin @('D','SAA','EXP','RF') }).Count) { throw 'Invalid baseline methods' }
     $tasks = @()
     foreach ($market in $markets) {
         $properties = @("-Dolist.instance=$(Join-Path $Root $market.instance)", "-Dolist.marketSeed=$($market.market_seed)",
             "-Dolist.includeTrend=$trend",
             "-Dolist.rfSeed=$($market.rf_seed)", "-Dolist.python=$($cfg.python)",
+            "-Dolist.marketLabel=$(if($cfg.marketLabel){$cfg.marketLabel}else{'current_factory_50pct_coverage_mqc015035_spot23_minH'})",
             "-Dolist.rfScript=$(Join-Path $Root 'scripts/rf_leaf_weights.py')",
             "-Dolist.threads=$($cfg.solverThreads)", "-Dolist.limit=$($cfg.limitSeconds)")
         $output = Join-Path $Root "results/$($market.market)"
@@ -62,7 +65,7 @@ try {
             'Test.analysis.brazil.OlistContextualRunner', 'prepare', $output)
         $code = Invoke-Java $prepare
         if ($code -ne 0) { throw "Protocol preparation failed: $($market.market)" }
-        foreach ($method in @('D', 'SAA', 'EXP', 'RF')) {
+        foreach ($method in $methods) {
             $arguments = @("-Xmx$($cfg.heap)") + $properties + @("-Dolist.methods=$method",
                 "-Djava.library.path=$($cfg.cplexNative)", '-cp', $cp,
                 'Test.analysis.brazil.OlistContextualRunner', 'run', $output, '0', '51')
@@ -71,7 +74,7 @@ try {
         }
     }
     Write-Atomic (Join-Path $control 'launch_plan.json') (ConvertTo-Json -InputObject @($tasks | Select-Object market,method,arguments) -Depth 5)
-    if ($CheckOnly) { Event "CHECK_ONLY_PASS five inputs, Java, RF dependencies, protocol and $($tasks.Count) launch commands; no solves"; return }
+    if ($CheckOnly) { Event "CHECK_ONLY_PASS $(@($markets).Count) inputs, Java, RF dependencies, protocol and $($tasks.Count) launch commands; no solves"; return }
     function Save-State {
         Write-Atomic (Join-Path $control 'status.json') (ConvertTo-Json -InputObject @($tasks | Select-Object market,method,state,attempt,pid,exitCode,started,finished) -Depth 5)
     }
@@ -97,7 +100,7 @@ try {
             Event "$($task.state) $($task.market) $($task.method) exit=$($task.exitCode) attempt=$($task.attempt)"
         }
         $slots = $cfg.maxParallel - @($tasks | Where-Object state -eq 'RUNNING').Count
-        foreach ($task in @($tasks | Where-Object state -eq 'PENDING' | Select-Object -First $slots)) {
+        foreach ($task in @($tasks | Where-Object { $_.state -eq 'PENDING' -and $slots -gt 0 } | Select-Object -First ([Math]::Max(0,$slots)))) {
             $task.attempt++
             $stem = Join-Path $control "$($task.market)_$($task.method)_$(Get-Date -Format yyyyMMdd_HHmmss_fff)_attempt$($task.attempt)"
             # All arguments are separate, quoted tokens; no generated shell command for file operations.
