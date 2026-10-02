@@ -137,7 +137,9 @@ public final class OlistContextualRunner {
         // Identical 15 origins for every candidate; never average a partial candidate.
         valid.sort(Comparator.comparingDouble(Candidate::mean).thenComparingDouble(Candidate::sd)
                 .thenComparingDouble(Candidate::parameter).thenComparingInt(Candidate::lag));
-        if (valid.isEmpty()) throw new IllegalStateException("No complete validation candidate.");
+        if (valid.size() != 3 * grid.length)
+            throw new IllegalStateException("Validation grid incomplete: " + valid.size() + "/" + (3 * grid.length)
+                    + "; saved origins retained for retry; no final selection made.");
         Candidate best = valid.get(0);
         atomic(directory.resolve("selection.tsv"), "lag\tparameter\tvalidation_mean\tvalidation_sd\n"
                 + best.lag() + "\t" + best.parameter() + "\t" + best.mean() + "\t" + best.sd() + "\n");
@@ -387,7 +389,7 @@ public final class OlistContextualRunner {
                 && Math.abs(sampleSd(costs, mean) - Double.parseDouble(selection[3])) <= 1e-10 * Math.max(1, mean);
     }
 
-    private static boolean selectionComplete(Path directory, Method method, String[] selection) throws Exception {
+    static boolean selectionComplete(Path directory, Method method, String[] selection) throws Exception {
         int lag = Integer.parseInt(selection[0]);
         double parameter = Double.parseDouble(selection[1]);
         Path candidateFile = directory.resolve("candidates.tsv");
@@ -404,7 +406,7 @@ public final class OlistContextualRunner {
             if (fields.length != 6) return false;
             int candidateLag = Integer.parseInt(fields[0]), count = Integer.parseInt(fields[2]);
             double candidateParameter = Double.parseDouble(fields[1]);
-            if (candidateLag < 1 || candidateLag > 3 || count < 0 || count > 15
+            if (candidateLag < 1 || candidateLag > 3 || count != 15
                     || Arrays.stream(grid).noneMatch(p -> p == candidateParameter)
                     || !seen.add(candidateLag + ":" + candidateParameter)
                     || !(fields[3].equals("true") || fields[3].equals("false"))

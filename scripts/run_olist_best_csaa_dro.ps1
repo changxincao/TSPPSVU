@@ -94,10 +94,11 @@ try {
             state='WAITING_BASELINES';updated=(Get-Date -Format o);completedBaseTasks=$done;
             failedBaseTasks=$failed;requiredBaseTasks=$requiredBaseTasks;parallel=4;solverThreads=4;
             lambdaGrid=$gridValues;selection=$selectionRule;formalTrainingOnly=$FixedRf.IsPresent}) -Depth 3)
-        if ($failed) { throw 'Baseline task failed: cannot select a global winner from incomplete results' }
+        if ($failed -and !$FixedRf) { throw 'Baseline task failed: cannot select a global winner from incomplete results' }
         if ($state.Count -ne $requiredBaseTasks) { throw 'Unexpected baseline queue task count' }
-        if ($done -lt $requiredBaseTasks) { Start-Sleep -Seconds 30 }
-    } while ($done -lt $requiredBaseTasks)
+        $baseReady = if($FixedRf){@($state|Where-Object state -notin @('COMPLETE','FAILED')).Count -eq 0}else{$done -eq $requiredBaseTasks}
+        if (!$baseReady) { Start-Sleep -Seconds 30 }
+    } while (!$baseReady)
     & $cfg.java @common select $BaseRoot $Root
     if ($LASTEXITCODE -ne 0) { throw 'Global selection/full-output audit failed' }
     $method = ([IO.File]::ReadAllLines((Join-Path $Root 'global_selection.tsv'))[1] -split "`t")[0]
@@ -108,15 +109,26 @@ try {
     })
     function Save-State {
         Write-Atomic (Join-Path $control 'status.json') (ConvertTo-Json -InputObject ([pscustomobject]@{
-            state=$(if(@($tasks | Where-Object state -in @('PENDING','RUNNING')).Count){'RUNNING'}else{'FINISHED'});
+            state=$(if(@($tasks | Where-Object state -in @('PENDING','RUNNING')).Count){'RUNNING'}elseif(@($tasks | Where-Object state -ne 'COMPLETE').Count){'FINISHED_WITH_FAILURES'}else{'FINISHED'});
             updated=(Get-Date -Format o);contextMethod=$method;parallel=4;solverThreads=4;
             lambdaGrid=$gridValues;selection=$selectionRule;formalTrainingOnly=$FixedRf.IsPresent;
             tasks=@($tasks | Select-Object market,method,state,attempt,pid,exitCode,started,finished)}) -Depth 4)
     }
     foreach ($task in $tasks) {
+        if ($FixedRf) {
+            $rfState=@($state | Where-Object { $_.market -eq $task.market -and $_.method -eq 'RF' })
+            if($rfState.Count -ne 1 -or $rfState[0].state -ne 'COMPLETE') {
+                $task.state='BLOCKED_BASELINE'; Event "BLOCKED_BASELINE $($task.market) RF incomplete"; continue
+            }
+            $auditArgs=@('-Xmx2g',"-Dolist.includeTrend=$trend","-Dolist.fixedTrend104=$fixedTrend",'-cp',$cp,
+                'Test.analysis.brazil.OlistContextualBatchMain','audit',$BaseRoot,$task.market,'RF')
+            & $cfg.java @auditArgs
+            if($LASTEXITCODE -ne 0){$task.state='BLOCKED_BASELINE';Event "BLOCKED_BASELINE $($task.market) RF output audit failed";continue}
+        }
         & $cfg.java @common audit $BaseRoot $Root $task.market $method
         if ($LASTEXITCODE -eq 0) { $task.state='COMPLETE'; Event "REUSE $($task.market)" }
     }
+    Save-State
     while (@($tasks | Where-Object state -in @('PENDING','RUNNING')).Count) {
         foreach ($task in @($tasks | Where-Object state -eq 'RUNNING')) {
             $task.process.Refresh()
@@ -151,7 +163,8 @@ try {
         Save-State
         if (@($tasks | Where-Object state -eq 'RUNNING').Count) { Start-Sleep -Seconds 5 }
     }
-    Event "QUEUE_FINISHED complete=$(@($tasks | Where-Object state -eq 'COMPLETE').Count)/$($markets.Count) failed=$(@($tasks | Where-Object state -eq 'FAILED').Count)"
+    Save-State
+    Event "QUEUE_FINISHED complete=$(@($tasks | Where-Object state -eq 'COMPLETE').Count)/$($markets.Count) failed_or_blocked=$(@($tasks | Where-Object state -ne 'COMPLETE').Count)"
 } catch {
     Write-Atomic (Join-Path $control 'scheduler_failure.json') (ConvertTo-Json -InputObject ([pscustomobject]@{
         state='FAILED';updated=(Get-Date -Format o);error=$_.Exception.Message}))

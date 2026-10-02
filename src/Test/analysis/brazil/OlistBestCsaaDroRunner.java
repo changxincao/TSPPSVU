@@ -150,6 +150,18 @@ public final class OlistBestCsaaDroRunner {
 
     private static void select(Path base, Path out) throws Exception {
         OlistContextualBatchMain.main(new String[]{"check", base.toString()});
+        if (FIXED_RF) {
+            // Family is fixed in advance. Audit RF availability per market in the scheduler;
+            // one failed market must not block other markets or trigger OOS family selection.
+            String result = "method\tselection\tformal_training_only\tmean_realized_cost\tvalidation_winner\n"
+                    + "RF\tUSER_FIXED_RF\ttrue\tNaN\tRF\n";
+            Path file = out.resolve("global_selection.tsv");
+            if (Files.exists(file) && !Files.readString(file).equals(result))
+                throw new IllegalStateException("Refuse to change a frozen fixed-family selection");
+            OlistContextualRunner.atomic(file, result);
+            System.out.println("USER_FIXED_METHOD=RF; baseline audit is per market");
+            return;
+        }
         List<String> markets = Files.readAllLines(base.resolve("inputs/markets.tsv")).stream()
                 .skip(1).map(row -> row.split("\t")[0]).toList();
         Map<String, Double> oos = new TreeMap<>(), validation = new TreeMap<>();

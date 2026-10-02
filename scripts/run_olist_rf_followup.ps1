@@ -51,12 +51,19 @@ try{
     Save 'RUNNING_RF' '10 markets, each 51 rolling predictions'
     & (Join-Path $PSScriptRoot 'run_olist_batch.ps1') -Root $Root
     $baseline=Read-Live (Join-Path $control 'status.json')
-    if(@($baseline).Count -ne 10 -or @($baseline|Where-Object state -ne 'COMPLETE').Count){
-        throw 'RF batch incomplete after retries; completed work retained, inspect failed markets'
+    if(@($baseline).Count -ne 10 -or @($baseline|Where-Object state -notin @('COMPLETE','FAILED')).Count){
+        throw 'RF scheduler has not reached a terminal state; inspect possible live workers'
     }
     Save 'RUNNING_DRO' 'RF parameters selected separately each week; lambda selected on 15 preceding origins'
     & (Join-Path $PSScriptRoot 'run_olist_best_csaa_dro.ps1') -BaseRoot $Root -Root $dro -LambdaGrid $cfg.lambdaGrid -FixedRf
     $robust=Read-Live (Join-Path $dro 'control/status.json')
+    $expected=@($baseline|ForEach-Object market|Sort-Object)
+    $actual=@($robust.tasks|ForEach-Object market|Sort-Object)
+    if($robust.state -notin @('FINISHED','FINISHED_WITH_FAILURES') -or $actual.Count -ne 10 -or
+        ($expected -join ',') -ne ($actual -join ',') -or
+        @($robust.tasks|Where-Object state -notin @('COMPLETE','FAILED','BLOCKED_BASELINE')).Count){
+        throw 'DRO terminal status missing or incomplete; cannot mark pipeline finished'
+    }
     $failed=@($robust.tasks|Where-Object state -ne 'COMPLETE').Count
     Save $(if($failed){'FINISHED_WITH_FAILURES'}else{'FINISHED'}) "DRO incomplete markets=$failed"
 }catch{Save 'FAILED' $_.Exception.Message;throw}finally{$lock.Dispose()}
