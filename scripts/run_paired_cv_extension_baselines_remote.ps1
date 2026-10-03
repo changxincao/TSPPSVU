@@ -9,6 +9,18 @@ try {
 function Complete($d){if(-not(Test-Path (Join-Path $d 'complete.txt'))){return $false};foreach($q in 0..39){$x=Join-Path $d ('queries\query_{0:D3}'-f$q);foreach($f in @('query_metadata.txt','validation\summary.csv','validation\details.csv','solve\final_solve.csv','solve\final_weights.csv','oos\summary.csv','oos\draws.csv')){$p=Join-Path $x $f;if(-not(Test-Path $p)-or(Get-Item $p).Length-eq0){return $false}}};return $true}
 $queue=[Collections.Generic.Queue[object]]::new();$running=[Collections.Generic.List[object]]::new();$failed=[Collections.Generic.List[object]]::new();$events=Join-Path $control 'events.csv';function Event($t,$s,$c){[pscustomobject]@{time=[DateTime]::Now.ToString('o');cell=$Cell;rep=$t.rep;method=$t.method;attempt=$t.attempt;state=$s;exitCode=$c}|Export-Csv $events -Append -NoTypeInformation -Encoding UTF8}
 function Write-JsonStatus($value){$json=$value|ConvertTo-Json;for($attempt=1;$attempt-le40;$attempt++){try{Set-Content -LiteralPath (Join-Path $control 'status.json') -Value $json -Encoding UTF8 -ErrorAction Stop;return}catch [System.IO.IOException]{if($attempt-eq40){throw};Start-Sleep -Milliseconds 250}}}
+function Worker-Arguments($Task){
+    $input=Join-Path $ExperimentRoot ("$Cell\input\rep_{0:D3}"-f$Task.rep)
+    $grid=if($Task.method-eq'CSAA-Tri'){'0.8,0.9,1,2'}else{'0.1,0.25,0.5,0.8'}
+    return @('-Xmx2g',"-Djava.library.path=$native","-Dtrb.svu.python=$python", "-Dtrb.svu.bandwidthGrid=$grid",'-Dtrb.svu.rfLeafGrid=1,2,5','-cp',$cp,'Test.analysis.synthetic.TRBSVUExperiment1IdeMain','--worker',$input,$Task.target,[string]$Task.rep,$Task.method,'25','4','14400')
+}
+function Worker-CommandMatches($Command,$Task){
+    $tokens=@([regex]::Matches($Command,'"[^"]*"|\S+')|ForEach-Object {$_.Value.Trim('"')})
+    $expected=@(Worker-Arguments $Task)
+    if($tokens.Count-ne($expected.Count+1)-or$tokens[0]-ne$java){return $false}
+    for($index=0;$index-lt$expected.Count;$index++){if($tokens[$index+1]-cne$expected[$index]){return $false}}
+    return $true
+}
 foreach($r in 0..($ReplicationCount-1)){
     foreach($m in @('CSAA-Exp','CSAA-Tri','RF-CSAA','SAA-All','D')){
         $target=Join-Path $ExperimentRoot ("$Cell\experiment1\rep_{0:D3}\{1}"-f$r,$m)
@@ -19,7 +31,7 @@ foreach($r in 0..($ReplicationCount-1)){
         if($active.Count -gt 1){throw "Duplicate baseline workers for $target"}
         if($active.Count -eq 1){
             $command=[OlistWindowsProcess]::CommandLine($active[0].Id)
-            if(!$command.Contains('Test.analysis.synthetic.TRBSVUExperiment1IdeMain')){throw "Unexpected worker for $target"}
+            if(!(Worker-CommandMatches $command $task)){throw "Worker protocol mismatch for $target; existing process left untouched"}
             $task.attempt=1;$heldHandle=$active[0].Handle
             $running.Add([pscustomobject]@{task=$task;process=$active[0]});Event $task ADOPTED $active[0].Id
         }else{
