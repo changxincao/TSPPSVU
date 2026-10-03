@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$Root,[switch]$Start,[switch]$CheckOnly)
+param([Parameter(Mandatory=$true)][string]$Root,[switch]$Start,[switch]$CheckOnly,[switch]$ResumeOverlap)
 $ErrorActionPreference='Stop'
 $Root=(Resolve-Path -LiteralPath $Root).Path
 $control=Join-Path $Root 'control'
@@ -8,6 +8,7 @@ if($Start){
     function Q($s){"'"+$s.Replace("'","''")+"'"}
     $log=Join-Path $control "pipeline_$(Get-Date -Format yyyyMMdd_HHmmss_fff).log"
     $body='$ErrorActionPreference=''Stop''; try { & '+(Q $PSCommandPath)+' -Root '+(Q $Root)+
+        $(if($ResumeOverlap){' -ResumeOverlap'}else{''})+
         ' *>&1 | Tee-Object -FilePath '+(Q $log)+' } catch { $_ | Out-String | Add-Content -LiteralPath '+(Q $log)+'; exit 1 }'
     $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($body))
     $startedPid=[OlistWindowsProcess]::StartDetached('C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe',
@@ -34,7 +35,7 @@ function Save($State,$Details){
     if([IO.File]::Exists($file)){[IO.File]::Replace("$file.tmp",$file,[NullString]::Value)}else{[IO.File]::Move("$file.tmp",$file)}
 }
 try{
-    & (Join-Path $PSScriptRoot 'run_olist_batch.ps1') -Root $Root -CheckOnly
+    if(!$ResumeOverlap){& (Join-Path $PSScriptRoot 'run_olist_batch.ps1') -Root $Root -CheckOnly}
     & (Join-Path $PSScriptRoot 'run_olist_best_csaa_dro.ps1') -BaseRoot $Root -Root $dro -LambdaGrid $cfg.lambdaGrid -FixedRf -CheckOnly
     do{
         $previous=Read-Live (Join-Path $cfg.previousRoot 'control/pipeline_status.json')
@@ -48,8 +49,8 @@ try{
         [OlistWindowsProcess]::CommandLine($_.Id).Contains([string]$cfg.previousRoot)
     })
     if($orphans.Count){throw 'Predecessor has live Java workers; refuse overlap'}
-    Save 'RUNNING_RF' '10 markets, each 51 rolling predictions'
-    & (Join-Path $PSScriptRoot 'run_olist_batch.ps1') -Root $Root
+    Save $(if($ResumeOverlap){'RUNNING_RF_DRO'}else{'RUNNING_RF'}) '10 markets, each 51 rolling predictions; shared four-slot pool when overlapping'
+    & (Join-Path $PSScriptRoot 'run_olist_batch.ps1') -Root $Root -AdoptRunning:$ResumeOverlap -OverlapFixedRf:$ResumeOverlap
     $baseline=Read-Live (Join-Path $control 'status.json')
     if(@($baseline).Count -ne 10 -or @($baseline|Where-Object state -notin @('COMPLETE','FAILED')).Count){
         throw 'RF scheduler has not reached a terminal state; inspect possible live workers'

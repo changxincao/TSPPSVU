@@ -43,3 +43,15 @@ incumbent在评价前落盘；每完成origin即保存；异常不丢已完成�
 `control/status.json`保存市场/方法/状态/PID/尝试次数/退出码；`events.log`、各attempt stdout/stderr、逐任务audit保存调度追踪。不得将缺失、失败或未完成记为零成本/零改善。
 
 `payload_manifest.tsv`记录可迁移文件的初始哈希；修改config后该文件哈希会变化，实际求解协议另冻结使用的运行设置、依赖版本及模型代码哈希。所有class均重新编译为Java21 major65，不搬用旧Java22 bin目录。
+
+## RF-only十市场：空闲席位立即接入DRO（2026-10-03）
+
+这项可选调度用于 `olist_rf_fixedtrend_seed10_20261003`，不改变上面的原始五市场实验。数据、RF参数选择、DRO模型和九档lambda不变。
+
+- `run_olist_rf_followup.ps1 -Root <目录> -Start -ResumeOverlap` 使用一个共享四席调度池。某市场RF的51周完整输出通过审计后，该市场DRO即可进入等待队列；不等待其他市场RF完成。
+- `run_olist_batch.ps1 -AdoptRunning -OverlapFixedRf` 保留现有RF PID、开始时间和attempt，校验进程命令行、market和开始时间后接管；不停止或重算RF。接管前必须先核验并停止旧控制器本身，不能同时运行两个控制器，不能停止其Java workers。活跃DRO不能用此入口接管，入口会拒绝重复启动。
+- RF与DRO合计最多4个任务，每个4线程；RF结束后空位自动用于其他已就绪DRO。一个RF永久失败只阻塞对应市场DRO；其他市场继续。已完成输出继续经过实际文件审计，attempt上限不会因恢复而重置。
+- 基础状态仍在 `control/status.json`；DRO状态在 `dro_rf/control/status.json`，`WAITING_BASELINE`表示等待对应市场RF，不是失败。共享启动/接管事件及stdout/stderr保存在基础 `control/`。DRO结果仍在原 `dro_rf/results/`，未新增结果目录。
+- 隔离回归：`test_olist_overlap.ps1 -TestRoot <新目录>`，另加 `-FailRf` 验证失败隔离和恢复。测试替代Java/进程启动，不调用任何求解器。Windows PowerShell 5.1和本机PowerShell均检查共享席位与复用。
+
+现场核验：10:34:28启动market_000/001的DRO；market_008/009原RF PID 12344/1916保持不变。远程控制器独立脱离SSH，本机断开不影响运行。

@@ -1,4 +1,5 @@
-param([string]$Root = (Split-Path $PSScriptRoot -Parent), [switch]$CheckOnly)
+param([string]$Root = (Split-Path $PSScriptRoot -Parent), [switch]$CheckOnly,
+      [switch]$AdoptRunning, [switch]$OverlapFixedRf)
 $ErrorActionPreference = 'Stop'
 $Root = (Resolve-Path -LiteralPath $Root).Path
 $cfg = Get-Content -LiteralPath (Join-Path $Root 'config.json') -Encoding UTF8 -Raw | ConvertFrom-Json
@@ -40,7 +41,8 @@ try {
         $command = [OlistWindowsProcess]::CommandLine($_.Id)
         $command.Contains($Root) -and $command.Contains('OlistContextualRunner')
     })
-    if ($orphans.Count) { throw "Existing Olist workers still running (PID $($orphans.Id -join ',')); do not launch duplicates." }
+    if ($orphans.Count -and !$AdoptRunning) { throw "Existing Olist workers still running (PID $($orphans.Id -join ',')); do not launch duplicates." }
+    $savedTasks=if($AdoptRunning){Get-Content -LiteralPath (Join-Path $control 'status.json') -Raw|ConvertFrom-Json}else{@()}
     $cp = (Join-Path $Root 'runtime/classes') + ';' + $cfg.cplexJar + ';' + $cfg.mosekJar
     $trend = if ($cfg.includeTrend -eq $true) { 'true' } else { 'false' }
     $fixedTrend = if ($cfg.fixedTrend104 -eq $true) { 'true' } else { 'false' }
@@ -65,8 +67,10 @@ try {
         # Prepare shared immutable metadata once, before the four method processes start.
         $prepare = @("-Xmx$($cfg.heap)") + $properties + @("-Djava.library.path=$($cfg.cplexNative)", '-cp', $cp,
             'Test.analysis.brazil.OlistContextualRunner', 'prepare', $output)
-        $code = Invoke-Java $prepare
-        if ($code -ne 0) { throw "Protocol preparation failed: $($market.market)" }
+        if(!$AdoptRunning){
+            $code = Invoke-Java $prepare
+            if ($code -ne 0) { throw "Protocol preparation failed: $($market.market)" }
+        }
         foreach ($method in $methods) {
             $arguments = @("-Xmx$($cfg.heap)") + $properties + @("-Dolist.methods=$method",
                 "-Djava.library.path=$($cfg.cplexNative)", '-cp', $cp,
@@ -77,16 +81,74 @@ try {
     }
     Write-Atomic (Join-Path $control 'launch_plan.json') (ConvertTo-Json -InputObject @($tasks | Select-Object market,method,arguments) -Depth 5)
     if ($CheckOnly) { Event "CHECK_ONLY_PASS $(@($markets).Count) inputs, Java, RF dependencies, protocol and $($tasks.Count) launch commands; no solves"; return }
+    $droLock=$null
+    if($OverlapFixedRf){
+        if(@($methods).Count -ne 1 -or @($methods)[0] -ne 'RF'){throw 'Overlap requires the fixed RF-only baseline'}
+        $dro=Join-Path $Root 'dro_rf';$droControl=Join-Path $dro 'control'
+        New-Item -ItemType Directory -Force -Path $droControl|Out-Null
+        $droLock=[IO.File]::Open((Join-Path $droControl 'scheduler.lock'),'OpenOrCreate','ReadWrite','None')
+        $follow=Get-Content -LiteralPath (Join-Path $Root 'followup.json') -Raw|ConvertFrom-Json
+        $grid=$follow.lambdaGrid
+        $lib=Split-Path $cfg.mosekJar -Parent
+        $env:Path="$($cfg.cplexNative);$lib;$(Split-Path $cfg.java -Parent);$env:Path"
+        $env:OPENBLAS_NUM_THREADS='1';$env:MKL_NUM_THREADS='1';$env:OMP_NUM_THREADS=[string]$cfg.solverThreads
+        $droCp=(Join-Path $dro 'runtime/classes')+';'+$cfg.cplexJar+';'+$cfg.mosekJar
+        $droCommon=@("-Xmx$($cfg.heap)","-Dolist.lambdaGrid=$grid",'-Dolist.fixedRf=true',
+            "-Dolist.fixedTrend104=$fixedTrend","-Dolist.includeTrend=$trend",
+            "-Dolist.threads=$($cfg.solverThreads)","-Dolist.limit=$($cfg.limitSeconds)",
+            "-Djava.library.path=$($cfg.cplexNative);$lib",'-cp',$droCp,'Test.analysis.brazil.OlistBestCsaaDroRunner')
+        $liveDro=@(Get-Process java -ErrorAction SilentlyContinue|Where-Object {
+            $command=[OlistWindowsProcess]::CommandLine($_.Id)
+            $command.Contains($dro) -and $command.Contains('OlistBestCsaaDroRunner')
+        })
+        if($liveDro.Count){throw 'Existing DRO workers: refuse duplicate overlapping controller'}
+        if((Invoke-Java ($droCommon+@('selfcheck'))) -ne 0){throw 'DRO overlap preflight failed'}
+        if((Invoke-Java ($droCommon+@('select',$Root,$dro))) -ne 0){throw 'Fixed RF selection failed'}
+        foreach($market in $markets){
+            $tasks+=[pscustomobject]@{market=$market.market;method='RF_CHI2';state='WAITING_BASELINE';attempt=0;pid=0;
+                exitCode=$null;started=$null;finished=$null;arguments=($droCommon+@('run',$Root,$dro,$market.market,'RF'));process=$null}
+        }
+    }
+    function Audit-Task($Task){
+        if($Task.method -eq 'RF_CHI2'){return (Invoke-Java ($droCommon+@('audit',$Root,$dro,$Task.market,'RF')))}
+        return (Invoke-Java ($base+@('Test.analysis.brazil.OlistContextualBatchMain','audit',$Root,$Task.market,$Task.method)))
+    }
     function Save-State {
-        Write-Atomic (Join-Path $control 'status.json') (ConvertTo-Json -InputObject @($tasks | Select-Object market,method,state,attempt,pid,exitCode,started,finished) -Depth 5)
+        Write-Atomic (Join-Path $control 'status.json') (ConvertTo-Json -InputObject @($tasks | Where-Object method -ne 'RF_CHI2' | Select-Object market,method,state,attempt,pid,exitCode,started,finished) -Depth 5)
+        if($OverlapFixedRf){
+            $robust=@($tasks|Where-Object method -eq 'RF_CHI2')
+            $active=@($tasks|Where-Object state -in @('PENDING','RUNNING','WAITING_BASELINE')).Count
+            Write-Atomic (Join-Path $droControl 'status.json') (ConvertTo-Json -InputObject ([pscustomobject]@{
+                state=$(if($active){'RUNNING'}elseif(@($robust|Where-Object state -ne 'COMPLETE').Count){'FINISHED_WITH_FAILURES'}else{'FINISHED'});
+                updated=(Get-Date -Format o);contextMethod='RF';parallel=$cfg.maxParallel;solverThreads=$cfg.solverThreads;
+                sharedBaselineSlots=$true;selection='USER_FIXED_RF';formalTrainingOnly=$true;
+                lambdaGrid=@($grid.Split(',')|ForEach-Object {[double]::Parse($_,[Globalization.CultureInfo]::InvariantCulture)});
+                tasks=@($robust|Select-Object market,@{n='method';e={'RF'}},state,attempt,pid,exitCode,started,finished)}) -Depth 5)
+        }
     }
     # Audit old results: an exit code or a marker alone is not enough to skip a task.
     foreach ($task in $tasks) {
-        $code = Invoke-Java ($base + @('Test.analysis.brazil.OlistContextualBatchMain', 'audit', $Root, $task.market, $task.method))
+        if($task.method -eq 'RF_CHI2'){continue}
+        $saved=@($savedTasks|Where-Object {$_.market -eq $task.market -and $_.method -eq $task.method})
+        if($saved.Count -gt 1){throw 'Duplicate saved baseline task'}
+        if($saved.Count -eq 1){
+            foreach($name in @('attempt','pid','exitCode','started','finished')){$task.$name=$saved[0].$name}
+            $worker=@($orphans|Where-Object Id -eq $task.pid)
+            if($worker.Count){
+                $command=[OlistWindowsProcess]::CommandLine($task.pid)
+                if($saved[0].state -ne 'RUNNING' -or !$command.Contains("results\$($task.market)") -or
+                    [Math]::Abs(($worker[0].StartTime-([datetime]$task.started)).TotalSeconds) -gt 5){throw 'Worker adoption identity mismatch'}
+                $task.process=$worker[0];$heldHandle=$task.process.Handle;$task.state='RUNNING'
+                Event "ADOPT $($task.market) $($task.method) pid=$($task.pid)";continue
+            }
+        }
+        $code = Audit-Task $task
         if ($code -eq 0) { $task.state = 'COMPLETE'; Event "REUSE $($task.market) $($task.method)" }
+        elseif($task.attempt -ge $cfg.maxAttempts){$task.state='FAILED'}
     }
+    if(@($orphans|Where-Object {$_.Id -notin @($tasks|Where-Object state -eq 'RUNNING'|ForEach-Object pid)}).Count){throw 'Unclaimed baseline worker; refuse duplicate launch'}
     Save-State
-    while (@($tasks | Where-Object { $_.state -in @('PENDING','RUNNING') }).Count) {
+    while (@($tasks | Where-Object { $_.state -in @('PENDING','RUNNING','WAITING_BASELINE') }).Count) {
         foreach ($task in @($tasks | Where-Object state -eq 'RUNNING')) {
             $task.process.Refresh()
             if (!$task.process.HasExited) { continue }
@@ -94,12 +156,20 @@ try {
             $task.exitCode = $task.process.ExitCode
             $task.process.Dispose()
             $task.process = $null
-            $code = Invoke-Java ($base + @('Test.analysis.brazil.OlistContextualBatchMain', 'audit', $Root, $task.market, $task.method))
+            $code = Audit-Task $task
             if ($code -eq 0) { $task.state='COMPLETE' }
             elseif ($task.attempt -lt $cfg.maxAttempts) { $task.state='PENDING' }
             else { $task.state='FAILED' }
             $task.finished = Get-Date -Format o
             Event "$($task.state) $($task.market) $($task.method) exit=$($task.exitCode) attempt=$($task.attempt)"
+        }
+        foreach($task in @($tasks|Where-Object state -eq 'WAITING_BASELINE')){
+            $rf=@($tasks|Where-Object {$_.market -eq $task.market -and $_.method -eq 'RF'})[0]
+            if($rf.state -eq 'FAILED'){$task.state='BLOCKED_BASELINE';Event "BLOCKED_BASELINE $($task.market)"}
+            elseif($rf.state -eq 'COMPLETE'){
+                if((Audit-Task $task) -eq 0){$task.state='COMPLETE';Event "REUSE $($task.market) RF_CHI2"}
+                else{$task.state='PENDING'}
+            }
         }
         $slots = $cfg.maxParallel - @($tasks | Where-Object state -eq 'RUNNING').Count
         foreach ($task in @($tasks | Where-Object { $_.state -eq 'PENDING' -and $slots -gt 0 } | Select-Object -First ([Math]::Max(0,$slots)))) {
@@ -108,7 +178,8 @@ try {
             # All arguments are separate, quoted tokens; no generated shell command for file operations.
             $quoted = @($task.arguments | ForEach-Object { '"' + $_ + '"' })
             try {
-                $task.process = Start-Process -FilePath $cfg.java -ArgumentList $quoted -WorkingDirectory $Root -WindowStyle Hidden -PassThru -RedirectStandardOutput "$stem.stdout.log" -RedirectStandardError "$stem.stderr.log"
+                $working=if($task.method -eq 'RF_CHI2'){$dro}else{$Root}
+                $task.process = Start-Process -FilePath $cfg.java -ArgumentList $quoted -WorkingDirectory $working -WindowStyle Hidden -PassThru -RedirectStandardOutput "$stem.stdout.log" -RedirectStandardError "$stem.stderr.log"
                 $heldHandle = $task.process.Handle
                 $task.pid=$task.process.Id; $task.state='RUNNING'; $task.started=Get-Date -Format o
                 Event "START $($task.market) $($task.method) pid=$($task.pid)"
@@ -120,5 +191,6 @@ try {
         Save-State
         if (@($tasks | Where-Object state -eq 'RUNNING').Count) { Start-Sleep -Seconds 5 }
     }
+    Save-State
     Event "QUEUE_FINISHED complete=$(@($tasks | Where-Object state -eq 'COMPLETE').Count)/$($tasks.Count) failed=$(@($tasks | Where-Object state -eq 'FAILED').Count)"
-} finally { $lock.Dispose() }
+} finally { if($null -ne $droLock){$droLock.Dispose()};$lock.Dispose() }
