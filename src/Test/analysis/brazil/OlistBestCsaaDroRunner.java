@@ -369,9 +369,21 @@ public final class OlistBestCsaaDroRunner {
     }
 
     private static boolean complete(Path target, Path baseline, int trial, String method, OlistContextualData data) throws Exception {
+        try {
+            return completeChecked(target, baseline, trial, method, data);
+        } catch (java.io.IOException | IllegalArgumentException | IndexOutOfBoundsException ex) {
+            System.err.println("Incomplete/corrupt Olist recovery artifacts at "
+                    + target + "/trial_" + trial + ": " + ex);
+            return false;
+        }
+    }
+
+    private static boolean completeChecked(Path target, Path baseline, int trial, String method,
+                                           OlistContextualData data) throws Exception {
         Path dir = target.resolve(String.format("trial_%03d", trial));
         if (!Files.exists(dir.resolve("complete.txt")) || Files.exists(dir.resolve("failure.txt"))
                 || !table(dir.resolve("selection.tsv"), 2) || !table(dir.resolve("candidates.tsv"), LAMBDA.length + 1)
+                || !table(dir.resolve("final_result.tsv"), 2)
                 || !solveFilesComplete(dir.resolve("final"), data, 50)) return false;
         String[] chosen = Files.readAllLines(dir.resolve("selection.tsv")).get(1).split("\t");
         String[] nominal = selection(baseline, trial, method);
@@ -410,6 +422,15 @@ public final class OlistBestCsaaDroRunner {
     }
 
     private static boolean solveFilesComplete(Path dir, OlistContextualData data, int samples) throws Exception {
+        try {
+            return solveFilesCompleteChecked(dir, data, samples);
+        } catch (java.io.IOException | IllegalArgumentException | IndexOutOfBoundsException ex) {
+            System.err.println("Incomplete/corrupt Olist solve artifacts at " + dir + ": " + ex);
+            return false;
+        }
+    }
+
+    private static boolean solveFilesCompleteChecked(Path dir, OlistContextualData data, int samples) throws Exception {
         if (!table(dir.resolve("result.tsv"), 2) || !table(dir.resolve("incumbent.tsv"), 2)
                 || !table(dir.resolve("weights.tsv"), samples + 1) || !table(dir.resolve("model_scenarios.tsv"), samples + 1)
                 || !table(dir.resolve("lane_oos.tsv"), data.market.J + 1) || !table(dir.resolve("carrier_oos.tsv"), data.market.I + 1)

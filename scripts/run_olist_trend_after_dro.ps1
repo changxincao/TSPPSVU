@@ -35,7 +35,7 @@ try {
     if($cfg.includeTrend -ne $true){throw 'This independent stage must explicitly enable trend'}
     do {
         $status=Read-Status (Join-Path $PreviousStage 'control/status.json')
-        $ready=$status.state -eq 'FINISHED' -and @($status.tasks).Count -eq 5 -and
+        $ready=$status.state -in @('FINISHED','FINISHED_WITH_FAILURES') -and @($status.tasks).Count -eq 5 -and
             @($status.tasks|Where-Object state -in @('PENDING','RUNNING')).Count -eq 0
         $failed=@($status.tasks|Where-Object state -eq 'FAILED').Count
         # An independent new experiment can start after terminal failures; do not mislabel those as successes.

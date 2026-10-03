@@ -188,7 +188,7 @@ public final class TRBSVUExperiment2Runner {
         for (String name : List.of("C-MM", "C-PCM")) {
             if (!requestedMethods.contains(name)) continue;
             if (momentSolver == null) momentSolver = new TRBSVUPcmSolver(
-                    Path.of(".venv-rsome", "Scripts", "python.exe"),
+                    momentPython(),
                     Path.of("analysis", "trb_svu", "solve_pcm.py"));
             boolean includeTotalVariance = name.equals("C-PCM");
             double bestParameter = Double.NaN, bestCost = Double.POSITIVE_INFINITY;
@@ -313,7 +313,7 @@ public final class TRBSVUExperiment2Runner {
                 if (moment) {
                     try {
                         if (momentSolver == null) momentSolver = new TRBSVUPcmSolver(
-                                Path.of(".venv-rsome", "Scripts", "python.exe"),
+                                momentPython(),
                                 Path.of("analysis", "trb_svu", "solve_pcm.py"));
                         solution = momentSolver.solve(instance.params, weighted, parameter,
                                 momentQuerySettings, true, name.equals("C-PCM"));
@@ -356,6 +356,11 @@ public final class TRBSVUExperiment2Runner {
                 orderedCopy(validationCurve), List.of());
     }
 
+    static Path momentPython() {
+        return Path.of(System.getProperty("trb.svu.python",
+                Path.of(".venv-rsome", "Scripts", "python.exe").toString())).toAbsolutePath();
+    }
+
     private ValidationScore validateMoment(TRBSVUSyntheticCase instance,
                                            ContextualChoice selected,
                                            TRBSVUPcmSolver solver,
@@ -370,11 +375,11 @@ public final class TRBSVUExperiment2Runner {
                 if (restored.isPresent()) {
                     TRBSVUValidationTrace trace = restored.get();
                     verifyCheckpointWindow(instance, trace, t);
+                    details.add(trace);
                     if (!trace.certifiedOptimal())
                         throw new IllegalStateException("Moment validation checkpoint is not solver-optimal: "
                                 + methodName + " kappa=" + kappa + " origin=" + t
                                 + " status=" + trace.solverStatus() + " gap=" + trace.relativeGap());
-                    details.add(trace);
                     realizedCosts[t - firstOrigin] = trace.realizedValidationCost();
                     continue;
                 }
@@ -390,6 +395,14 @@ public final class TRBSVUExperiment2Runner {
                     methodName, kappa, t);
             Solution solution = solver.solve(instance.params, weighted, kappa, momentValidationSettings,
                     true, includeTotalVariance);
+            // Persist diagnostics before applying the moment-validation acceptance policy.
+            if (!solution.certifiedOptimal) {
+                TRBSVUValidationTrace rejected = trace(methodName, kappa, t,
+                        window.train(), weighted, weightResult.effectiveBandwidth(),
+                        solution, Double.NaN);
+                details.add(rejected);
+                saveCheckpoint(rejected);
+            }
             requireUsableIncumbent(solution, methodName, instance.params.I);
             if (!solution.certifiedOptimal)
                 throw new IllegalStateException("Moment validation solve is not solver-optimal: "
@@ -485,7 +498,10 @@ public final class TRBSVUExperiment2Runner {
             throw new IllegalStateException("Validation checkpoint uses a different training window at origin "
                     + origin + ".");
         double[] decision = trace.decision();
-        if (decision == null || decision.length != instance.params.I)
+        boolean rejectedMoment = !trace.certifiedOptimal()
+                && (trace.method().equals("C-MM") || trace.method().equals("C-PCM"));
+        if ((decision == null && !rejectedMoment)
+                || (decision != null && decision.length != instance.params.I))
             throw new IllegalStateException("Validation checkpoint has an invalid decision at origin "
                     + origin + ".");
     }

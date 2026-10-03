@@ -22,6 +22,8 @@ public class SAAModel {
         int W = samples.size();
 
         IloCplex cplex = new IloCplex();
+        PrintStream ps = null;
+        try {
 
         // CPLEX params
         cplex.setParam(IloCplex.Param.Threads, cfg.threads);
@@ -29,7 +31,6 @@ public class SAAModel {
         cplex.setParam(IloCplex.Param.MIP.Tolerances.MIPGap, cfg.tol);
 
         // log handling
-        PrintStream ps = null;
         if (cfg.writeCplexLogToFile && out != null) {
             Path logFile = out.logsDir.resolve("cplex.log");
             ps = new PrintStream(new FileOutputStream(logFile.toFile()));
@@ -152,8 +153,6 @@ public class SAAModel {
             } catch (Exception e) {
                 status = "UNKNOWN(" + e.getClass().getSimpleName() + ")";
             }
-            if (ps != null) ps.close();
-            cplex.end();
             throw new IllegalStateException("CPLEX failed. Status=" + status);
         }
 
@@ -177,9 +176,6 @@ public class SAAModel {
                     solverStatus, bestBound, mipGap, nodes, timeSec);
         }
 
-        if (ps != null) ps.close();
-        cplex.end();
-
         Solution solution = new Solution(objVal, yVal, timeSec);
         solution.optimizerTimeSec = timeSec;
         solution.solverStatus = solverStatus;
@@ -188,5 +184,9 @@ public class SAAModel {
         solution.nodeCount = nodes;
         solution.certifiedOptimal = certifiedOptimal;
         return solution;
+        } finally {
+            try { cplex.end(); }
+            finally { if (ps != null) ps.close(); }
+        }
     }
 }

@@ -164,11 +164,12 @@ def solve(root: Path) -> dict[str, object]:
     certified_optimal = status == "Optimal" and bound_consistent
     status_label = ("OPTIMAL_PCM_LIFTED_AFFINE_APPROXIMATION"
                     if status == "Optimal"
-                    else "TIME_LIMIT_FEASIBLE_PCM_LIFTED_AFFINE_APPROXIMATION")
+                    else "FEASIBLE_PCM_LIFTED_AFFINE_APPROXIMATION")
     if not bound_consistent:
         status_label += "_BOUND_INCONSISTENT"
     result = {
         "status": status_label,
+        "primal_solution_status": status,
         "objective": float(model.get()),
         "best_bound": best_bound if np.isfinite(best_bound) else None,
         "relative_gap": relative_gap if np.isfinite(relative_gap) else None,

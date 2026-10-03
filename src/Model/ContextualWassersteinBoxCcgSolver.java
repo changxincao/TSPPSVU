@@ -25,6 +25,7 @@ public final class ContextualWassersteinBoxCcgSolver {
 
         long start = System.nanoTime();
         double bestUpper = Double.POSITIVE_INFINITY;
+        double bestLower = Double.NaN;
         double[] bestY = null;
         double bestEta = Double.NaN;
         WorstDemandSnapshot bestWorstDemand = null;
@@ -53,7 +54,8 @@ public final class ContextualWassersteinBoxCcgSolver {
             try {
                 master = solveMaster(input, config, points, remaining);
             } catch (IllegalStateException ex) {
-                if (remainingSeconds(start, config.timeLimitSeconds) <= 0.0 && bestY != null) {
+                if ((ex instanceof WassersteinBoxOracle.TimeLimitException
+                        || remainingSeconds(start, config.timeLimitSeconds) <= 0.0) && bestY != null) {
                     timedOut = true;
                     break;
                 }
@@ -61,11 +63,26 @@ public final class ContextualWassersteinBoxCcgSolver {
             }
             double masterSeconds = (System.nanoTime() - masterStart) / 1.0e9;
             optimizerTimeSec += master.optimizerTimeSec;
+            if (Double.isFinite(master.lowerBound) && master.lowerBound <= master.objective
+                    + 1e-8 * Math.max(1.0, Math.abs(master.objective)))
+                bestLower = Double.isFinite(bestLower) ? Math.max(bestLower, master.lowerBound) : master.lowerBound;
+            else System.err.printf(java.util.Locale.ROOT,
+                    "W1-CCG invalid/unavailable master bound: incumbent=%.17g lowerBound=%.17g%n",
+                    master.objective, master.lowerBound);
+            // Even an incomplete oracle pass must not discard a feasible master y.
+            // All-spot recourse gives a valid (possibly loose) robust upper bound.
+            double fallback = allSpotUpperBound(input, master.y);
+            if (fallback < bestUpper) {
+                bestUpper = fallback;
+                bestY = master.y.clone();
+                bestEta = 0.0;
+                bestWorstDemand = null; // no claimed worst-demand diagnostic without separation
+            }
             System.out.printf(java.util.Locale.ROOT,
-                    "W1-CCG iter=%d masterSolved LB=%.6f eta=%.6f selected=%d masterSec=%.3f totalSec=%.3f%n",
-                    iterations, master.objective, master.eta, selectedCount(master.y),
+                    "W1-CCG iter=%d masterSolved LB=%.6f masterIncumbent=%.6f eta=%.6f selected=%d masterSec=%.3f totalSec=%.3f%n",
+                    iterations, bestLower, master.objective, master.eta, selectedCount(master.y),
                     masterSeconds, secondsSince(start));
-            double exact = input.radius * master.eta;
+            double candidateUpper = input.radius * master.eta;
             boolean added = false;
             int addedThisIteration = 0;
             int positiveProcessed = 0;
@@ -85,9 +102,10 @@ public final class ContextualWassersteinBoxCcgSolver {
                 WassersteinBoxOracle.Result oracle;
                 try {
                     oracle = WassersteinBoxOracle.solve(input, s, master.y, master.eta,
-                            config.threads, remaining);
+                            config.threads, remaining, true);
                 } catch (IllegalStateException ex) {
-                    if (remainingSeconds(start, config.timeLimitSeconds) <= 0.0 && bestY != null) {
+                    if ((ex instanceof WassersteinBoxOracle.TimeLimitException
+                            || remainingSeconds(start, config.timeLimitSeconds) <= 0.0) && bestY != null) {
                         timedOut = true;
                         completedOraclePass = false;
                         break;
@@ -96,7 +114,16 @@ public final class ContextualWassersteinBoxCcgSolver {
                 }
                 oracleSolves++;
                 optimizerTimeSec += oracle.optimizerTimeSec();
-                exact += input.probability[s] * oracle.value();
+                // This is a maximization oracle: its incumbent is NOT an upper bound.
+                double oracleUpper = oracle.upperBound();
+                if (!Double.isFinite(oracleUpper) || oracleUpper < oracle.value()
+                        - 1e-8 * Math.max(1.0, Math.abs(oracle.value()))) {
+                    System.err.printf(java.util.Locale.ROOT,
+                            "W1-CCG invalid/unavailable oracle bound: sample=%d incumbent=%.17g upperBound=%.17g%n",
+                            s, oracle.value(), oracleUpper);
+                    oracleUpper = Double.POSITIVE_INFINITY;
+                }
+                candidateUpper += input.probability[s] * oracleUpper;
                 worstDemand.add(s, oracle.worstDemand());
                 double violationTolerance = tolerance * Math.max(1.0, Math.abs(oracle.value()));
                 if (oracle.value() > master.t[s] + violationTolerance) {
@@ -119,8 +146,8 @@ public final class ContextualWassersteinBoxCcgSolver {
             }
             if (!completedOraclePass) break;
 
-            if (exact < bestUpper) {
-                bestUpper = exact;
+            if (candidateUpper < bestUpper) {
+                bestUpper = candidateUpper;
                 bestY = master.y.clone();
                 bestEta = master.eta;
                 bestWorstDemand = worstDemand.snapshot();
@@ -128,29 +155,27 @@ public final class ContextualWassersteinBoxCcgSolver {
                         "W1-CCG incumbentUpdate iter=%d UB=%.6f eta=%.6f y=%s%n",
                         iterations, bestUpper, bestEta, java.util.Arrays.toString(bestY));
             }
-            double currentGap = Math.max(0.0, bestUpper - master.objective)
-                    / Math.max(1.0, Math.abs(bestUpper));
+            double currentGap = certifiedGap(bestUpper, bestLower);
             System.out.printf(java.util.Locale.ROOT,
                     "W1-CCG iter=%d done LB=%.6f bestUB=%.6f gap=%.4f%% added=%d points=%d totalSec=%.3f%n",
-                    iterations, master.objective, bestUpper, 100.0 * currentGap,
+                    iterations, bestLower, bestUpper, 100.0 * currentGap,
                     addedThisIteration, points.stream().mapToInt(List::size).sum(), secondsSince(start));
-            double gapTolerance = tolerance * Math.max(1.0, Math.abs(bestUpper));
-            if (!added && bestUpper - master.objective <= gapTolerance) {
+            if (!added && Double.isFinite(currentGap) && currentGap <= tolerance) {
                 converged = true;
                 break;
             }
+            if (!master.optimal) { timedOut = true; break; }
         }
 
-        if (master == null || bestY == null || bestWorstDemand == null) {
+        if (master == null || bestY == null) {
             throw new IllegalStateException("Wasserstein CCG did not produce an incumbent.");
         }
-        double relativeGap = Math.max(0.0, bestUpper - master.objective)
-                / Math.max(1.0, Math.abs(bestUpper));
+        double relativeGap = certifiedGap(bestUpper, bestLower);
         int initialPointCount = input.sampleCount();
         int totalPointCount = points.stream().mapToInt(List::size).sum();
         Solution solution = new Solution(bestUpper, bestY,
                 (System.nanoTime() - start) / 1.0e9);
-        solution.bestBound = master.objective;
+        solution.bestBound = bestLower;
         solution.relativeGap = relativeGap;
         solution.iterationCount = iterations;
         solution.cutCount = generatedCuts;
@@ -164,6 +189,7 @@ public final class ContextualWassersteinBoxCcgSolver {
         solution.wassersteinBoxLower = input.lower.clone();
         solution.wassersteinBoxUpper = input.upper.clone();
         solution.wassersteinDistanceScale = input.scale.clone();
+        if (bestWorstDemand != null) {
         solution.wassersteinWorstMeanDistance = bestWorstDemand.meanDistance();
         solution.wassersteinWorstMeanNominalDemand = bestWorstDemand.meanNominalDemand();
         solution.wassersteinWorstMeanDemand = bestWorstDemand.meanWorstDemand();
@@ -173,22 +199,25 @@ public final class ContextualWassersteinBoxCcgSolver {
         solution.wassersteinWorstMaxMovedLaneCount = bestWorstDemand.maxMovedLaneCount();
         solution.wassersteinWorstLowerMoveProbability = bestWorstDemand.lowerMoveProbability();
         solution.wassersteinWorstUpperMoveProbability = bestWorstDemand.upperMoveProbability();
+        }
         solution.certifiedOptimal = converged && relativeGap <= config.tol;
         solution.solverStatus = solution.certifiedOptimal ? "OPTIMAL_W1_CCG"
                 : timedOut ? "TIME_LIMIT_W1_CCG" : "ITERATION_LIMIT_W1_CCG";
+        if (!Double.isFinite(relativeGap)) solution.solverStatus += "_BOUND_UNAVAILABLE_OR_INCONSISTENT";
+        if (bestWorstDemand == null) solution.solverStatus += "_ANALYTIC_UPPER_BOUND";
         System.out.printf(java.util.Locale.ROOT,
                 "W1-CCG summary radius=%.17g eta=%.17g initialPoints=%d generatedCuts=%d totalPoints=%d oracleSolves=%d optimizerSec=%.6f boxLower=%s boxUpper=%s distanceScale=%s meanWorstDistance=%.17g meanNominalDemand=%s meanWorstDemand=%s meanMovedLanes=%.17g maxMovedLanes=%d meanNominalTotal=%.17g meanWorstTotal=%.17g lowerMoveProbability=%s upperMoveProbability=%s%n",
                 input.radius, bestEta, initialPointCount, generatedCuts, totalPointCount,
                 oracleSolves, optimizerTimeSec, java.util.Arrays.toString(input.lower),
                 java.util.Arrays.toString(input.upper), java.util.Arrays.toString(input.scale),
-                bestWorstDemand.meanDistance(),
-                java.util.Arrays.toString(bestWorstDemand.meanNominalDemand()),
-                java.util.Arrays.toString(bestWorstDemand.meanWorstDemand()),
-                bestWorstDemand.meanMovedLaneCount(),
-                bestWorstDemand.maxMovedLaneCount(), bestWorstDemand.meanNominalTotalDemand(),
-                bestWorstDemand.meanWorstTotalDemand(),
-                java.util.Arrays.toString(bestWorstDemand.lowerMoveProbability()),
-                java.util.Arrays.toString(bestWorstDemand.upperMoveProbability()));
+                solution.wassersteinWorstMeanDistance,
+                java.util.Arrays.toString(solution.wassersteinWorstMeanNominalDemand),
+                java.util.Arrays.toString(solution.wassersteinWorstMeanDemand),
+                solution.wassersteinWorstMeanMovedLaneCount,
+                solution.wassersteinWorstMaxMovedLaneCount, solution.wassersteinWorstMeanNominalTotalDemand,
+                solution.wassersteinWorstMeanTotalDemand,
+                java.util.Arrays.toString(solution.wassersteinWorstLowerMoveProbability),
+                java.util.Arrays.toString(solution.wassersteinWorstUpperMoveProbability));
         return new Result(solution, bestEta, iterations, initialPointCount,
                 generatedCuts, totalPointCount, oracleSolves);
     }
@@ -197,6 +226,19 @@ public final class ContextualWassersteinBoxCcgSolver {
         int count = 0;
         for (double probability : input.probability) if (probability > 0.0) count++;
         return count;
+    }
+
+    static double certifiedGap(double upper, double lower) {
+        if (!Double.isFinite(upper) || !Double.isFinite(lower)
+                || lower > upper + 1e-8 * Math.max(1.0, Math.abs(upper))) return Double.NaN;
+        return Math.max(0.0, upper - lower) / Math.max(1.0, Math.abs(upper));
+    }
+
+    static double allSpotUpperBound(WassersteinBoxInput input, double[] y) {
+        double bound = 0.0;
+        for (int j = 0; j < input.params.J; j++) bound += input.params.e[j] * input.upper[j];
+        for (int i = 0; i < input.params.I; i++) bound += input.params.h[i] * input.params.p[i] * y[i];
+        return bound;
     }
 
     private static final class WorstDemandAccumulator {
@@ -285,6 +327,7 @@ public final class ContextualWassersteinBoxCcgSolver {
                                              Config config,
                                              List<List<double[]>> points,
                                              double remainingSeconds) throws Exception {
+        long started = System.nanoTime();
         ProcurementParams params = input.params;
         IloCplex cplex = new IloCplex();
         try {
@@ -319,10 +362,15 @@ public final class ContextualWassersteinBoxCcgSolver {
                 objective.addTerm(input.probability[s], t[s]);
             }
             cplex.addMinimize(objective);
+            double remaining = remainingSeconds - secondsSince(started);
+            if (remaining <= 0.0) throw new WassersteinBoxOracle.TimeLimitException("W1 master budget exhausted during modeling");
+            cplex.setParam(IloCplex.Param.TimeLimit, remaining);
             long optimizerStart = System.nanoTime();
             boolean solved = cplex.solve();
             double optimizerTimeSec = (System.nanoTime() - optimizerStart) / 1e9;
-            if (!solved || cplex.getStatus() != IloCplex.Status.Optimal) {
+            if (!solved) {
+                if (String.valueOf(cplex.getCplexStatus()).contains("TimeLim"))
+                    throw new WassersteinBoxOracle.TimeLimitException("W1 master timed out without incumbent");
                 throw new IllegalStateException("Wasserstein CCG master failed: " + cplex.getStatus());
             }
             double[] yValue = new double[params.I];
@@ -330,7 +378,8 @@ public final class ContextualWassersteinBoxCcgSolver {
                 yValue[i] = cplex.getValue(y[i]) > 0.5 ? 1.0 : 0.0;
             }
             return new MasterResult(cplex.getObjValue(), cplex.getValue(eta),
-                    yValue, cplex.getValues(t), optimizerTimeSec);
+                    yValue, cplex.getValues(t), optimizerTimeSec, cplex.getBestObjValue(),
+                    cplex.getStatus() == IloCplex.Status.Optimal);
         } finally {
             cplex.end();
         }
@@ -412,7 +461,7 @@ public final class ContextualWassersteinBoxCcgSolver {
     }
 
     private record MasterResult(double objective, double eta, double[] y, double[] t,
-                                double optimizerTimeSec) {
+                                double optimizerTimeSec, double lowerBound, boolean optimal) {
         private MasterResult {
             y = y.clone();
             t = t.clone();

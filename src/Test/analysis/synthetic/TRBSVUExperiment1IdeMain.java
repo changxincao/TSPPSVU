@@ -49,7 +49,10 @@ public final class TRBSVUExperiment1IdeMain {
 
     public static void main(String[] args) throws Exception {
         if (args.length > 0 && "--worker".equals(args[0])) {
-            runWorker(Arrays.copyOfRange(args, 1, args.length));
+            if (args.length < 3) throw new IllegalArgumentException("Missing worker input/output");
+            try (var workerLock = TRBSVUWorkerLock.acquire(Path.of(args[2]))) {
+                runWorker(Arrays.copyOfRange(args, 1, args.length));
+            }
             return;
         }
         if ((args.length == 4 || args.length == 5) && "--aggregate".equals(args[0])) {

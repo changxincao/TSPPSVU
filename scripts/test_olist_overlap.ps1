@@ -1,5 +1,13 @@
 param([Parameter(Mandatory=$true)][string]$TestRoot,[switch]$FailRf)
 $ErrorActionPreference='Stop'
+# Native-process identity stub for this isolated scheduler test only.
+Add-Type 'public static class OlistWindowsProcess { public static string FixtureCommand = ""; public static string CommandLine(int pid) { return FixtureCommand; } }'
+$global:fixtureAdopting=$false
+function Get-Process {
+    param($Name,$ErrorAction)
+    if($global:fixtureAdopting){return $global:fixtureLiveWorker}
+    return @()
+}
 if(Test-Path -LiteralPath $TestRoot){throw 'Use a fresh isolated fixture directory'}
 New-Item -ItemType Directory -Path $TestRoot|Out-Null
 $base=Join-Path $TestRoot 'base';$dro=Join-Path $base 'dro_rf'
@@ -66,4 +74,21 @@ if($global:fixtureStarts.Count -ne 12){throw 'Completed RF markets were recomput
 $before=$global:fixtureStarts.Count
 & (Join-Path $PSScriptRoot 'run_olist_batch.ps1') -Root $base -OverlapFixedRf -AdoptRunning
 if($global:fixtureStarts.Count -ne $before){throw 'Recovery reset attempts or recomputed complete work'}
+if(!$FailRf){
+    # A controller restart must adopt a live DRO optimizer without launching it twice.
+    $statusPath=Join-Path $dro 'control/status.json'
+    $saved=Get-Content -LiteralPath $statusPath -Raw|ConvertFrom-Json
+    $start=Get-Date
+    $savedTask=@($saved.tasks|Where-Object market -eq 'market_009')[0]
+    $savedTask.state='RUNNING';$savedTask.pid=49999;$savedTask.started=$start.ToString('o')
+    $saved|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $statusPath -Encoding UTF8
+    $global:fixtureLiveWorker=[pscustomobject]@{Id=49999;Handle=1;StartTime=$start;HasExited=$true;ExitCode=0}
+    foreach($name in @('Refresh','WaitForExit','Dispose')){$global:fixtureLiveWorker|Add-Member -MemberType ScriptMethod -Name $name -Value {}}
+    [OlistWindowsProcess]::FixtureCommand='"OlistBestCsaaDroRunner" "-Dolist.lambdaGrid=0.01,0.05,0.1,0.25,0.5,1,2,5,10" "-Dolist.threads=4" "-Dolist.limit=14400" "-Dolist.includeTrend=true" "-Dolist.fixedTrend104=true" "run" "'+$base+'" "'+$dro+'" "market_009" "RF"'
+    $global:fixtureAdopting=$true
+    & (Join-Path $PSScriptRoot 'run_olist_batch.ps1') -Root $base -OverlapFixedRf -AdoptRunning
+    $global:fixtureAdopting=$false
+    if($global:fixtureStarts.Count -ne $before){throw 'Live DRO was duplicated on adoption'}
+    if(-not((Get-Content -LiteralPath (Join-Path $base 'control/events.log')) -match 'ADOPT market_009 RF_CHI2 pid=49999')){throw 'Live DRO was not adopted'}
+}
 Write-Output "OLIST_OVERLAP_PASS shared_4_slots/per_market_dependency/reuse_8_RF/recovery fail_RF=$($FailRf.IsPresent) no_optimizers"

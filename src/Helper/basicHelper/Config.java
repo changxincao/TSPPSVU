@@ -73,8 +73,7 @@ public class Config {
     public boolean rcsaaCompactDual = false;
     // Static global repair planes at zero/all-one anchors, no local branching.
     public boolean rcsaaCompactRepairAnchors = false;
-    // QUARANTINED diagnostic: fixed-y identity passes, but I10 MIP bound failed
-    // an independent feasible-solution check. Public solve rejects this flag.
+    // Integrated switched-compact exact formulation, supported by the formal dispatcher.
     public boolean rcsaaCompactSwitchedDual = false;
     
     //Others

@@ -61,7 +61,10 @@ public final class TRBSVUExperiment2IdeMain {
 
     public static void main(String[] args) throws Exception {
         if (args.length > 0 && "--worker".equals(args[0])) {
-            runWorker(Arrays.copyOfRange(args, 1, args.length));
+            if (args.length < 4) throw new IllegalArgumentException("Missing worker input/selection/output");
+            try (var workerLock = TRBSVUWorkerLock.acquire(Path.of(args[3]))) {
+                runWorker(Arrays.copyOfRange(args, 1, args.length));
+            }
             return;
         }
         Config config = Config.parse(args);

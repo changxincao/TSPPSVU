@@ -26,6 +26,7 @@ $control=Join-Path $stage 'control'
 New-Item -ItemType Directory -Force -Path $control | Out-Null
 . (Join-Path $PSScriptRoot 'olist_windows_process.ps1')
 $schedulerLock=[IO.File]::Open((Join-Path $control 'scheduler.lock'),[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+try {
 $env:Path="$native;$env:Path"
 $env:MOSEKLM_LICENSE_FILE=Join-Path $TaskRoot 'tmp\mosek.lic'
 $env:OPENBLAS_NUM_THREADS='1';$env:MKL_NUM_THREADS='1';$env:OMP_NUM_THREADS='1'
@@ -126,14 +127,9 @@ foreach($data in $replicationData){
         $process=$active[0];$heldHandle=$process.Handle;$task.attempt=1
         $running.Add([pscustomobject]@{task=$task;process=$process});Write-Event $task 'ADOPTED' $process.Id
     } else {
-        $complete=Test-Path -LiteralPath (Join-Path $target 'complete.txt')
-        if($complete){foreach($q in 0..39){
-            foreach($relative in @('oos\experiment2_summary.csv','solve\experiment2_final_solves.csv')){
-                $file=Join-Path $target ('queries\query_{0:D3}\{1}' -f $q,$relative)
-                if(-not(Test-Path -LiteralPath $file) -or (Get-Item -LiteralPath $file).Length -eq 0){$complete=$false}
-            }
-        }}
-        if(-not $complete){$queue.Enqueue($task)}
+        # Let the Java worker validate protocol and artifact hashes. A valid completed
+        # task returns without optimization; file existence alone is not sufficient.
+        $queue.Enqueue($task)
     }
 }
 $selectionRows | Export-Csv -LiteralPath (Join-Path $control 'oos_vs_validation_selection.csv') -NoTypeInformation -Encoding UTF8
@@ -166,3 +162,4 @@ while($queue.Count -gt 0 -or $running.Count -gt 0){
 $failed | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $control 'failed_tasks.json') -Encoding UTF8
 Write-Status $(if($failed.Count -eq 0){'FINISHED'}else{'PARTIAL'})
 if($failed.Count -gt 0){exit 2}
+} finally { $schedulerLock.Dispose() }

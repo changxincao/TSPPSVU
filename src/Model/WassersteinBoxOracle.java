@@ -16,6 +16,12 @@ final class WassersteinBoxOracle {
                         double eta,
                         int threads,
                         double timeLimitSeconds) throws Exception {
+        return solve(input, sample, y, eta, threads, timeLimitSeconds, false);
+    }
+
+    static Result solve(WassersteinBoxInput input, int sample, double[] y, double eta,
+                        int threads, double timeLimitSeconds, boolean allowFeasible) throws Exception {
+        long started = System.nanoTime();
         ProcurementParams params = input.params;
         if (y == null || y.length != params.I) {
             throw new IllegalArgumentException("Carrier decision dimension mismatch.");
@@ -102,10 +108,15 @@ final class WassersteinBoxOracle {
                 }
             }
             cplex.addMaximize(objective);
+            double remaining = timeLimitSeconds - (System.nanoTime() - started) / 1e9;
+            if (remaining <= 0.0) throw new TimeLimitException("W1 oracle budget exhausted during modeling");
+            cplex.setParam(IloCplex.Param.TimeLimit, remaining);
             long optimizerStart = System.nanoTime();
             boolean solved = cplex.solve();
             double optimizerTimeSec = (System.nanoTime() - optimizerStart) / 1e9;
-            if (!solved || cplex.getStatus() != IloCplex.Status.Optimal) {
+            if (!solved || (!allowFeasible && cplex.getStatus() != IloCplex.Status.Optimal)) {
+                if (String.valueOf(cplex.getCplexStatus()).contains("TimeLim"))
+                    throw new TimeLimitException("W1 oracle has no accepted incumbent: " + cplex.getStatus());
                 throw new IllegalStateException(
                         "Wasserstein separation failed: " + cplex.getStatus());
             }
@@ -140,10 +151,14 @@ final class WassersteinBoxOracle {
             }
             return new Result(cplex.getObjValue(), alphaValue, yCoefficient,
                     constant, worstDemand, affineConstant, etaCoefficient,
-                    optimizerTimeSec);
+                    optimizerTimeSec, cplex.getBestObjValue());
         } finally {
             cplex.end();
         }
+    }
+
+    static final class TimeLimitException extends IllegalStateException {
+        TimeLimitException(String message) { super(message); }
     }
 
     private static IloNumVar binaryProduct(IloCplex cplex,
@@ -176,7 +191,8 @@ final class WassersteinBoxOracle {
                   double[] worstDemand,
                   double affineConstant,
                   double etaCoefficient,
-                  double optimizerTimeSec) {
+                  double optimizerTimeSec,
+                  double upperBound) {
         Result {
             alpha = alpha.clone();
             yCoefficient = yCoefficient.clone();

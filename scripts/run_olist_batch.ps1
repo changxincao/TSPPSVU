@@ -101,9 +101,14 @@ try {
             $command=[OlistWindowsProcess]::CommandLine($_.Id)
             $command.Contains($dro) -and $command.Contains('OlistBestCsaaDroRunner')
         })
-        if($liveDro.Count){throw 'Existing DRO workers: refuse duplicate overlapping controller'}
+        $savedDroTasks=@()
+        if($AdoptRunning -and (Test-Path -LiteralPath (Join-Path $droControl 'status.json'))){
+            $savedDroState=Get-Content -LiteralPath (Join-Path $droControl 'status.json') -Raw|ConvertFrom-Json
+            $savedDroTasks=@($savedDroState.tasks)
+        }
+        if($liveDro.Count -and !$AdoptRunning){throw 'Existing DRO workers: use AdoptRunning to take over'}
         if((Invoke-Java ($droCommon+@('selfcheck'))) -ne 0){throw 'DRO overlap preflight failed'}
-        if((Invoke-Java ($droCommon+@('select',$Root,$dro))) -ne 0){throw 'Fixed RF selection failed'}
+        if(!$liveDro.Count -and (Invoke-Java ($droCommon+@('select',$Root,$dro))) -ne 0){throw 'Fixed RF selection failed'}
         foreach($market in $markets){
             $tasks+=[pscustomobject]@{market=$market.market;method='RF_CHI2';state='WAITING_BASELINE';attempt=0;pid=0;
                 exitCode=$null;started=$null;finished=$null;arguments=($droCommon+@('run',$Root,$dro,$market.market,'RF'));process=$null}
@@ -147,6 +152,34 @@ try {
         elseif($task.attempt -ge $cfg.maxAttempts){$task.state='FAILED'}
     }
     if(@($orphans|Where-Object {$_.Id -notin @($tasks|Where-Object state -eq 'RUNNING'|ForEach-Object pid)}).Count){throw 'Unclaimed baseline worker; refuse duplicate launch'}
+    if($OverlapFixedRf -and $AdoptRunning){
+        foreach($task in @($tasks|Where-Object method -eq 'RF_CHI2')){
+            $saved=@($savedDroTasks|Where-Object {$_.market -eq $task.market -and $_.method -eq 'RF'})
+            if($saved.Count -gt 1){throw 'Duplicate saved DRO task'}
+            if($saved.Count -ne 1){continue}
+            foreach($name in @('attempt','pid','exitCode','started','finished')){$task.$name=$saved[0].$name}
+            $worker=@($liveDro|Where-Object Id -eq $task.pid)
+            if(!$worker.Count){continue}
+            $command=[OlistWindowsProcess]::CommandLine($task.pid)
+            $runTail='"?run"?\s+"?'+[regex]::Escape($Root)+'"?\s+"?'+
+                [regex]::Escape($dro)+'"?\s+"?'+[regex]::Escape($task.market)+'"?\s+"?RF"?(?:\s|$)'
+            if($saved[0].state -ne 'RUNNING' -or !$command.Contains($dro) -or
+                $command -notmatch $runTail -or
+                !$command.Contains("-Dolist.lambdaGrid=$grid") -or
+                !$command.Contains("-Dolist.threads=$($cfg.solverThreads)") -or
+                !$command.Contains("-Dolist.includeTrend=$trend") -or
+                !$command.Contains("-Dolist.fixedTrend104=$fixedTrend") -or
+                !$command.Contains("-Dolist.limit=$($cfg.limitSeconds)") -or
+                [Math]::Abs(($worker[0].StartTime-([datetime]$task.started)).TotalSeconds) -gt 5){
+                throw 'DRO worker adoption identity/configuration mismatch'
+            }
+            $task.process=$worker[0];$heldHandle=$task.process.Handle;$task.state='RUNNING'
+            Event "ADOPT $($task.market) RF_CHI2 pid=$($task.pid)"
+        }
+        if(@($liveDro|Where-Object {$_.Id -notin @($tasks|Where-Object state -eq 'RUNNING'|ForEach-Object pid)}).Count){
+            throw 'Unclaimed DRO worker; refuse duplicate launch'
+        }
+    }
     Save-State
     while (@($tasks | Where-Object { $_.state -in @('PENDING','RUNNING','WAITING_BASELINE') }).Count) {
         foreach ($task in @($tasks | Where-Object state -eq 'RUNNING')) {
