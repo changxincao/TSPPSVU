@@ -81,6 +81,17 @@ public final class TRBSVUGenerateModerateCommonCasesMain {
         TRBSVUSyntheticCase.Seeds seeds = new TRBSVUSyntheticCase.Seeds(
                 random.nextLong(), random.nextLong(), random.nextLong(),
                 random.nextLong(), random.nextLong());
+        generate(replicationRoot, volatility, batchSeed, caseSeed, replication,
+                cvLower, cvUpper, seedScheme, seeds);
+    }
+
+    /** Explicit noise-seed override for a paired demand-resampling diagnostic. */
+    static void generate(Path replicationRoot, Volatility volatility,
+                         long batchSeed, long caseSeed, int replication,
+                         Double cvLower, Double cvUpper, String seedScheme,
+                         TRBSVUSyntheticCase.Seeds seeds) throws Exception {
+        if (Files.exists(replicationRoot))
+            throw new IllegalStateException("Refusing to overwrite: " + replicationRoot);
         Parameters parameters = TRBSVUSyntheticDemandGenerator.sampleParameters(
                 J, H, seeds.demandParameters(), 10.0,
                 ContextStructure.DENSE_INDEPENDENT_UNIFORM_POSITIVE,
