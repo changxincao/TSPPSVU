@@ -33,7 +33,7 @@ public final class TRBSVUGridCompletionMain {
         String method = args[5];
         String pool = TRBSVUExperiment1IdeMain.queryPoolFingerprint(
                 TRBSVUExperiment1IdeMain.loadQueries(input));
-        String source = (String) invoke("C-Chi2".equals(method)
+        String source = (String) invoke(("C-Chi2".equals(method) || "RCSAA".equals(method))
                 ? TRBSVUExperiment2IdeMain.class : TRBSVUExperiment1IdeMain.class,
                 "sourceFingerprint", Path.class, Path.of("src"));
         String script = hash(Files.readAllBytes(Path.of("analysis/trb_svu/rf_leaf_weights.py")));
@@ -94,6 +94,11 @@ public final class TRBSVUGridCompletionMain {
             TRBSVUExperiment2IdeMain.main(new String[]{"--worker", input.toString(),
                     newChoiceFile.toString(), output.toString(), Integer.toString(rep),
                     "4", "14400", "PRIMARY", "C-Chi2", csv(LAMBDA)});
+        } else if ("rcsaa".equals(args[0])) {
+            if (!"RCSAA".equals(method)) throw new IllegalArgumentException("Expected RCSAA method");
+            TRBSVUExperiment2IdeMain.main(new String[]{"--worker", input.toString(),
+                    args[6], output.toString(), Integer.toString(rep),
+                    "4", "14400", "PRIMARY", "RCSAA", csv(LAMBDA)});
         } else throw new IllegalArgumentException("Unknown operation " + args[0]);
     }
 
