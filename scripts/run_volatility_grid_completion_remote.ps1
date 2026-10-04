@@ -11,6 +11,7 @@ $classpath="$tools\bin;$deploy\bin;$cplex\lib\cplex.jar;$deploy\lib\mosek.jar"
 $env:PATH="$native;$env:PATH";$env:MOSEKLM_LICENSE_FILE='C:\Users\codex-runner\mosek\mosek.lic'
 $env:OPENBLAS_NUM_THREADS='1';$env:MKL_NUM_THREADS='1';$env:OMP_NUM_THREADS='1'
 Set-Location -LiteralPath $deploy
+. "$deploy\scripts\olist_windows_process.ps1"
 $running=[Collections.Generic.List[object]]::new();$failures=[Collections.Generic.List[object]]::new()
 function Event($t,$state,$detail){[pscustomobject]@{time=(Get-Date -Format o);cell=$t.cell;rep=$t.rep;method=$t.method;attempt=$t.attempt;state=$state;detail=$detail}|Export-Csv "$control\events.csv" -Append -NoTypeInformation -Encoding UTF8}
 function Complete($t){
@@ -35,7 +36,18 @@ try{
         }}
         while($queue.Count-gt0-or$running.Count-gt0){
             while($queue.Count-gt0-and$running.Count-lt4){
-                $t=$queue.Dequeue();$t.runAttempts++;do{$t.attempt++}while(Test-Path "$($t.target)\attempt_$($t.attempt).stdout.log")
+                $t=$queue.Dequeue();$t.runAttempts++
+                # A controller replacement must retain live RF/chi workers, not duplicate them.
+                $live=@(Get-Process java -ErrorAction SilentlyContinue|Where-Object{
+                    $cmd=[OlistWindowsProcess]::CommandLine($_.Id)
+                    $cmd.Contains('"'+$t.target+'"')-and$cmd.Contains('Test.analysis.synthetic.TRBSVUGridCompletionMain')
+                })
+                if($live.Count-gt1){throw "Duplicate workers for $($t.target)"}
+                if($live.Count-eq1){
+                    $t.attempt=[int]((Get-ChildItem "$($t.target)\attempt_*.stdout.log"|ForEach-Object{if($_.Name-match'^attempt_(\d+)\.stdout\.log$'){[int]$Matches[1]}}|Measure-Object -Maximum).Maximum)
+                    $handle=$live[0].Handle;$running.Add([pscustomobject]@{task=$t;process=$live[0]});Event $t 'ADOPTED' $live[0].Id;continue
+                }
+                do{$t.attempt++}while(Test-Path "$($t.target)\attempt_$($t.attempt).stdout.log")
                 New-Item -ItemType Directory -Force -Path $t.target|Out-Null
                 $rep='rep_{0:D3}'-f$t.rep;$base="$Root\baseline\$cell"
                 $oldRf="$base\experiment1\$rep\RF-CSAA"
