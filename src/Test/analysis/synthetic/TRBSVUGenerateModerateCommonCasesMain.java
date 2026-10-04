@@ -90,6 +90,15 @@ public final class TRBSVUGenerateModerateCommonCasesMain {
                          long batchSeed, long caseSeed, int replication,
                          Double cvLower, Double cvUpper, String seedScheme,
                          TRBSVUSyntheticCase.Seeds seeds) throws Exception {
+        generate(replicationRoot, volatility, batchSeed, caseSeed, replication,
+                cvLower, cvUpper, seedScheme, seeds, Distribution.NORMAL);
+    }
+
+    /** Same frozen procurement/context rules, with an explicitly selected residual distribution. */
+    static void generate(Path replicationRoot, Volatility volatility,
+                         long batchSeed, long caseSeed, int replication,
+                         Double cvLower, Double cvUpper, String seedScheme,
+                         TRBSVUSyntheticCase.Seeds seeds, Distribution distribution) throws Exception {
         if (Files.exists(replicationRoot))
             throw new IllegalStateException("Refusing to overwrite: " + replicationRoot);
         Parameters parameters = TRBSVUSyntheticDemandGenerator.sampleParameters(
@@ -102,7 +111,7 @@ public final class TRBSVUGenerateModerateCommonCasesMain {
                 : String.format(Locale.ROOT, "CV_U_%.1f_%.1f", cvLower, cvUpper);
         MultiQueryReplication generated =
                 TRBSVUSyntheticDemandGenerator.generateMultiQueryWithLinearTrend(
-                        parameters, Distribution.NORMAL, cv, QUERIES, OOS,
+                        parameters, distribution, cv, QUERIES, OOS,
                         seeds.contexts(), seeds.historicalNoise(), seeds.oosNoise(),
                         ContextDistribution.UNIFORM);
         ProcurementParams market = TRBSVUProcurementGenerator.generate(
@@ -137,11 +146,11 @@ public final class TRBSVUGenerateModerateCommonCasesMain {
         Files.writeString(queryRoot.resolve("queries.tsv"), queryManifest,
                 StandardCharsets.UTF_8);
         TRBSVUResultWriter.writeDgpParameters(instanceDirectory, parameters,
-                Distribution.NORMAL, cvLabel, cv, parameters.linearTrendTypicalDemand());
+                distribution, cvLabel, cv, parameters.linearTrendTypicalDemand());
         Files.writeString(instanceDirectory.resolve("manifest.txt"),
                 "protocolVersion=" + TRBSVUFormalProtocol.EXPERIMENT12_VERSION + "\n"
                         + "experiment=moderate-common-volatility\n"
-                        + "distribution=NORMAL\nvolatility=" + cvLabel + "\n"
+                        + "distribution=" + distribution + "\nvolatility=" + cvLabel + "\n"
                         + (cvLower == null ? "" : "cvLower=" + cvLower + "\ncvUpper=" + cvUpper + "\n")
                         + "I=" + I + "\nJ=" + J + "\nH=" + H + "\nOOS=" + OOS + "\n"
                         + "queries=" + QUERIES + "\nqueryType=RANDOM\n"
