@@ -11,8 +11,8 @@ $lock=[System.IO.File]::Open((Join-Path $control 'scheduler.lock'),'OpenOrCreate
 $java=Join-Path $TaskRoot 'runtime\java\bin\java.exe'
 $python=Join-Path $TaskRoot 'runtime\python\python.exe'
 $native='E:\EnglishSave\Cplex22\cplex\bin\x64_win64'
-# Original solver classes first; the isolated tools directory only supplies the new driver.
-$classpath="$TaskRoot\bin;$ToolsRoot\bin;E:\EnglishSave\Cplex22\cplex\lib\cplex.jar;$TaskRoot\lib\mosek.jar"
+# Isolated driver/cache-adapter runners first; native model/solver classes remain in the original bin.
+$classpath="$ToolsRoot\bin;$TaskRoot\bin;E:\EnglishSave\Cplex22\cplex\lib\cplex.jar;$TaskRoot\lib\mosek.jar"
 $env:Path="$native;$TaskRoot\lib;$env:Path"
 $env:MOSEKLM_LICENSE_FILE=Join-Path $TaskRoot 'tmp\mosek.lic'
 $env:OPENBLAS_NUM_THREADS='1'; $env:MKL_NUM_THREADS='1'; $env:OMP_NUM_THREADS='1'

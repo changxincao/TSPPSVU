@@ -246,8 +246,11 @@ public final class TRBSVUExperiment1Runner {
             finalParameters.put("RF-CSAA", (double) selectedRfMinLeaf);
         for (var method : finalWeights.entrySet()) {
             double selectedParameter = finalParameters.getOrDefault(method.getKey(), Double.NaN);
-            Solution solved = finalCheckpoint == null ? null
+            var reused = finalCheckpoint == null ? null : TRBSVUFinalResultReuse.load(
+                    instance, method.getKey(), selectedParameter, method.getValue());
+            Solution solved = reused != null ? reused.solution() : finalCheckpoint == null ? null
                     : finalCheckpoint.load(method.getKey(), selectedParameter).orElse(null);
+            if (reused != null) finalCheckpoint.save(method.getKey(), selectedParameter, solved);
             if (solved == null) {
                 System.out.printf(java.util.Locale.ROOT,
                         "RUN_CONTEXT experiment=1 stage=final method=%s candidate=%.17g%n",
@@ -262,7 +265,7 @@ public final class TRBSVUExperiment1Runner {
             }
             requireUsableIncumbent(solved, method.getKey(), instance.params.I);
             solutions.put(method.getKey(), solved);
-            TRBSVUSolveMethods.OosEvaluation evaluation = TRBSVUSolveMethods.evaluateDetailed(
+            TRBSVUSolveMethods.OosEvaluation evaluation = reused != null ? reused.evaluation() : TRBSVUSolveMethods.evaluateDetailed(
                     instance.params, solved.y, instance.oos);
             oos.put(method.getKey(), evaluation.summary());
             oosDetails.put(method.getKey(), evaluation.draws());

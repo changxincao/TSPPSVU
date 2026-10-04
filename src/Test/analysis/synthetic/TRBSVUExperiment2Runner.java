@@ -157,8 +157,10 @@ public final class TRBSVUExperiment2Runner {
                     : new WeightResult(TRBSVUScenarioWeights.equal(instance.history), Double.NaN);
             List<Sample> weighted = weightResult.weights();
             if (weighted.isEmpty()) throw new IllegalStateException("No final contextual support for " + name);
-            Solution solution = finalCheckpoint == null ? null
+            var reused = finalCheckpoint == null ? null : TRBSVUFinalResultReuse.load(instance, name, bestParameter, weighted);
+            Solution solution = reused != null ? reused.solution() : finalCheckpoint == null ? null
                     : finalCheckpoint.load(name, bestParameter).orElse(null);
+            if (reused != null) finalCheckpoint.save(name, bestParameter, solution);
             if (solution == null) {
                 System.out.printf(java.util.Locale.ROOT,
                         "RUN_CONTEXT experiment=2 stage=final method=%s candidate=%.17g%n",
@@ -177,7 +179,7 @@ public final class TRBSVUExperiment2Runner {
             solutions.put(name, solution);
             finalWeights.put(name, weighted);
             effectiveContextBandwidth.put(name, weightResult.effectiveBandwidth());
-            TRBSVUSolveMethods.OosEvaluation evaluation = TRBSVUSolveMethods.evaluateDetailed(
+            TRBSVUSolveMethods.OosEvaluation evaluation = reused != null ? reused.evaluation() : TRBSVUSolveMethods.evaluateDetailed(
                     instance.params, solution.y, instance.oos);
             oos.put(name, evaluation.summary());
             oosDetails.put(name, evaluation.draws());
@@ -303,8 +305,10 @@ public final class TRBSVUExperiment2Runner {
                     instance.history, instance.testContext, selected);
             List<Sample> weighted = weightResult.weights();
             if (weighted.isEmpty()) throw new IllegalStateException("No final contextual support for " + name);
-            Solution solution = finalCheckpoint == null ? null
+            var reused = finalCheckpoint == null ? null : TRBSVUFinalResultReuse.load(instance, name, parameter, weighted);
+            Solution solution = reused != null ? reused.solution() : finalCheckpoint == null ? null
                     : finalCheckpoint.load(name, parameter).orElse(null);
+            if (reused != null) finalCheckpoint.save(name, parameter, solution);
             if (solution == null) {
                 System.out.printf(java.util.Locale.ROOT,
                         "RUN_CONTEXT experiment=2 stage=frozen-final method=%s candidate=%.17g%n",
@@ -343,7 +347,7 @@ public final class TRBSVUExperiment2Runner {
             completedParameters.put(name, parameter);
             finalWeights.put(name, weighted);
             effectiveContextBandwidth.put(name, weightResult.effectiveBandwidth());
-            TRBSVUSolveMethods.OosEvaluation evaluation = TRBSVUSolveMethods.evaluateDetailed(
+            TRBSVUSolveMethods.OosEvaluation evaluation = reused != null ? reused.evaluation() : TRBSVUSolveMethods.evaluateDetailed(
                     instance.params, solution.y, instance.oos);
             oos.put(name, evaluation.summary());
             oosDetails.put(name, evaluation.draws());

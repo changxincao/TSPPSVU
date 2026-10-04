@@ -19,6 +19,11 @@ public final class TRBSVUGridCompletionMain {
 
     public static void main(String[] args) throws Exception {
         if (args.length == 0) throw new IllegalArgumentException("Expected exp, check, chi or lognormal.");
+        if ("fingerprints".equals(args[0])) {
+            for (Class<?> owner : new Class<?>[]{TRBSVUExperiment1IdeMain.class, TRBSVUExperiment2IdeMain.class})
+                System.out.println(owner.getSimpleName() + "=" + invoke(owner, "sourceFingerprint", Path.class, Path.of("src")));
+            return;
+        }
         if ("lognormal".equals(args[0])) {
             generateLognormal(Path.of(args[1]), Path.of(args[2]));
             return;
@@ -28,7 +33,9 @@ public final class TRBSVUGridCompletionMain {
         String method = args[5];
         String pool = TRBSVUExperiment1IdeMain.queryPoolFingerprint(
                 TRBSVUExperiment1IdeMain.loadQueries(input));
-        String source = (String) invoke("sourceFingerprint", Path.class, Path.of("src"));
+        String source = (String) invoke("C-Chi2".equals(method)
+                ? TRBSVUExperiment2IdeMain.class : TRBSVUExperiment1IdeMain.class,
+                "sourceFingerprint", Path.class, Path.of("src"));
         String script = hash(Files.readAllBytes(Path.of("analysis/trb_svu/rf_leaf_weights.py")));
         String environment = "RF-CSAA".equals(method)
                 ? (String) invoke("pythonEnvironment", Path.class,
@@ -46,29 +53,44 @@ public final class TRBSVUGridCompletionMain {
             if ("check".equals(args[0])) return;
             System.setProperty("trb.svu.bandwidthGrid", csv(B));
             System.setProperty("trb.svu.rfLeafGrid", csv(LEAF));
+            enableFinalReuse(input, baseline, output, oldProtocol);
             TRBSVUExperiment1IdeMain.main(new String[]{"--worker", input.toString(), output.toString(),
                     Integer.toString(rep), method, "25", "4", "14400"});
-        } else if ("chi".equals(args[0])) {
+        } else if ("chi".equals(args[0]) || "check-chi".equals(args[0])) {
             Path oldChoiceFile = Path.of(args[6]), newChoiceFile = Path.of(args[7]);
             var oldChoice = TRBSVUExperiment4Main.loadChoice(oldChoiceFile);
             var newChoice = TRBSVUExperiment4Main.loadChoice(newChoiceFile);
+            // Validate the RF recipe too, not just its selected leaf and the DRO solver source.
+            Path oldRfRoot = oldChoiceFile.getParent().getParent().getParent().getParent();
+            String rfSource = (String) invoke("sourceFingerprint", Path.class, Path.of("src"));
+            String rfEnvironment = (String) invoke("pythonEnvironment", Path.class,
+                    Path.of(System.getProperty("trb.svu.python")));
+            String oldRfProtocol = expProtocol("RF-CSAA", pool, rfSource, script, rfEnvironment,
+                    new double[]{.1, .25, .5, .8}, new double[]{1, 2, 5});
+            if (!oldRfProtocol.equals(metadata(oldRfRoot.resolve("complete.txt")).get("protocol")))
+                throw new IllegalStateException("Baseline RF recipe/source/environment mismatch: " + oldRfRoot);
             // The ranked leaf list/validation score may change when extending the grid;
             // only the selected RF leaf determines the scenario weights.
             boolean sameWeights = "RF".equals(oldChoice.family()) && "RF".equals(newChoice.family())
                     && oldChoice.rfMinLeaf() == newChoice.rfMinLeaf();
             boolean sameSource = Files.isRegularFile(baseline.resolve("complete.txt"))
                     && source.equals(metadata(baseline.resolve("complete.txt")).get("sourceSha256"));
+            boolean checkOnly = "check-chi".equals(args[0]);
+            String oldProtocol = chiProtocol(pool, source, oldChoice.toString(), new double[]{.1, .25, .5, 1});
             if (sameWeights && sameSource) {
                 importValidation(baseline, output, input, "C-Chi2", pool, source,
-                        chiProtocol(pool, source, oldChoice.toString(), new double[]{.1, .25, .5, 1}),
+                        oldProtocol,
                         chiProtocol(pool, source, newChoice.toString(), LAMBDA),
-                        new double[]{.1, .25, .5, 1}, false);
+                        new double[]{.1, .25, .5, 1}, checkOnly);
+                if (!checkOnly) enableFinalReuse(input, baseline, output, oldProtocol);
             } else {
+                if (checkOnly) throw new IllegalStateException("Baseline weights/source not reusable: " + baseline);
                 Files.createDirectories(output);
                 Files.writeString(output.resolve("validation_import.txt"),
                         "reusedOrigins=0\nreason=" + (!sameWeights ? "RF selected leaf changed" : "solver source fingerprint differs") + "\nold=" + oldChoice
                                 + "\nnew=" + newChoice + "\n", StandardCharsets.UTF_8);
             }
+            if (checkOnly) return;
             TRBSVUExperiment2IdeMain.main(new String[]{"--worker", input.toString(),
                     newChoiceFile.toString(), output.toString(), Integer.toString(rep),
                     "4", "14400", "PRIMARY", "C-Chi2", csv(LAMBDA)});
@@ -106,14 +128,14 @@ public final class TRBSVUGridCompletionMain {
                     || (!"EMPTY_KERNEL_SUPPORT".equals(trace.solverStatus())
                         && (trace.decision() == null || trace.decision().length != instance.params.I)))
                 throw new IllegalStateException("Invalid imported window or decision at " + origin);
-            // Preserve already finished work on a retry; never import final/OOS decisions.
+            // Preserve already finished validation on a retry; final/OOS reuse is checked separately per query.
             if (target != null && target.load(method, candidate, origin).isEmpty()) target.save(trace);
             count++;
         }
         String receipt = "baseline=" + baseline.toAbsolutePath() + "\nqueryPool=" + pool
                 + "\nsourceSha256=" + source + "\noldProtocol=" + oldProtocol
                 + "\nnewProtocol=" + newProtocol + "\nreusedOrigins=" + count
-                + "\nfinalAndOosImported=false\n";
+                + "\nfinalAndOosReuse=CHECK_PARAMETER_AND_ACTUAL_WEIGHTS_PER_QUERY\n";
         if (!checkOnly) TRBSVUCompletionMarker.writeAtomically(output.resolve("validation_import.txt"), receipt);
         System.out.println("IMPORT method=" + method + " origins=" + count + " checked=" + checkOnly);
     }
@@ -195,9 +217,22 @@ public final class TRBSVUGridCompletionMain {
         return result;
     }
     private static Object invoke(String name, Class<?> type, Object argument) throws Exception {
-        Method method = TRBSVUExperiment1IdeMain.class.getDeclaredMethod(name, type);
+        return invoke(TRBSVUExperiment1IdeMain.class, name, type, argument);
+    }
+    private static Object invoke(Class<?> owner, String name, Class<?> type, Object argument) throws Exception {
+        Method method = owner.getDeclaredMethod(name, type);
         method.setAccessible(true);
         return method.invoke(null, argument);
+    }
+    private static void enableFinalReuse(Path input, Path baseline, Path output, String oldProtocol) throws Exception {
+        if (baseline.toAbsolutePath().normalize().equals(output.toAbsolutePath().normalize())
+                || !Files.isRegularFile(baseline.resolve("complete.txt"))) return;
+        if (!oldProtocol.equals(metadata(baseline.resolve("complete.txt")).get("protocol")))
+            throw new IllegalStateException("Final reuse requires the already verified baseline protocol");
+        System.setProperty("trb.svu.finalReuseInput", input.toAbsolutePath().toString());
+        System.setProperty("trb.svu.finalReuseBaseline", baseline.toAbsolutePath().toString());
+        System.setProperty("trb.svu.finalReuseTarget", output.toAbsolutePath().toString());
+        System.setProperty("trb.svu.finalReuseProtocol", oldProtocol);
     }
     private static String hash(byte[] bytes) throws Exception {
         return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
