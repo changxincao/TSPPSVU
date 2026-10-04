@@ -64,6 +64,7 @@ public final class TRBSVULambdaDecisionComparison {
         TRBSVUScaleExperiment.atomicText(output.resolve("effective_reference.tsv"), referenceText.toString());
         var evaluationCache = new TRBSVULambdaEvaluationCache(output.resolve("evaluations"), instance,
                 effectiveReference, fingerprint);
+        boolean reuseEvaluations = Boolean.parseBoolean(p.getProperty("reuseEvaluations", "true"));
         StringBuilder comparison = new StringBuilder(header());
         boolean allRecorded = true;
         int failures = 0;
@@ -84,13 +85,16 @@ public final class TRBSVULambdaDecisionComparison {
                         sanitize(solution, instance.params.I);
                         solutions.put(name, solution);
                         writeSolve(dir, instance, p, name, lambda, weights, solution);
+                        var modelEvaluation = reuseEvaluations ? evaluationCache
+                                : new TRBSVULambdaEvaluationCache(dir.resolve(name + "_evaluations"),
+                                        instance, effectiveReference, fingerprint);
                         if (name.equals("C-Chi2") && solution.y != null && solution.certifiedOptimal) {
-                            certificate = evaluationCache.certificate(solution, lambda);
+                            certificate = modelEvaluation.certificate(solution, lambda);
                             TRBSVUScaleExperiment.atomicText(dir.resolve("certificate.csv"),
                                     "mean,sd,minimum,denominator,lambda_threshold,holds\n" + certificateValues(certificate) + "\n");
                         }
                         if (solution.y != null) {
-                            var evaluated = evaluationCache.oos(solution);
+                            var evaluated = modelEvaluation.oos(solution);
                             oos.put(name, evaluated.summary());
                             TRBSVUResultWriter.writeOosSummary(dir.resolve(name + "_oos_summary.csv"), replication,
                                     "LAMBDA_COMPARISON", Map.of(name, evaluated.summary()), Map.of(name, solution));

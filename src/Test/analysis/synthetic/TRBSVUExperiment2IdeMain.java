@@ -271,6 +271,12 @@ public final class TRBSVUExperiment2IdeMain {
                             + "\ncompletedMethods=" + String.join(";", result.decisions().keySet())
                             + "\nmissingMethods=" + String.join(";", missingMethods) + "\n",
                     StandardCharsets.UTF_8);
+            if (requestedMethods.stream().anyMatch(TRBSVUMomentBatchStop::stopped)) {
+                TRBSVUCompletionMarker.writeAtomically(incomplete, "protocol=" + protocol
+                        + "\nreason=MOMENT_BATCH_STOP\nlastRecordedQuery=" + query.index() + "\n");
+                System.err.println("Moment batch stop recorded; saved current outputs and checkpoints.");
+                return;
+            }
         }
         TRBSVUCompletionMarker.requireQueryArtifacts(output, queryIndices,
                 "query_metadata.txt", "solve/experiment2_final_solves.csv",
@@ -519,8 +525,8 @@ public final class TRBSVUExperiment2IdeMain {
             int parallel = integer(values, "parallel", DEFAULT_PARALLEL_TASKS);
             int threads = integer(values, "solver-threads", DEFAULT_SOLVER_THREADS);
             int limit = integer(values, "limit-seconds", DEFAULT_LIMIT_SECONDS);
-            if (parallel < 1 || threads < 1 || limit < 1)
-                throw new IllegalArgumentException("Parallelism, threads and time limit must be positive.");
+            if (parallel < 1 || threads < 1 || limit < 0)
+                throw new IllegalArgumentException("Parallelism/threads must be positive; time limit nonnegative.");
             String phase = values.getOrDefault("phase", "all").toLowerCase(Locale.ROOT);
             if (!Set.of("all", "primary", "moment").contains(phase))
                 throw new IllegalArgumentException("Phase must be all, primary or moment: " + phase);

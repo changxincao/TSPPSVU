@@ -10,11 +10,15 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
+import sys
 import time
 from pathlib import Path
 
 import numpy as np
 from rsome import E, dro, square
+# Embedded Windows Python with a ._pth file does not add the script directory.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import msk_feasible_solver as msk
 
 
@@ -137,12 +141,19 @@ def solve(root: Path) -> dict[str, object]:
           f"scalarLinearConstraints={scalar_constraint_count} coneBlocks={cone_count}",
           flush=True)
 
+    # Include RSOME construction in the approved wall budget; reserve time for
+    # extracting/writing an available incumbent before the Java hard watchdog.
+    deadline = os.environ.get("TSPP_MOMENT_DEADLINE_EPOCH")
+    remaining = (float(deadline) - time.time() - 60.0
+                 if deadline else float(meta["time_limit_seconds"]))
+    if remaining <= 0:
+        raise RuntimeError("Moment wall-clock budget exhausted during reformulation")
     model.solve(
         msk,
         display=True,
         log=True,
         params={
-            "mioMaxTime": float(meta["time_limit_seconds"]),
+            "mioMaxTime": remaining,
             "numThreads": int(meta["threads"]),
         },
     )

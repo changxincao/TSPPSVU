@@ -33,7 +33,8 @@ final class WassersteinBoxOracle {
         try {
             cplex.setOut(null);
             cplex.setParam(IloCplex.Param.Threads, threads);
-            cplex.setParam(IloCplex.Param.TimeLimit, Math.max(1e-3, timeLimitSeconds));
+            if (Double.isFinite(timeLimitSeconds))
+                cplex.setParam(IloCplex.Param.TimeLimit, Math.max(1e-3, timeLimitSeconds));
 
             int I = params.I;
             int J = params.J;
@@ -110,7 +111,7 @@ final class WassersteinBoxOracle {
             cplex.addMaximize(objective);
             double remaining = timeLimitSeconds - (System.nanoTime() - started) / 1e9;
             if (remaining <= 0.0) throw new TimeLimitException("W1 oracle budget exhausted during modeling");
-            cplex.setParam(IloCplex.Param.TimeLimit, remaining);
+            if (Double.isFinite(remaining)) cplex.setParam(IloCplex.Param.TimeLimit, remaining);
             long optimizerStart = System.nanoTime();
             boolean solved = cplex.solve();
             double optimizerTimeSec = (System.nanoTime() - optimizerStart) / 1e9;

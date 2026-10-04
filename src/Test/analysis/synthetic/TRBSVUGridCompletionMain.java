@@ -14,7 +14,8 @@ import java.util.Map;
 public final class TRBSVUGridCompletionMain {
     private static final double[] B = {.1, .25, .5, .8, .9, 1, 2, 3, 5, 10, 30, 50, 100};
     private static final double[] LEAF = {1, 2, 5, 10};
-    private static final double[] LAMBDA = {.01, .05, .1, .25, .5, 1, 2, 5, 10};
+    // Keep aligned with the revised synthetic grid; do not overwrite historical nine-point runs.
+    private static final double[] LAMBDA = {.1, .25, .5, 1, 2, 5, 10};
     private TRBSVUGridCompletionMain() { }
 
     public static void main(String[] args) throws Exception {

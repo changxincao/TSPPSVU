@@ -43,6 +43,9 @@ public final class TRBSVUPcmSolver {
                           boolean includeTotalVariance) throws Exception {
         if (weighted.isEmpty() || !(kappa > 0.0) || !Double.isFinite(kappa))
             throw new IllegalArgumentException("Invalid moment-DRO samples or kappa.");
+        long wallStarted = System.nanoTime();
+        String batchMethod = includeTotalVariance ? "C-PCM" : "C-MM";
+        TRBSVUMomentBatchStop.requireRunning(batchMethod);
         Moments moments = moments(weighted, params.J, kappa);
         Path temporaryRoot = Path.of("tmp");
         Files.createDirectories(temporaryRoot);
@@ -59,20 +62,25 @@ public final class TRBSVUPcmSolver {
             ProcessBuilder builder = new ProcessBuilder(python.toString(), script.toString(), directory.toString())
                     .redirectErrorStream(true).inheritIO();
             builder.environment().put("PYTHONUNBUFFERED", "1");
+            builder.environment().put("TSPP_MOMENT_DEADLINE_EPOCH",
+                    Double.toString(System.currentTimeMillis() / 1000.0
+                            + settings.timeLimitSeconds() - (System.nanoTime() - wallStarted) / 1e9));
             Process process = builder.start();
-            // MOSEK's mioMaxTime starts only after RSOME has constructed and
-            // reformulated the conic model.  Large PCM instances can spend
-            // many minutes in that build phase, so the outer watchdog must
-            // not consume the optimizer's requested time limit.
-            boolean ended = process.waitFor(settings.timeLimitSeconds() + 3600L, TimeUnit.SECONDS);
+            long remainingMillis = Math.max(1L, Math.round(1000.0 * settings.timeLimitSeconds()
+                    - (System.nanoTime() - wallStarted) / 1e6));
+            boolean ended = process.waitFor(remainingMillis, TimeUnit.MILLISECONDS);
             if (!ended) {
                 destroyProcessTree(process);
-                throw new IllegalStateException("Moment-DRO process exceeded solver limit plus 3600 seconds build grace.");
+                throw new IllegalStateException("Moment-DRO exceeded total model-build/solve wall-clock limit.");
             }
             if (process.exitValue() != 0)
                 throw new IllegalStateException("Moment-DRO solve failed with exit code " + process.exitValue()
                         + "; inspect the run log above this marker.");
             Solution solution = readSolution(directory.resolve("solution.json"), params.I);
+            if (!solution.certifiedOptimal)
+                TRBSVUMomentBatchStop.stop(batchMethod, "Non-optimal moment solve, limitSec="
+                        + settings.timeLimitSeconds() + " status=" + solution.solverStatus
+                        + " gap=" + solution.relativeGap);
             System.out.printf(java.util.Locale.ROOT,
                     "%s_SOLVE_END status=%s certified=%s objective=%.17g modelBuildAndSolveSec=%.6f optimizerSec=%.6f selected=%d variables=%d constraints=%d coneBlocks=%d%n",
                     modelLabel, solution.solverStatus, solution.certifiedOptimal, solution.objValue,
@@ -82,6 +90,17 @@ public final class TRBSVUPcmSolver {
             return solution;
         } catch (Exception | Error failure) {
             primaryFailure = failure;
+            if (TRBSVUMomentBatchStop.marker(batchMethod) != null) {
+                TRBSVUMomentBatchStop.stop(batchMethod, failure.toString());
+                Path saved = TRBSVUMomentBatchStop.marker(batchMethod).getParent()
+                        .resolve("failures").resolve(directory.getFileName());
+                Files.createDirectories(saved);
+                try (var inputs = Files.list(directory)) {
+                    for (Path input : inputs.toList())
+                        Files.copy(input, saved.resolve(input.getFileName()));
+                }
+                Files.writeString(saved.resolve("failure.txt"), failure.toString());
+            }
             throw failure;
         } finally {
             try {

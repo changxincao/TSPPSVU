@@ -42,7 +42,7 @@ public final class TRBSVUSolveMethods {
                 throw new IllegalArgumentException("Switched compact requires compact dual.");
         }
 
-        /** Zero is an explicit unlimited sentinel, supported only by the paired robust models. */
+        /** Zero is an explicit unlimited sentinel for the primary robust models. */
         public static Settings unlimitedRobust(int threads) {
             return new Settings(threads, 0, 1e-4, RCSAASolverVariant.LBBD_PRIMAL_EXACT, false, true, true);
         }
@@ -69,10 +69,10 @@ public final class TRBSVUSolveMethods {
                                  Method method, double robustness,
                                  Settings settings) throws Exception {
         if (weighted.isEmpty()) throw new IllegalArgumentException("No training scenarios.");
-        if (settings.timeLimitSeconds() == 0 && (method != Method.CHI_SQUARED && method != Method.RCSAA
+        if (settings.timeLimitSeconds() == 0 && (method != Method.CHI_SQUARED && method != Method.RCSAA && method != Method.WASSERSTEIN
                 || method == Method.RCSAA && (!settings.switchedCompactDual() || settings.repairCuts()
                 || settings.rcsaaVariant() != RCSAASolverVariant.LBBD_PRIMAL_EXACT)))
-            throw new IllegalArgumentException("Unlimited time is supported only for chi-square and switched-compact RCSAA");
+            throw new IllegalArgumentException("Unlimited time requires chi-square, W1 or switched-compact RCSAA");
         // The original Sample objects and weights belong to the case, not to any method.
         List<Sample> samples = TRBSVUScenarioWeights.copyWithWeights(weighted,
                 weighted.stream().mapToDouble(s -> s.weight).toArray(),

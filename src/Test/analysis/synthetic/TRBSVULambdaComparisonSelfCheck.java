@@ -85,6 +85,13 @@ public final class TRBSVULambdaComparisonSelfCheck {
                             input.testContext, method, 0.5, limited);
                     check(Math.abs(finiteResult.objValue - 11.5) < 0.001, "Existing positive-limit route");
                 }
+                var finiteW1 = TRBSVUSolveMethods.solve(input.params, input.lanes, history,
+                        input.testContext, TRBSVUSolveMethods.Method.WASSERSTEIN, 0.01, limited);
+                var unlimitedW1 = TRBSVUSolveMethods.solve(input.params, input.lanes, history,
+                        input.testContext, TRBSVUSolveMethods.Method.WASSERSTEIN, 0.01,
+                        TRBSVUSolveMethods.Settings.unlimitedRobust(1));
+                check(unlimitedW1.certifiedOptimal && Math.abs(unlimitedW1.objValue - finiteW1.objValue) < 0.001,
+                        "Unlimited W1 must match the finite-budget micro fixture");
                 Path output = temp.resolve("run");
                 String[] runArgs = {configFile.toString(), instance.toString(), weights.toString(), output.toString()};
                 TRBSVULambdaDecisionComparison.main(runArgs);
@@ -106,6 +113,19 @@ public final class TRBSVULambdaComparisonSelfCheck {
                         TRBSVUExperiment4Runner.comparisonReference(history), Files.readString(output.resolve("input_fingerprint.txt")).trim());
                 check(Math.abs(cache.oos(exact).summary().mean() - 11) < 1e-5, "OOS mean");
                 Files.writeString(drawFile, "corrupt"); rejects(() -> cache.oos(exact));
+                Properties isolated = config();
+                isolated.setProperty("reuseEvaluations", "false");
+                StringBuilder isolatedText = new StringBuilder();
+                for (String key : isolated.stringPropertyNames())
+                    isolatedText.append(key).append('=').append(isolated.getProperty(key)).append('\n');
+                Path isolatedConfig = temp.resolve("isolated.properties"), isolatedOutput = temp.resolve("isolated");
+                Files.writeString(isolatedConfig, isolatedText.toString());
+                TRBSVULambdaDecisionComparison.main(new String[]{isolatedConfig.toString(), instance.toString(),
+                        weights.toString(), isolatedOutput.toString()});
+                check(Files.exists(isolatedOutput.resolve("lambda_0.5/C-Chi2_evaluations/1/decision_draws.csv"))
+                                && Files.exists(isolatedOutput.resolve("lambda_0.5/RCSAA_evaluations/1/decision_draws.csv"))
+                                && Files.exists(isolatedOutput.resolve("lambda_2.0/RCSAA_evaluations/1/decision_draws.csv")),
+                        "Disabled reuse must isolate evaluations across both model and lambda");
             }
             Files.writeString(weights, "row_index\tsample_id\tweight\n0\t999\t0.5\n1\t1\t0.5\n");
             rejects(() -> TRBSVULambdaDecisionComparison.readWeights(weights, history));

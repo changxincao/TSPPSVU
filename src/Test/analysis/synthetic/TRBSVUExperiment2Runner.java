@@ -22,7 +22,8 @@ public final class TRBSVUExperiment2Runner {
     public static final Set<String> MOMENT_METHODS = Set.of("C-MM", "C-PCM");
     public static final Set<String> ALL_METHODS = Set.of(
             "RCSAA", "C-Chi2", "C-W1", "C-MM", "C-PCM");
-    public static final double[] LAMBDA = {0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10};
+    // 2026-10-04: revised after exploratory full-grid OOS comparisons; retain those results.
+    public static final double[] LAMBDA = {0.1, 0.25, 0.5, 1, 2, 5, 10};
     public static final double[] W1_RADIUS = {
             0.0001, 0.00025, 0.0005, 0.001, 0.0025,
             0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5
@@ -189,6 +190,7 @@ public final class TRBSVUExperiment2Runner {
         TRBSVUPcmSolver momentSolver = null;
         for (String name : List.of("C-MM", "C-PCM")) {
             if (!requestedMethods.contains(name)) continue;
+            if (TRBSVUMomentBatchStop.stopped(name)) continue;
             if (momentSolver == null) momentSolver = new TRBSVUPcmSolver(
                     momentPython(),
                     Path.of("analysis", "trb_svu", "solve_pcm.py"));
@@ -298,6 +300,7 @@ public final class TRBSVUExperiment2Runner {
         TRBSVUPcmSolver momentSolver = null;
         for (var entry : selectedParameters.entrySet()) {
             String name = entry.getKey();
+            if (TRBSVUMomentBatchStop.stopped(name)) continue;
             double parameter = entry.getValue();
             if (!(parameter > 0.0) || !Double.isFinite(parameter))
                 throw new IllegalArgumentException("Invalid frozen parameter for " + name + ": " + parameter);
@@ -374,6 +377,7 @@ public final class TRBSVUExperiment2Runner {
         double[] realizedCosts = new double[validationOrigins];
         int firstOrigin = TRBSVUFormalProtocol.VALIDATION_TRAINING_PERIODS;
         for (int t = firstOrigin; t < firstOrigin + validationOrigins; t++) {
+            TRBSVUMomentBatchStop.requireRunning(methodName);
             if (checkpoint != null) {
                 var restored = checkpoint.load(methodName, kappa, t);
                 if (restored.isPresent()) {
@@ -403,7 +407,9 @@ public final class TRBSVUExperiment2Runner {
             if (!solution.certifiedOptimal) {
                 TRBSVUValidationTrace rejected = trace(methodName, kappa, t,
                         window.train(), weighted, weightResult.effectiveBandwidth(),
-                        solution, Double.NaN);
+                        solution, solution.y != null && Double.isFinite(solution.objValue)
+                                ? TRBSVUSolveMethods.realizedCost(instance.params, solution.y,
+                                        window.realized().demand()) : Double.NaN);
                 details.add(rejected);
                 saveCheckpoint(rejected);
             }

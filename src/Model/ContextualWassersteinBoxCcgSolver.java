@@ -315,7 +315,7 @@ public final class ContextualWassersteinBoxCcgSolver {
     }
 
     private static double remainingSeconds(long start, int limitSeconds) {
-        return limitSeconds - secondsSince(start);
+        return limitSeconds == 0 ? Double.POSITIVE_INFINITY : limitSeconds - secondsSince(start);
     }
 
     private static String format(double value) {
@@ -336,7 +336,8 @@ public final class ContextualWassersteinBoxCcgSolver {
                 cplex.setWarning(System.err);
             } else cplex.setOut(null);
             cplex.setParam(IloCplex.Param.Threads, config.threads);
-            cplex.setParam(IloCplex.Param.TimeLimit, Math.max(1e-3, remainingSeconds));
+            if (Double.isFinite(remainingSeconds))
+                cplex.setParam(IloCplex.Param.TimeLimit, Math.max(1e-3, remainingSeconds));
 
             IloNumVar[] y = cplex.boolVarArray(params.I);
             IloNumVar eta = cplex.numVar(0.0, input.lipschitzBound(), "eta");
@@ -364,7 +365,7 @@ public final class ContextualWassersteinBoxCcgSolver {
             cplex.addMinimize(objective);
             double remaining = remainingSeconds - secondsSince(started);
             if (remaining <= 0.0) throw new WassersteinBoxOracle.TimeLimitException("W1 master budget exhausted during modeling");
-            cplex.setParam(IloCplex.Param.TimeLimit, remaining);
+            if (Double.isFinite(remaining)) cplex.setParam(IloCplex.Param.TimeLimit, remaining);
             long optimizerStart = System.nanoTime();
             boolean solved = cplex.solve();
             double optimizerTimeSec = (System.nanoTime() - optimizerStart) / 1e9;

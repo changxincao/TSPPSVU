@@ -23,8 +23,8 @@ public final class TRBSVUProtocolRegressionSelfCheck {
                         new double[]{0.1, 0.25, 0.5, 0.8, 0.9, 1, 2, 3, 5, 10, 30, 50, 100}),
                 "Experiment 1 bandwidth grid is not the locked 13-point tuning grid.");
         require(Arrays.equals(TRBSVUExperiment2Runner.LAMBDA,
-                        new double[]{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10}),
-                "Experiment 2 lambda grid is not the locked 9-point tuning grid.");
+                        new double[]{0.1, 0.25, 0.5, 1, 2, 5, 10}),
+                "Experiment 2 lambda grid is not the revised 7-point tuning grid.");
         require(Arrays.equals(TRBSVUExperiment2Runner.W1_RADIUS,
                         new double[]{0.0001, 0.00025, 0.0005, 0.001, 0.0025,
                                 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5}),
@@ -94,6 +94,19 @@ public final class TRBSVUProtocolRegressionSelfCheck {
             verifyFinalCheckpointInvalidation(root);
             verifyCompletionMarker(root);
             verifyNullableMomentDiagnostics();
+            String oldStopRoot = System.getProperty("trb.svu.momentStopDirectory");
+            try {
+                System.setProperty("trb.svu.momentStopDirectory", root.resolve("moment-stop").toString());
+                TRBSVUMomentBatchStop.stop("C-MM", "first timeout");
+                TRBSVUMomentBatchStop.stop("C-MM", "later failure");
+                require(TRBSVUMomentBatchStop.stopped("C-MM") && !TRBSVUMomentBatchStop.stopped("C-PCM"),
+                        "Moment stop must be global within one method, not stop the other method.");
+                require(Files.readString(TRBSVUMomentBatchStop.marker("C-MM")).contains("first timeout"),
+                        "Moment stop receipt overwrote the first cause.");
+            } finally {
+                if (oldStopRoot == null) System.clearProperty("trb.svu.momentStopDirectory");
+                else System.setProperty("trb.svu.momentStopDirectory", oldStopRoot);
+            }
         } finally {
             try (var paths = Files.walk(root)) {
                 for (Path path : paths.sorted(Comparator.reverseOrder()).toList())

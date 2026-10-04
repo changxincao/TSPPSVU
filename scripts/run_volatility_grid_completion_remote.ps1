@@ -68,7 +68,7 @@ try{
                 if($code-eq0-and(Complete $item.task)){Event $item.task 'COMPLETE' $code}else{Event $item.task 'FAILED' $code;if($item.task.runAttempts-lt2){$queue.Enqueue($item.task)}else{$failures.Add($item.task)}}
                 [void]$running.Remove($item);$item.process.Dispose()
             }
-            [pscustomobject]@{state='RUNNING';cell=$cell;phase=$phase;updated=(Get-Date -Format o);queued=$queue.Count;running=$running.Count;failed=$failures.Count;parallel=4;solverThreads=4;lambdaGrid=@(.01,.05,.1,.25,.5,1,2,5,10);rcsaaEnabled=$false}|ConvertTo-Json|Set-Content "$control\status.json" -Encoding UTF8
+            [pscustomobject]@{state='RUNNING';cell=$cell;phase=$phase;updated=(Get-Date -Format o);queued=$queue.Count;running=$running.Count;failed=$failures.Count;parallel=4;solverThreads=4;lambdaGrid=@(.1,.25,.5,1,2,5,10);rcsaaEnabled=$false}|ConvertTo-Json|Set-Content "$control\status.json" -Encoding UTF8
         }
     }}
     $failures|ConvertTo-Json -Depth 4|Set-Content "$control\failed_tasks.json" -Encoding UTF8
