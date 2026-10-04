@@ -53,7 +53,7 @@ try{
         foreach($job in $jobs|Select-Object -First 2){Write-Output ((Arguments $job)-join' ')}
         return
     }
-    # Resume only this deployment/output module; never import old solve/OOS files.
+    # Resume the active queue; completed baseline experiments remain external references.
     foreach($job in $jobs){
         $job|Add-Member state 'QUEUED';$job|Add-Member attempt 0;$job|Add-Member pid 0
         if(Stopped $job){$job.state='STOPPED';continue}
@@ -62,7 +62,10 @@ try{
             try{([OlistWindowsProcess]::CommandLine($_.Id)).Contains('"'+$job.output+'"')}catch{$false}
         })
         if($live.Count-gt1){throw "Duplicate worker for $($job.id)"}
-        if($live.Count-eq1){$job.state='RUNNING';$job.pid=$live[0].Id;$handle=$live[0].Handle;$running.Add([pscustomobject]@{job=$job;process=$live[0]});Event $job 'ADOPTED' $job.pid}
+        if($live.Count-eq1){
+            $job.attempt=[int]((Get-ChildItem -LiteralPath "$control\logs" -Filter "$($job.id)_*.stdout.log"|ForEach-Object{if($_.Name-match'_(\d+)\.stdout\.log$'){[int]$Matches[1]}}|Measure-Object -Maximum).Maximum)
+            $job.state='RUNNING';$job.pid=$live[0].Id;$handle=$live[0].Handle;$running.Add([pscustomobject]@{job=$job;process=$live[0]});Event $job 'ADOPTED' $job.pid
+        }
     }
     while(@($jobs|Where-Object{$_.state-in@('QUEUED','RUNNING')}).Count){
         foreach($job in @($jobs|Where-Object{$_.state-eq'QUEUED'})){

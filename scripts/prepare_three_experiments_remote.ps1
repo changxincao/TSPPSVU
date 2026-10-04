@@ -3,7 +3,8 @@ param([Parameter(Mandatory=$true)][ValidateSet('MAIN','SECONDARY')][string]$Mode
       [Parameter(Mandatory=$true)][string]$BaseDeployment,
       [Parameter(Mandatory=$true)][string]$MainInput,
       [Parameter(Mandatory=$true)][string]$MainRf,
-      [string]$NormalInputRoot='', [string]$LognormalInputRoot='', [string]$PythonOverride='')
+      [string]$NormalInputRoot='', [string]$LognormalInputRoot='', [string]$PythonOverride='',
+      [switch]$IncludeNormal, [switch]$IncludeMainChi)
 $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
 $control=Join-Path $Root 'control';$deployment=Join-Path $Root 'deployment'
 if(Test-Path -LiteralPath "$control\manifest.json"){throw 'Already prepared; do not overwrite frozen queue'}
@@ -39,7 +40,8 @@ $hashes=[Collections.Generic.List[object]]::new()
 function RecordHash($p){$hashes.Add([pscustomobject]@{path=$p;sha256=(Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash})}
 if($Mode-eq'MAIN'){
     $rank=0
-    foreach($method in @('RCSAA','C-Chi2','C-W1','C-MM','C-PCM')){
+    $methods=if($IncludeMainChi){@('RCSAA','C-Chi2','C-W1','C-MM','C-PCM')}else{@('RCSAA','C-W1','C-MM','C-PCM')}
+    foreach($method in $methods){
         foreach($r in 1..5){
             $rep='rep_{0:D3}'-f$r
             $choice="$Root\frozen_rf\$rep\context_candidate.csv"
@@ -53,7 +55,7 @@ if($Mode-eq'MAIN'){
         };$rank++
     }
 }else{
-    # Both experiments share one four-slot controller; no result imports.
+    # Approximation does not import solves. Completed Normal baselines need not rerun.
     foreach($r in 1..5){
         $rep='rep_{0:D3}'-f$r
         $choice=Import-Csv -LiteralPath "$MainRf\$rep\RF-CSAA\queries\query_000\validation\context_candidate.csv"
@@ -79,7 +81,8 @@ if($Mode-eq'MAIN'){
             RecordHash $caseInput;RecordHash $weightFile;RecordHash $config
         }
     }
-    foreach($dist in @('normal','lognormal')){foreach($cv in @('cv010030','cv040060')){foreach($r in 1..5){
+    $distributions=if($IncludeNormal){@('normal','lognormal')}else{@('lognormal')}
+    foreach($dist in $distributions){foreach($cv in @('cv010030','cv040060')){foreach($r in 1..5){
         $rep='rep_{0:D3}'-f$r;$cell="${dist}_$cv"
         $caseInput=if($dist-eq'normal'){"$NormalInputRoot\$cv\input\$rep"}else{"$LognormalInputRoot\lognormal_$cv\input\$rep"}
         foreach($method in @('D','SAA-All','RF-CSAA')){
