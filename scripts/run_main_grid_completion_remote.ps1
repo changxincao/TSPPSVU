@@ -3,7 +3,8 @@ param([Parameter(Mandatory=$true)][string]$TaskRoot,
       [Parameter(Mandatory=$true)][string]$OutputRoot,
       [Parameter(Mandatory=$true)][string]$ToolsRoot,
       [ValidateRange(1,4)][int]$MaxParallel=4,
-      [switch]$IncludeBaselines)
+      [switch]$IncludeBaselines,
+      [switch]$CsaaOnly)
 $ErrorActionPreference='Stop'
 $control=Join-Path $OutputRoot 'control'
 New-Item -ItemType Directory -Force -Path $control | Out-Null
@@ -44,7 +45,8 @@ function Complete($task) {
     return $true
 }
 try {
-    foreach($phase in @('CSAA','DRO')) {
+    $phases=if($CsaaOnly){@('CSAA')}else{@('CSAA','DRO')}
+    foreach($phase in $phases) {
         $queue=[System.Collections.Generic.Queue[object]]::new()
         foreach($rep in 1..5) {
             $name='rep_{0:D3}' -f $rep
@@ -52,7 +54,7 @@ try {
             if($phase -eq 'CSAA' -and $IncludeBaselines) {$methods=@('D','SAA-All')+$methods}
             foreach($method in $methods) {
                 $target=if($phase -eq 'CSAA') {Join-Path $OutputRoot "experiment1\$name\$method"} else {Join-Path $OutputRoot "experiment2_rf\$name"}
-                $task=[pscustomobject]@{rep=$rep;method=$method;target=$target;attempt=0}
+                $task=[pscustomobject]@{rep=$rep;method=$method;target=$target;attempt=0;runAttempts=0}
                 if($phase -eq 'DRO' -and -not(Complete ([pscustomobject]@{method='RF-CSAA';target=(Join-Path $OutputRoot "experiment1\$name\RF-CSAA")}))) {
                     Event $task 'SKIPPED' 'RF-CSAA prerequisite incomplete'; $failures.Add($task); continue
                 }
@@ -62,7 +64,8 @@ try {
         }
         while($queue.Count -gt 0 -or $running.Count -gt 0) {
             while($queue.Count -gt 0 -and $running.Count -lt $MaxParallel) {
-                $task=$queue.Dequeue(); $task.attempt++
+                $task=$queue.Dequeue(); $task.runAttempts++
+                do {$task.attempt++} while(Test-Path -LiteralPath (Join-Path $task.target "attempt_$($task.attempt).stdout.log"))
                 $name='rep_{0:D3}' -f $task.rep
                 New-Item -ItemType Directory -Force -Path $task.target | Out-Null
                 $inputDir=Join-Path $BaselineRoot "input\$name"
@@ -83,7 +86,7 @@ try {
                     $running.Add([pscustomobject]@{task=$task;process=$process}); Event $task 'STARTED' $process.Id
                 } catch {
                     Event $task 'START_FAILED' $_.Exception.Message
-                    if($task.attempt -lt 2) {$queue.Enqueue($task)} else {$failures.Add($task)}
+                    if($task.runAttempts -lt 2) {$queue.Enqueue($task)} else {$failures.Add($task)}
                 }
             }
             Start-Sleep -Seconds 10
@@ -92,16 +95,16 @@ try {
                 $item.process.WaitForExit(); $code=$item.process.ExitCode
                 if($code -eq 0 -and (Complete $item.task)) {Event $item.task 'COMPLETE' $code} else {
                     Event $item.task 'FAILED' $code
-                    if($item.task.attempt -lt 2) {$queue.Enqueue($item.task)} else {$failures.Add($item.task)}
+                    if($item.task.runAttempts -lt 2) {$queue.Enqueue($item.task)} else {$failures.Add($item.task)}
                 }
                 [void]$running.Remove($item); $item.process.Dispose()
             }
             [pscustomobject]@{state='RUNNING';phase=$phase;updated=[DateTime]::Now.ToString('o');
-                queued=$queue.Count;running=$running.Count;failed=$failures.Count;parallel=$MaxParallel;solverThreads=4} |
+                queued=$queue.Count;running=$running.Count;failed=$failures.Count;parallel=$MaxParallel;solverThreads=4;droEnabled=(-not $CsaaOnly)} |
                 ConvertTo-Json | Set-Content -LiteralPath (Join-Path $control 'status.json') -Encoding UTF8
         }
     }
     $failures | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $control 'failed_tasks.json') -Encoding UTF8
-    [pscustomobject]@{state=$(if($failures.Count -eq 0){'FINISHED'}else{'PARTIAL'});running=0;queued=0;failed=$failures.Count;ended=[DateTime]::Now.ToString('o')} |
+    [pscustomobject]@{state=$(if($failures.Count -eq 0){'FINISHED'}else{'PARTIAL'});running=0;queued=0;failed=$failures.Count;droEnabled=(-not $CsaaOnly);ended=[DateTime]::Now.ToString('o')} |
         ConvertTo-Json | Set-Content -LiteralPath (Join-Path $control 'status.json') -Encoding UTF8
 } finally {$lock.Dispose()}

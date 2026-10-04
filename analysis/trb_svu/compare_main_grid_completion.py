@@ -27,10 +27,11 @@ def write(path, data):
         out.writerows(data)
 
 
-def main(baseline, output):
+def main(baseline, output, csaa_only=False):
     target = output / "comparison"
     target.mkdir(exist_ok=True)
     results, changes, audit = [], [], []
+    methods = ("D", "SAA-All") + CSAA + (() if csaa_only else ("C-Chi2",))
     for rep in range(1, 6):
         name = f"rep_{rep:03}"
         saa = baseline / "experiment1" / name / "SAA-All"
@@ -42,7 +43,7 @@ def main(baseline, output):
                 raise ValueError(f"Incomplete SAA OOS: {root}")
             reference.append((metadata(root / "query_metadata.txt")["querySha256"],
                               [(r["sample_id"], r["total_demand"]) for r in draws]))
-        for method in ("D", "SAA-All") + CSAA + ("C-Chi2",):
+        for method in methods:
             directory = (baseline / "experiment1" / name / method if method in ("D", "SAA-All")
                          else output / "experiment2_rf" / name if method == "C-Chi2"
                          else output / "experiment1" / name / method)
@@ -68,6 +69,9 @@ def main(baseline, output):
                                   certified_optimal=summary[0]["certified_optimal"],
                                   gap=summary[0]["solve_gap"], paired=True, oos_count=len(draws)))
             result = dict(rep=rep, method=method, **{k: statistics.mean(float(r[k]) for r in summaries) for k in METRICS})
+            choice = rows(directory / "queries/query_000/validation/context_candidate.csv")[0] if method in CSAA else None
+            result["selected_parameter"] = float(choice["validation_selected_min_leaf" if method == "RF-CSAA" else "validation_selected_B"]) if choice else math.nan
+            result["validation_cost"] = float(choice["validation_cost"]) if choice else math.nan
             results.append(result)
             if method in ("CSAA-Exp", "CSAA-Tri", "RF-CSAA"):
                 old_dir = baseline / "experiment1" / name / method
@@ -84,9 +88,10 @@ def main(baseline, output):
         for k in METRICS:
             result[k + "_vs_saa_pct"] = 100 * (base[k] - result[k]) / base[k]
     overall = [dict(method=method, **{k + "_vs_saa_pct": statistics.mean(r[k + "_vs_saa_pct"] for r in results if r["method"] == method) for k in METRICS})
-               for method in ("D", "SAA-All") + CSAA + ("C-Chi2",)]
-    rankings = [dict(rep=rep, mean_ranking=";".join(r["method"] for r in sorted(
-                    (r for r in results if r["rep"] == rep and r["method"] in CSAA), key=lambda r: r["mean"]))) for rep in range(1, 6)]
+               for method in methods]
+    rankings = [dict(rep=rep, **{k + "_ranking": ";".join(r["method"] for r in sorted(
+                    (r for r in results if r["rep"] == rep and r["method"] in CSAA), key=lambda r: r[k]))
+                    for k in METRICS + ("validation_cost",)}) for rep in range(1, 6)]
     write(target / "per_market.csv", results)
     write(target / "overall.csv", overall)
     write(target / "parameter_changes.csv", changes)
@@ -96,8 +101,11 @@ def main(baseline, output):
         captured=datetime.now(timezone.utc).isoformat(), baseline=str(baseline), output=str(output),
         markets=5, queries_per_market=40, oos_per_query=1000,
         aggregation="Mean each metric over 40 queries within market, then mean market-relative improvements",
-        risk_metrics="average conditional query metrics, not pooled risk", selection="no market filtering"), indent=2), encoding="utf-8")
+        risk_metrics="average conditional query metrics, not pooled risk", selection="no market filtering",
+        scope="CSAA_ONLY" if csaa_only else "CSAA_AND_RF_CHI2"), indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":
-    main(Path(sys.argv[1]), Path(sys.argv[2]))
+    if len(sys.argv) not in (3, 4) or (len(sys.argv) == 4 and sys.argv[3] != "--csaa-only"):
+        raise SystemExit("Usage: compare_main_grid_completion.py BASELINE OUTPUT [--csaa-only]")
+    main(Path(sys.argv[1]), Path(sys.argv[2]), csaa_only=len(sys.argv) == 4)
