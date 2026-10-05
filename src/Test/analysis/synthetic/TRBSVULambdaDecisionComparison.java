@@ -194,7 +194,8 @@ public final class TRBSVULambdaDecisionComparison {
             for (double y : s.y) if (!Double.isFinite(y) || Math.min(Math.abs(y), Math.abs(y - 1)) > 1e-4)
                 throw new IllegalStateException("Nonbinary carrier selection");
             if (!Double.isFinite(s.bestBound)) s.relativeGap = Double.NaN;
-            else if (s.bestBound > s.objValue + 1e-8 * Math.max(1, Math.abs(s.objValue))) {
+            else if (s.bestBound > s.objValue + 1e-8 * Math.max(1, Math.abs(s.objValue))
+                    && !Model.RCSAABoundDiagnostics.acceptedOverlap(s)) {
                 s.relativeGap = Double.NaN; s.certifiedOptimal = false; s.solverStatus += "/BOUND_INCONSISTENT";
             }
         }

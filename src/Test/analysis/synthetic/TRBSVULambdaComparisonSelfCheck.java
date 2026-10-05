@@ -54,6 +54,16 @@ public final class TRBSVULambdaComparisonSelfCheck {
         check(settings.timeLimitSeconds() == 0 && settings.switchedCompactDual() && !settings.repairCuts(), "Unlimited switched compact");
         Solution exact = new Solution(10, new double[]{1}, 1); exact.certifiedOptimal = true;
         Solution chi = new Solution(10, new double[]{1}, 1); chi.certifiedOptimal = true;
+        exact.bestBound = 10.0000004; exact.relativeGap = 0;
+        exact.solverStatus = "OPTIMAL_RCSAA_SWITCHED_COMPACT:NUMERICAL_BOUND_OVERLAP_WITHIN_TOL";
+        TRBSVULambdaDecisionComparison.sanitize(exact, 1);
+        check(exact.certifiedOptimal && exact.bestBound == 10.0000004,
+                "Comparison must preserve accepted roundoff and raw bound");
+        exact.bestBound = 11;
+        TRBSVULambdaDecisionComparison.sanitize(exact, 1);
+        check(!exact.certifiedOptimal && Double.isNaN(exact.relativeGap), "Material overlap rejected");
+        exact.bestBound = 10; exact.relativeGap = 0; exact.certifiedOptimal = true;
+        exact.solverStatus = "TEST_OPTIMAL";
         int columns = TRBSVULambdaDecisionComparison.header().trim().split(",", -1).length;
         String paired = TRBSVULambdaDecisionComparison.row("r0", "q0", 1, chi, exact, null, null, c);
         check(paired.trim().split(",", -1).length == columns && paired.contains("BOTH_CERTIFIED,true,true,HOLDS"), "Paired CSV");

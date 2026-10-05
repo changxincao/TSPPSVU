@@ -18,9 +18,6 @@ import mosek.fusion.SolutionStatus;
 import mosek.fusion.Variable;
 
 final class RCSAALBBDPrimalExactSolver {
-    // Numerical bound overlap is only tolerated far below the configured MIP-gap tolerance.
-    private static final double BOUND_CONSISTENCY_REL_TOL = 5e-8;
-
     Solution solve(Data data, Config cfg) throws Exception {
         if (cfg.lambda < 0 || !Double.isFinite(cfg.lambda))
             throw new IllegalArgumentException("RCSAA lambda must be finite and nonnegative");
@@ -136,20 +133,12 @@ final class RCSAALBBDPrimalExactSolver {
                                         "BOUND_INCONSISTENT:LB=%.17g:UB=%.17g",
                                         mr.bestBound, bestUpperBound));
                     }
-                    if (mr.bestBound > bestUpperBound) {
-                        double relativeExcess = (mr.bestBound - bestUpperBound)
-                                / Math.max(1.0, Math.abs(bestUpperBound));
-                        return incompleteSolution(bestUpperBound, bestY, mr.bestBound,
-                                secondsBetween(t0, t1), iter, totalCuts, totalNodes,
-                                totalOptimizerTimeSec,
-                                String.format(java.util.Locale.ROOT,
-                                        "NUMERICAL_BOUND_OVERLAP_WITHIN_TOL:LB=%.17g:UB=%.17g:relativeExcess=%.9g:allowedRelativeExcess=%.9g",
-                                        mr.bestBound, bestUpperBound, relativeExcess,
-                                        Math.min(BOUND_CONSISTENCY_REL_TOL,
-                                                Math.max(0.0, cfg.tol))));
-                    }
+                    boolean numericalOverlap = mr.bestBound > bestUpperBound;
                     double reportedBound = mr.bestBound;
-                    double reportedGap = relativeGap(reportedBound, bestUpperBound);
+                    // Accept only checked roundoff-scale overlap after native optimality;
+                    // preserve the raw bound instead of replacing it by the incumbent.
+                    double reportedGap = RCSAABoundDiagnostics.certificationGap(
+                            reportedBound, bestUpperBound, cfg.tol);
                     System.out.println(String.format(
                             "RCSAA-LBBD-PRIMAL-EXACT iter=%d solved globalLB=%.6f globalUB=%.6f gap=%s sel=%d masterSec=%.3f scenarioSec=%.3f upperCuts=0 totalSec=%.3f",
                             iter,
@@ -165,6 +154,9 @@ final class RCSAALBBDPrimalExactSolver {
                             ? "OPTIMAL_RCSAA_SWITCHED_COMPACT"
                             : cfg.rcsaaCompactDual
                             ? "OPTIMAL_RCSAA_PRODUCT_COMPACT" : "OPTIMAL_RCSAA_REPAIR";
+                    if (numericalOverlap) solution.solverStatus += String.format(java.util.Locale.ROOT,
+                            ":NUMERICAL_BOUND_OVERLAP_WITHIN_TOL:relativeExcess=%.9g",
+                            (reportedBound - bestUpperBound) / Math.max(1, Math.abs(bestUpperBound)));
                     solution.bestBound = reportedBound;
                     solution.relativeGap = reportedGap;
                     solution.nodeCount = totalNodes;
@@ -229,12 +221,7 @@ final class RCSAALBBDPrimalExactSolver {
     }
 
     static boolean boundsConsistent(double lowerBound, double upperBound, double tolerance) {
-        if (!Double.isFinite(lowerBound) || !Double.isFinite(upperBound)) return false;
-        if (lowerBound <= upperBound) return true;
-        double scale = Math.max(1.0, Math.abs(upperBound));
-        double relativeTolerance = Math.min(BOUND_CONSISTENCY_REL_TOL,
-                Math.max(0.0, tolerance));
-        return lowerBound - upperBound <= relativeTolerance * scale;
+        return RCSAABoundDiagnostics.boundsConsistent(lowerBound, upperBound, tolerance);
     }
 
     private static int countSelected(double[] y) {

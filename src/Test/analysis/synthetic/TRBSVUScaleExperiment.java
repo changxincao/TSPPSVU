@@ -266,7 +266,8 @@ public final class TRBSVUScaleExperiment {
         } else if (!Double.isFinite(solution.bestBound)) {
             solution.relativeGap = Double.NaN;
         } else if (Double.isFinite(solution.bestBound) && Double.isFinite(solution.objValue)
-                && solution.bestBound > solution.objValue + 1e-8 * Math.max(1, Math.abs(solution.objValue))) {
+                && solution.bestBound > solution.objValue + 1e-8 * Math.max(1, Math.abs(solution.objValue))
+                && !Model.RCSAABoundDiagnostics.acceptedOverlap(solution)) {
             solution.relativeGap = Double.NaN;
             solution.certifiedOptimal = false;
             solution.solverStatus += "/BOUND_INCONSISTENT";
