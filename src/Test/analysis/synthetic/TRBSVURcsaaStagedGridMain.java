@@ -110,6 +110,7 @@ public final class TRBSVURcsaaStagedGridMain {
     private static Map<String, String> metadata(Path file) throws Exception {
         Map<String, String> values = new LinkedHashMap<>();
         for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
+            if (line.isBlank()) continue;
             int split = line.indexOf('=');
             if (split <= 0 || values.put(line.substring(0, split), line.substring(split + 1)) != null)
                 throw new IllegalStateException("Invalid metadata: " + file);

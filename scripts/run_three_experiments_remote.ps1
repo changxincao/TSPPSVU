@@ -32,6 +32,17 @@ function Complete($job){
     };return $true
 }
 function Stopped($job){return $job.method-in@('C-MM','C-PCM')-and(HasFile "$control\moment_stop\$($job.method).stop.txt")}
+function MainStageBlocked($job,$queue){
+    $blocking=@($queue|Where-Object{$_.rank-lt$job.rank-and$_.state-in@('QUEUED','RUNNING')})
+    # A supplement waits for its own small-grid task via depends, not other markets.
+    if($job.kind-eq'rcsaa-staged'-and$job.rank-eq1){
+        $blocking=@($blocking|Where-Object{-not($_.kind-eq'rcsaa-staged'-and$_.rank-eq0)})
+    }
+    return $blocking.Count-gt0
+}
+function WorkerCommandMatches($command,$expectedArguments){
+    return $command.TrimEnd().EndsWith(' '+($expectedArguments-join' '),[StringComparison]::Ordinal)
+}
 function Arguments($job){
     $jobClasspath=if($job.kind-eq'rcsaa-staged'){"$($job.tools)\bin;$classpath"}else{$classpath}
     $workerArguments=@('-Xmx2g',('"-Djava.library.path='+$plan.native+'"'),('"-Dtrb.svu.python='+$plan.python+'"'),('"-Dtrb.svu.momentStopDirectory='+$control+'\moment_stop"'),'-cp',('"'+$jobClasspath+'"'))
@@ -68,15 +79,24 @@ try{
         $job|Add-Member state 'QUEUED';$job|Add-Member attempt 0;$job|Add-Member pid 0
         if(Stopped $job){$job.state='STOPPED';continue}
         if(Complete $job){$job.state='COMPLETE';continue}
+        $expectedArguments=Arguments $job
         $live=@(Get-Process java -ErrorAction SilentlyContinue|Where-Object{
-            try{([OlistWindowsProcess]::CommandLine($_.Id)).Contains('"'+$job.output+'"')}catch{$false}
+            try{WorkerCommandMatches ([OlistWindowsProcess]::CommandLine($_.Id)) $expectedArguments}catch{$false}
         })
         if($live.Count-gt1){throw "Duplicate worker for $($job.id)"}
         if($live.Count-eq1){
+            if(@($running|Where-Object{$_.process.Id-eq$live[0].Id}).Count){throw "Worker already adopted for another task: $($live[0].Id)"}
             $job.attempt=[int]((Get-ChildItem -LiteralPath "$control\logs" -Filter "$($job.id)_*.stdout.log"|ForEach-Object{if($_.Name-match'_(\d+)\.stdout\.log$'){[int]$Matches[1]}}|Measure-Object -Maximum).Maximum)
             $job.state='RUNNING';$job.pid=$live[0].Id;$handle=$live[0].Handle;$running.Add([pscustomobject]@{job=$job;process=$live[0]});Event $job 'ADOPTED' $job.pid
         }
     }
+    $existingWorkers=@(Get-Process java -ErrorAction SilentlyContinue|Where-Object{
+        try{([OlistWindowsProcess]::CommandLine($_.Id)).Contains('"-Dtrb.svu.momentStopDirectory='+$control+'\moment_stop"')}catch{$false}
+    })
+    foreach($worker in $existingWorkers){
+        if(@($running|Where-Object{$_.process.Id-eq$worker.Id}).Count-ne1){throw "Unadopted experiment worker: $($worker.Id); refusing additional launches"}
+    }
+    if($running.Count-gt4){throw 'Existing workers exceed four-slot limit'}
     while(@($jobs|Where-Object{$_.state-in@('QUEUED','RUNNING')}).Count){
         foreach($job in @($jobs|Where-Object{$_.state-eq'QUEUED'})){
             if(Stopped $job){$job.state='STOPPED';Event $job 'STOPPED' 'Method-wide moment stop receipt';continue}
@@ -90,7 +110,7 @@ try{
                 $j=$_
                 if($j.state-ne'QUEUED'){return $false}
                 if(@($j.depends|Where-Object{ $id=$_;@($jobs|Where-Object{$_.id-eq$id})[0].state-ne'COMPLETE' }).Count){return $false}
-                if($plan.mode-eq'MAIN'-and@($jobs|Where-Object{$_.rank-lt$j.rank-and$_.state-in@('QUEUED','RUNNING')}).Count){return $false}
+                if($plan.mode-eq'MAIN'-and(MainStageBlocked $j $jobs)){return $false}
                 return $true
             }|Sort-Object @{Expression={$lane=$_.lane;@($running|Where-Object{$_.job.lane-eq$lane}).Count}},rank,id)
             if(-not$ready.Count){break}
