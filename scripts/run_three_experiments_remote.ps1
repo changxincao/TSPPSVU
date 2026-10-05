@@ -33,7 +33,11 @@ function Complete($job){
 }
 function Stopped($job){return $job.method-in@('C-MM','C-PCM')-and(HasFile "$control\moment_stop\$($job.method).stop.txt")}
 function Arguments($job){
-    $workerArguments=@('-Xmx2g',('"-Djava.library.path='+$plan.native+'"'),('"-Dtrb.svu.python='+$plan.python+'"'),('"-Dtrb.svu.momentStopDirectory='+$control+'\moment_stop"'),'-cp',('"'+$classpath+'"'))
+    $jobClasspath=if($job.kind-eq'rcsaa-staged'){"$($job.tools)\bin;$classpath"}else{$classpath}
+    $workerArguments=@('-Xmx2g',('"-Djava.library.path='+$plan.native+'"'),('"-Dtrb.svu.python='+$plan.python+'"'),('"-Dtrb.svu.momentStopDirectory='+$control+'\moment_stop"'),'-cp',('"'+$jobClasspath+'"'))
+    if($job.kind-eq'rcsaa-staged'){
+        return $workerArguments+@('Test.analysis.synthetic.TRBSVURcsaaStagedGridMain','run',('"'+$job.input+'"'),('"'+$job.baseline+'"'),('"'+$job.output+'"'),$job.rep,('"'+$job.choice+'"'),$job.oldGrid,$job.grid)
+    }
     if($job.kind-eq'comparison'){
         return $workerArguments+@('Test.analysis.synthetic.TRBSVULambdaDecisionComparison',('"'+$job.config+'"'),('"'+$job.input+'"'),('"'+$job.weights+'"'),('"'+$job.output+'"'))
     }
@@ -49,7 +53,8 @@ try{
         foreach($id in @($job.depends)){
             if($id-eq$job.id-or@($jobs|Where-Object{$_.id-eq$id}).Count-ne1){throw "Invalid dependency: $($job.id) -> $id"}
         }
-        if($job.kind-notin@('base','robust','comparison')){throw "Unknown worker kind $($job.kind)"}
+        if($job.kind-notin@('base','robust','comparison','rcsaa-staged')){throw "Unknown worker kind $($job.kind)"}
+        if($job.kind-eq'rcsaa-staged'-and($job.method-ne'RCSAA'-or-not(HasFile "$($job.tools)\bin\Test\analysis\synthetic\TRBSVURcsaaStagedGridMain.class")-or-not(HasFile $job.choice)-or-not$job.oldGrid-or-not$job.grid)){throw "Invalid staged RCSAA worker $($job.id)"}
         if(-not(HasFile $(if($job.kind-eq'comparison'){$job.input}else{"$($job.input)\queries\queries.tsv"}))){throw "Missing input $($job.id)"}
         if($job.kind-eq'comparison'-and(-not(HasFile $job.config)-or-not(HasFile $job.weights))){throw "Missing comparison configuration $($job.id)"}
     }
