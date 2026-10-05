@@ -17,8 +17,13 @@ function HasFile($path){return [IO.File]::Exists($path)-and([IO.FileInfo]$path).
 function Complete($job){
     if(-not(HasFile "$($job.output)\complete.txt")){return $false}
     if($job.kind-eq'comparison'){
-        if(-not(HasFile "$($job.output)\comparison.csv")){return $false}
-        return @(Import-Csv -LiteralPath "$($job.output)\comparison.csv").Count-eq11
+        if(-not(HasFile "$($job.output)\comparison.csv")-or-not(HasFile $job.config)){return $false}
+        $grid=@(Get-Content -LiteralPath $job.config|Where-Object{$_-match'^lambdaGrid='})
+        if($grid.Count-ne1){return $false}
+        $expected=@($grid[0].Substring('lambdaGrid='.Length).Split(',')|ForEach-Object{[double]::Parse($_,[Globalization.CultureInfo]::InvariantCulture)})
+        $rows=@(Import-Csv -LiteralPath "$($job.output)\comparison.csv")
+        $actual=@($rows|ForEach-Object{[double]::Parse($_.lambda,[Globalization.CultureInfo]::InvariantCulture)})
+        return $rows.Count-eq$expected.Count-and@($actual|Select-Object -Unique).Count-eq$expected.Count-and@($expected|Where-Object{$_-notin$actual}).Count-eq0
     }
     foreach($q in 0..39){
         $dir=Join-Path $job.output ('queries\query_{0:D3}'-f$q)
