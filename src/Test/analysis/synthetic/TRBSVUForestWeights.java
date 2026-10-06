@@ -4,6 +4,7 @@ import Basic.CovariateVector;
 import Basic.Sample;
 
 import java.io.BufferedWriter;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -134,9 +135,36 @@ public final class TRBSVUForestWeights implements TRBSVUExperiment1Runner.Forest
             if (Math.abs(sum - 1.0) > 1e-8) throw new IllegalStateException("RF weights do not sum to 1.");
             return values;
         } finally {
-            Files.deleteIfExists(output);
-            Files.deleteIfExists(input);
-            Files.deleteIfExists(directory);
+            cleanupTemporaryFiles(output, input, directory);
+        }
+    }
+
+    /** Cleanup must not discard valid weights or replace the original fit error. */
+    static void cleanupTemporaryFiles(Path... paths) {
+        for (Path path : paths) {
+            Exception failure = null;
+            for (int attempt = 1; attempt <= 3; attempt++) {
+                try {
+                    Files.deleteIfExists(path);
+                    failure = null;
+                    break;
+                } catch (IOException | SecurityException ex) {
+                    failure = ex;
+                    if (attempt < 3 && !Thread.currentThread().isInterrupted()) {
+                        try {
+                            Thread.sleep(100L);
+                        } catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            }
+            if (failure != null)
+                System.err.println("RF_TEMP_CLEANUP_WARNING retained=" + path.toAbsolutePath()
+                        + " reason=" + failure);
         }
     }
 
