@@ -188,6 +188,7 @@ public final class TRBSVUExperiment2IdeMain {
         String sourceHash = sourceFingerprint(Path.of("src"));
         Path python = Path.of(System.getProperty("trb.svu.python",
                 Path.of(".venv-rsome", "Scripts", "python.exe").toString())).toAbsolutePath();
+        RfFingerprint rf = rfFingerprint(selected, python);
         boolean usesMomentPython = phase == Phase.MOMENT;
         String pcmScriptHash = usesMomentPython
                 ? sha256(Files.readAllBytes(Path.of("analysis", "trb_svu", "solve_pcm.py")))
@@ -209,7 +210,7 @@ public final class TRBSVUExperiment2IdeMain {
                 + "|rcsaaCompactFormulation=SWITCHED_COMPACT"
                 + "|threads=" + threads + "|limit=" + limit + "|source=" + sourceHash
                 + "|pcmScript=" + pcmScriptHash + "|mosekAdapter=" + mosekAdapterHash
-                + "|momentPythonEnvironment=" + momentPythonEnvironment)
+                + "|momentPythonEnvironment=" + momentPythonEnvironment + rf.protocolSuffix())
                 .getBytes(StandardCharsets.UTF_8));
         Path complete = output.resolve("complete.txt");
         if (checkOnly) TRBSVUCompletionMarker.requireMatchingProtocol(complete, protocol);
@@ -302,6 +303,8 @@ public final class TRBSVUExperiment2IdeMain {
                 + "\npcmScriptSha256=" + pcmScriptHash
                 + "\nmosekAdapterSha256=" + mosekAdapterHash
                 + "\nmomentPythonEnvironment=" + momentPythonEnvironment
+                + "\nrfScriptSha256=" + rf.scriptSha256()
+                + "\nrfPythonEnvironment=" + rf.pythonEnvironment()
                 + "\nphase=" + phase.directory
                 + "\nrequestedMethods=" + String.join(";", requestedMethods)
                 + "\nrcsaaCompactFormulation=SWITCHED_COMPACT"
@@ -486,6 +489,20 @@ public final class TRBSVUExperiment2IdeMain {
 
     private static String sha256(byte[] content) throws Exception {
         return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content));
+    }
+
+    // All Experiment 2 protocol producers must include the same RF recipe fingerprint.
+    record RfFingerprint(String scriptSha256, String pythonEnvironment) {
+        String protocolSuffix() {
+            return "|rfScript=" + scriptSha256 + "|rfPythonEnvironment=" + pythonEnvironment;
+        }
+    }
+
+    static RfFingerprint rfFingerprint(ContextualChoice selected, Path python) throws Exception {
+        if (!"RF".equals(selected.family())) return new RfFingerprint("NOT_USED", "NOT_USED");
+        return new RfFingerprint(sha256(Files.readAllBytes(
+                Path.of("analysis", "trb_svu", "rf_leaf_weights.py"))),
+                TRBSVUExperiment1IdeMain.pythonEnvironment(python));
     }
 
     private static String momentPythonEnvironment(Path python) throws Exception {

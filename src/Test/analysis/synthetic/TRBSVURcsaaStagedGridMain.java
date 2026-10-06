@@ -29,9 +29,12 @@ public final class TRBSVURcsaaStagedGridMain {
         Method fingerprint = TRBSVUExperiment2IdeMain.class.getDeclaredMethod("sourceFingerprint", Path.class);
         fingerprint.setAccessible(true);
         String source = (String) fingerprint.invoke(null, Path.of("src"));
-        String selected = TRBSVUExperiment4Main.loadChoice(choiceFile).toString();
-        String oldProtocol = protocol(pool, source, selected, oldGrid);
-        String newProtocol = protocol(pool, source, selected, newGrid);
+        var choice = TRBSVUExperiment4Main.loadChoice(choiceFile);
+        String selected = choice.toString();
+        var rf = TRBSVUExperiment2IdeMain.rfFingerprint(choice, Path.of(System.getProperty(
+                "trb.svu.python", Path.of(".venv-rsome", "Scripts", "python.exe").toString())).toAbsolutePath());
+        String oldProtocol = protocol(pool, source, selected, oldGrid, rf);
+        String newProtocol = protocol(pool, source, selected, newGrid, rf);
         Path oldDirectory = baseline.resolve("validation_checkpoints");
         int imported = 0;
         StringBuilder audit = new StringBuilder("candidate,origin,source_sha256\n");
@@ -86,7 +89,8 @@ public final class TRBSVURcsaaStagedGridMain {
                 output.toString(), args[4], "4", "0", "PRIMARY", "RCSAA", args[7]});
     }
 
-    private static String protocol(String pool, String source, String selected, double[] lambda) throws Exception {
+    private static String protocol(String pool, String source, String selected, double[] lambda,
+            TRBSVUExperiment2IdeMain.RfFingerprint rf) throws Exception {
         return hash((TRBSVUFormalProtocol.EXPERIMENT12_VERSION
                 + "|experiment=2|phase=primary|methods=[RCSAA]|queryPool=" + pool
                 + "|selected=" + selected + "|lambda=" + Arrays.toString(lambda)
@@ -95,7 +99,8 @@ public final class TRBSVURcsaaStagedGridMain {
                 + "|momentValidationLimit=" + TRBSVUExperiment2Runner.MOMENT_VALIDATION_LIMIT_SECONDS
                 + "|momentQueryLimit=" + TRBSVUExperiment2Runner.MOMENT_QUERY_LIMIT_SECONDS
                 + "|rcsaaCompactFormulation=SWITCHED_COMPACT|threads=4|limit=0|source=" + source
-                + "|pcmScript=NOT_USED|mosekAdapter=NOT_USED|momentPythonEnvironment=NOT_USED")
+                + "|pcmScript=NOT_USED|mosekAdapter=NOT_USED|momentPythonEnvironment=NOT_USED"
+                + rf.protocolSuffix())
                 .getBytes(StandardCharsets.UTF_8));
     }
 

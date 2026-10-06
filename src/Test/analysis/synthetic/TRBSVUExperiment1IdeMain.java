@@ -447,7 +447,7 @@ public final class TRBSVUExperiment1IdeMain {
         return HexFormat.of().formatHex(digest.digest());
     }
 
-    private static String pythonEnvironment(Path python) throws Exception {
+    static String pythonEnvironment(Path python) throws Exception {
         String code = "import sys; from importlib.metadata import version; "
                 + "print('python='+sys.version.split()[0]+'|numpy='+version('numpy')"
                 + "+'|scikit-learn='+version('scikit-learn'))";

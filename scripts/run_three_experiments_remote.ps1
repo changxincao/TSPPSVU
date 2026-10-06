@@ -71,6 +71,8 @@ function AuditArguments($job){
         $index=[Array]::IndexOf($argsList,'Test.analysis.synthetic.TRBSVULambdaDecisionComparison')
         return @($argsList[0..$index])+@('--check-complete')+@($argsList[($index+1)..($argsList.Length-1)])
     }
+    # Audit the deployment worker, not any older Experiment 2 class in staged tools/bin.
+    $cpIndex=[Array]::IndexOf($argsList,'-cp');$argsList[$cpIndex+1]='"'+$classpath+'"'
     $index=[Array]::IndexOf($argsList,'Test.analysis.synthetic.TRBSVURcsaaStagedGridMain')
     return @($argsList[0..($index-1)])+@('Test.analysis.synthetic.TRBSVUExperiment2IdeMain','--check-complete',
         ('"'+$job.input+'"'),('"'+$job.choice+'"'),('"'+$job.output+'"'),$job.rep,'4','0','PRIMARY','RCSAA',$job.grid)

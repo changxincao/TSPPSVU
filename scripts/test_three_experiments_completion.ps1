@@ -19,6 +19,12 @@ try{
         if('--check-complete'-notin$argsList-or'--worker'-in$argsList){throw "Incorrect audit arguments: $kind"}
         if($kind-eq'rcsaa-staged'-and($argsList[-1]-ne$job.grid-or'Test.analysis.synthetic.TRBSVUExperiment2IdeMain'-notin$argsList)){throw 'Staged audit lost method grid'}
         if(('"'+$job.output+'"')-notin$argsList){throw 'Quoted output path lost'}
+        $cpIndex=[Array]::IndexOf($argsList,'-cp')
+        if($cpIndex-lt0-or$argsList[$cpIndex+1]-ne('"'+$classpath+'"')){throw "Audit must use deployment classpath: $kind"}
+        if($kind-eq'rcsaa-staged'){
+            $workerArgs=@(Arguments $job);$workerCp=[Array]::IndexOf($workerArgs,'-cp')
+            if($workerArgs[$workerCp+1]-ne('"'+$job.tools+'\bin;'+$classpath+'"')){throw 'Staged worker classpath changed'}
+        }
     }
     # Substitute a child shell that only returns an exit code; no Java/native solver.
     function AuditArguments($job){return @('-NoProfile','-Command',('"exit '+$script:auditExit+'"'))}

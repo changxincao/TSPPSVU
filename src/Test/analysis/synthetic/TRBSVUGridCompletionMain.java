@@ -66,6 +66,7 @@ public final class TRBSVUGridCompletionMain {
             String rfSource = (String) invoke("sourceFingerprint", Path.class, Path.of("src"));
             String rfEnvironment = (String) invoke("pythonEnvironment", Path.class,
                     Path.of(System.getProperty("trb.svu.python")));
+            var rf = new TRBSVUExperiment2IdeMain.RfFingerprint(script, rfEnvironment);
             String oldRfProtocol = expProtocol("RF-CSAA", pool, rfSource, script, rfEnvironment,
                     new double[]{.1, .25, .5, .8}, new double[]{1, 2, 5});
             if (!oldRfProtocol.equals(metadata(oldRfRoot.resolve("complete.txt")).get("protocol")))
@@ -77,11 +78,11 @@ public final class TRBSVUGridCompletionMain {
             boolean sameSource = Files.isRegularFile(baseline.resolve("complete.txt"))
                     && source.equals(metadata(baseline.resolve("complete.txt")).get("sourceSha256"));
             boolean checkOnly = "check-chi".equals(args[0]);
-            String oldProtocol = chiProtocol(pool, source, oldChoice.toString(), new double[]{.1, .25, .5, 1});
+            String oldProtocol = chiProtocol(pool, source, oldChoice.toString(), new double[]{.1, .25, .5, 1}, rf);
             if (sameWeights && sameSource) {
                 importValidation(baseline, output, input, "C-Chi2", pool, source,
                         oldProtocol,
-                        chiProtocol(pool, source, newChoice.toString(), LAMBDA),
+                        chiProtocol(pool, source, newChoice.toString(), LAMBDA, rf),
                         new double[]{.1, .25, .5, 1}, checkOnly);
                 if (!checkOnly) enableFinalReuse(input, baseline, output, oldProtocol);
             } else {
@@ -156,7 +157,8 @@ public final class TRBSVUGridCompletionMain {
                 .getBytes(StandardCharsets.UTF_8));
     }
 
-    private static String chiProtocol(String pool, String source, String selected, double[] lambda)
+    private static String chiProtocol(String pool, String source, String selected, double[] lambda,
+            TRBSVUExperiment2IdeMain.RfFingerprint rf)
             throws Exception {
         return hash((TRBSVUFormalProtocol.EXPERIMENT12_VERSION
                 + "|experiment=2|phase=primary|methods=[C-Chi2]|queryPool=" + pool
@@ -166,7 +168,8 @@ public final class TRBSVUGridCompletionMain {
                 + "|momentValidationLimit=" + TRBSVUExperiment2Runner.MOMENT_VALIDATION_LIMIT_SECONDS
                 + "|momentQueryLimit=" + TRBSVUExperiment2Runner.MOMENT_QUERY_LIMIT_SECONDS
                 + "|rcsaaCompactFormulation=SWITCHED_COMPACT|threads=4|limit=14400|source=" + source
-                + "|pcmScript=NOT_USED|mosekAdapter=NOT_USED|momentPythonEnvironment=NOT_USED")
+                + "|pcmScript=NOT_USED|mosekAdapter=NOT_USED|momentPythonEnvironment=NOT_USED"
+                + rf.protocolSuffix())
                 .getBytes(StandardCharsets.UTF_8));
     }
 

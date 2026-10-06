@@ -58,7 +58,8 @@ public final class TRBSVUCompletionAuditSelfCheck {
                     + "|momentValidationLimit=" + TRBSVUExperiment2Runner.MOMENT_VALIDATION_LIMIT_SECONDS
                     + "|momentQueryLimit=" + TRBSVUExperiment2Runner.MOMENT_QUERY_LIMIT_SECONDS
                     + "|rcsaaCompactFormulation=SWITCHED_COMPACT|threads=4|limit=0|source=" + robustSource
-                    + "|pcmScript=NOT_USED|mosekAdapter=NOT_USED|momentPythonEnvironment=NOT_USED");
+                    + "|pcmScript=NOT_USED|mosekAdapter=NOT_USED|momentPythonEnvironment=NOT_USED"
+                    + "|rfScript=NOT_USED|rfPythonEnvironment=NOT_USED");
             for (boolean robust : List.of(false, true)) {
                 Path output = temp.resolve(robust ? "robust" : "base");
                 String[] workerArgs = robust ? new String[]{input.toString(), choice.toString(), output.toString(), "0", "4", "0", "PRIMARY", "C-Chi2"}
@@ -82,6 +83,7 @@ public final class TRBSVUCompletionAuditSelfCheck {
                 rejects(() -> auditWorker(entry, workerArgs));
                 check(before.equals(snapshot(output)), "Protocol rejection changed saved output");
             }
+            if (Arrays.asList(args).contains("--rf")) checkRfAudit(temp, input, pool, robustSource);
             checkComparison(temp.resolve("comparison"));
             System.out.println("TRBSVUCompletionAuditSelfCheck PASS: base/robust/comparison, read-only, missing artifacts, protocol and cache integrity");
         } finally {
@@ -89,6 +91,56 @@ public final class TRBSVUCompletionAuditSelfCheck {
                 for (Path p : paths.sorted(Comparator.reverseOrder()).toList()) Files.delete(p);
             }
         }
+    }
+
+    /** Optional real Python dependency probe; no forest training or optimization. */
+    private static void checkRfAudit(Path temp, Path input, String pool, String source) throws Exception {
+        Path choiceFile = temp.resolve("rf-choice.csv");
+        Files.writeString(choiceFile, "family,validation_selected_B,validation_cost,validation_sd,bandwidth_order,validation_selected_min_leaf,min_leaf_order\n"
+                + "RF,NaN,10,1,,2,2;1;5\n");
+        var choice = TRBSVUExperiment4Main.loadChoice(choiceFile);
+        Path python = Path.of(System.getProperty("trb.svu.python",
+                Path.of(".venv-rsome", "Scripts", "python.exe").toString())).toAbsolutePath();
+        var rf = TRBSVUExperiment2IdeMain.rfFingerprint(choice, python);
+        check(rf.scriptSha256().equals(TRBSVUScaleExperiment.sha256(
+                Path.of("analysis/trb_svu/rf_leaf_weights.py"))), "Incorrect RF script fingerprint");
+        check(rf.pythonEnvironment().contains("python=") && rf.pythonEnvironment().contains("numpy=")
+                && rf.pythonEnvironment().contains("scikit-learn="), "Missing RF dependency versions");
+        var kernel = TRBSVUExperiment2IdeMain.rfFingerprint(
+                new TRBSVUExperiment1Runner.ContextualChoice("TRIANGULAR", 1, 10),
+                temp.resolve("missing-python.exe"));
+        check(kernel.equals(new TRBSVUExperiment2IdeMain.RfFingerprint("NOT_USED", "NOT_USED")),
+                "Kernel center must not probe Python");
+        rejects(() -> TRBSVUExperiment2IdeMain.rfFingerprint(choice, temp.resolve("missing-python.exe")));
+        double[] lambda = {.1, .25, .5, 1};
+        for (String method : List.of("C-Chi2", "RCSAA")) {
+            boolean staged = "RCSAA".equals(method);
+            var producer = (staged ? TRBSVURcsaaStagedGridMain.class : TRBSVUGridCompletionMain.class)
+                    .getDeclaredMethod(staged ? "protocol" : "chiProtocol", String.class, String.class,
+                            String.class, double[].class, TRBSVUExperiment2IdeMain.RfFingerprint.class);
+            producer.setAccessible(true);
+            Path output = temp.resolve("rf-" + method);
+            createQueries(output, true, method);
+            String[] workerArgs = {input.toString(), choiceFile.toString(), output.toString(), "0", "4",
+                    staged ? "0" : "14400", "PRIMARY", method, "0.1,0.25,0.5,1"};
+            String protocol = (String) producer.invoke(null, pool, source, choice.toString(), lambda, rf);
+            TRBSVUCompletionMarker.writeAtomically(output.resolve("complete.txt"),
+                    "protocol=" + protocol + "\nallRequestedMethodsCompleted=true\n");
+            var before = snapshot(output);
+            auditWorker(TRBSVUExperiment2IdeMain.class, workerArgs);
+            check(before.equals(snapshot(output)), "RF audit changed output");
+            for (var changed : List.of(
+                    new TRBSVUExperiment2IdeMain.RfFingerprint("changed-script", rf.pythonEnvironment()),
+                    new TRBSVUExperiment2IdeMain.RfFingerprint(rf.scriptSha256(), "changed-environment"))) {
+                String mismatch = (String) producer.invoke(null, pool, source, choice.toString(), lambda, changed);
+                check(!protocol.equals(mismatch), "RF recipe change did not invalidate protocol");
+                Files.writeString(output.resolve("complete.txt"), "protocol=" + mismatch + "\n");
+                before = snapshot(output);
+                rejects(() -> auditWorker(TRBSVUExperiment2IdeMain.class, workerArgs));
+                check(before.equals(snapshot(output)), "RF protocol mismatch changed output");
+            }
+        }
+        System.out.println("RF_PROTOCOL_SELF_CHECK_PASS script/environment invalidation, kernel isolation, worker/staged/grid agreement");
     }
 
     private static void checkComparison(Path output) throws Exception {
@@ -127,7 +179,11 @@ public final class TRBSVUCompletionAuditSelfCheck {
     }
 
     private static void createQueries(Path output, boolean robust) throws Exception {
-        String method = robust ? "C-Chi2" : "D", prefix = robust ? "experiment2_" : "";
+        createQueries(output, robust, robust ? "C-Chi2" : "D");
+    }
+
+    private static void createQueries(Path output, boolean robust, String method) throws Exception {
+        String prefix = robust ? "experiment2_" : "";
         for (int q = 0; q < 40; q++) {
             Path dir = output.resolve(String.format("queries/query_%03d", q));
             for (String sub : List.of("validation", "solve", "oos")) Files.createDirectories(dir.resolve(sub));
