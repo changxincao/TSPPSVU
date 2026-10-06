@@ -7,6 +7,9 @@ param([Parameter(Mandatory=$true)][string]$LocalRoot,
       [Parameter(Mandatory=$true)][string]$Key,
       [switch]$CheckOnly)
 $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
+$ioScript=Join-Path $PSScriptRoot 'experiment_file_io.ps1'
+. $ioScript
+$ioSource='function Get-ExperimentSha256 {'+(Get-Item Function:\Get-ExperimentSha256).Definition+'}'
 $LocalRoot=[IO.Path]::GetFullPath($LocalRoot)
 $control=Join-Path $LocalRoot 'control\split_publisher'
 [void][IO.Directory]::CreateDirectory($control)
@@ -18,7 +21,7 @@ $connection=@('-6','-o','HostKeyAlias=100.71.236.93','-o','BatchMode=yes','-o','
 $address='codex-runner@fd7a:115c:a1e0::d2b:ec5e'
 $scpAddress='codex-runner@[fd7a:115c:a1e0::d2b:ec5e]'
 function Remote([string]$Code){
-    $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes("`$ErrorActionPreference='Stop';`$ProgressPreference='SilentlyContinue';"+$Code))
+    $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes("`$ErrorActionPreference='Stop';`$ProgressPreference='SilentlyContinue';"+$ioSource+"`n"+$Code))
     $output=& $ssh @connection $address powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded 2>&1
     if($LASTEXITCODE){throw "Remote publish failed: $output"}
     return ($output|Out-String)
@@ -40,8 +43,8 @@ function Publish([int]$Rep){
     $archive=Join-Path $control "$name.tgz"
     & tar.exe -czf $archive -C "$LocalRoot\results\primary\C-W1" $name
     if($LASTEXITCODE){throw 'Archive failed'}
-    $sha=(Get-FileHash -LiteralPath $archive).Hash
-    $markerSha=(Get-FileHash -LiteralPath "$LocalRoot\results\primary\C-W1\$name\complete.txt").Hash
+    $sha=Get-ExperimentSha256 $archive
+    $markerSha=Get-ExperimentSha256 "$LocalRoot\results\primary\C-W1\$name\complete.txt"
     $destination="$RemoteRoot\control\small_${name}_${sha}.tgz"
     $unixPath=$destination.Replace('\','/')
     $upload=& $scp @connection $archive "${scpAddress}:$unixPath" 2>&1
@@ -50,14 +53,14 @@ function Publish([int]$Rep){
     # therefore never arrives before the remaining source files.
     $code=@"
 `$archive='$destination';`$base='$RemoteRoot\w1_split';`$target=Join-Path `$base 'local_small\$name';
-if((Get-FileHash -LiteralPath `$archive).Hash-ne'$sha'){throw 'Transferred archive hash mismatch'};
+if((Get-ExperimentSha256 `$archive)-ne'$sha'){throw 'Transferred archive hash mismatch'};
 if(Test-Path -LiteralPath `$target){
-    if(-not(Test-Path -LiteralPath "`$target\complete.txt")-or(Get-FileHash -LiteralPath "`$target\complete.txt").Hash-ne'$markerSha'){throw 'Conflicting published source; preserve and inspect'};
+    if(-not(Test-Path -LiteralPath "`$target\complete.txt")-or(Get-ExperimentSha256 "`$target\complete.txt")-ne'$markerSha'){throw 'Conflicting published source; preserve and inspect'};
 }else{
     `$incoming=Join-Path `$base 'incoming\${name}_$sha';[void][IO.Directory]::CreateDirectory(`$incoming);
     & tar.exe -xzf `$archive -C `$incoming;if(`$LASTEXITCODE){throw 'Extraction failed'};
     `$source=Join-Path `$incoming '$name';
-    if((Get-FileHash -LiteralPath "`$source\complete.txt").Hash-ne'$markerSha'){throw 'Extracted completion marker mismatch'};
+    if((Get-ExperimentSha256 "`$source\complete.txt")-ne'$markerSha'){throw 'Extracted completion marker mismatch'};
     [void][IO.Directory]::CreateDirectory((Split-Path `$target -Parent));
     Move-Item -LiteralPath `$source -Destination `$target;
 };
@@ -87,8 +90,7 @@ try{
             catch{$job.lastError=$_.Exception.Message;Write-Output "PUBLISH_RETRY rep=$($job.rep) $($job.lastError)"}
         }
         $state=[pscustomobject]@{updated=(Get-Date -Format o);jobs=$jobs;policy='Local completion audit then publish; remote merge re-audits and reuses only identical parameter/weights'}
-        $state|ConvertTo-Json -Depth 5|Set-Content "$control\status.json.tmp" -Encoding UTF8
-        Move-Item -LiteralPath "$control\status.json.tmp" -Destination "$control\status.json" -Force
+        [void](Write-ExperimentJson $state "$control\status.json")
         if(@($jobs|Where-Object state -ne PUBLISHED).Count){Start-Sleep -Seconds 30}
     }
 }finally{$lock.Dispose()}
