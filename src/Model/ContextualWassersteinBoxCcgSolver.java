@@ -36,6 +36,7 @@ public final class ContextualWassersteinBoxCcgSolver {
         int iterations = 0;
         boolean converged = false;
         boolean timedOut = false;
+        boolean stalled = false;
         double tolerance = Math.max(1e-7, config.tol);
 
         while (iterations < Math.max(1, config.maxBendersIter)) {
@@ -165,6 +166,15 @@ public final class ContextualWassersteinBoxCcgSolver {
                 break;
             }
             if (!master.optimal) { timedOut = true; break; }
+            if (stalledWithoutCuts(added, currentGap, tolerance)) {
+                // No model change or tighter inner solve follows: repeating this
+                // master/oracle pass cannot be relied on to improve the certificate.
+                stalled = true;
+                System.err.printf(java.util.Locale.ROOT,
+                        "W1-CCG stalled without new cuts: LB=%.17g UB=%.17g gap=%.17g; preserving incumbent%n",
+                        bestLower, bestUpper, currentGap);
+                break;
+            }
         }
 
         if (master == null || bestY == null) {
@@ -202,7 +212,7 @@ public final class ContextualWassersteinBoxCcgSolver {
         }
         solution.certifiedOptimal = converged && relativeGap <= config.tol;
         solution.solverStatus = solution.certifiedOptimal ? "OPTIMAL_W1_CCG"
-                : timedOut ? "TIME_LIMIT_W1_CCG" : "ITERATION_LIMIT_W1_CCG";
+                : timedOut ? "TIME_LIMIT_W1_CCG" : stalled ? "STALLED_W1_CCG" : "ITERATION_LIMIT_W1_CCG";
         if (!Double.isFinite(relativeGap)) solution.solverStatus += "_BOUND_UNAVAILABLE_OR_INCONSISTENT";
         if (bestWorstDemand == null) solution.solverStatus += "_ANALYTIC_UPPER_BOUND";
         System.out.printf(java.util.Locale.ROOT,
@@ -232,6 +242,10 @@ public final class ContextualWassersteinBoxCcgSolver {
         if (!Double.isFinite(upper) || !Double.isFinite(lower)
                 || lower > upper + 1e-8 * Math.max(1.0, Math.abs(upper))) return Double.NaN;
         return Math.max(0.0, upper - lower) / Math.max(1.0, Math.abs(upper));
+    }
+
+    static boolean stalledWithoutCuts(boolean added, double gap, double tolerance) {
+        return !added && !(Double.isFinite(gap) && gap <= tolerance);
     }
 
     static double allSpotUpperBound(WassersteinBoxInput input, double[] y) {

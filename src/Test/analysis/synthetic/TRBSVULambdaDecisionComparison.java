@@ -26,6 +26,8 @@ public final class TRBSVULambdaDecisionComparison {
     private TRBSVULambdaDecisionComparison() { }
 
     public static void main(String[] args) throws Exception {
+        boolean checkOnly = args.length > 0 && "--check-complete".equals(args[0]);
+        if (checkOnly) args = Arrays.copyOfRange(args, 1, args.length);
         if (args.length != 4) throw new IllegalArgumentException(
                 "Usage: <config.properties> <instance.tsv> <context_weights.tsv> <case-query-output-dir>");
         Path configFile = Path.of(args[0]).toAbsolutePath();
@@ -40,6 +42,15 @@ public final class TRBSVULambdaDecisionComparison {
                 + TRBSVUScaleExperiment.sha256(instanceFile) + ":" + TRBSVUScaleExperiment.sha256(weightFile)
                 + ":" + required(p, "runtimeFingerprint");
         Path receipt = output.resolve("input_fingerprint.txt");
+        if (checkOnly) {
+            if (Files.isRegularFile(receipt) && !Files.readString(receipt).trim().equals(fingerprint)) {
+                System.err.println("Comparison input/configuration fingerprint differs; preserve existing output");
+                System.exit(20);
+            }
+            auditComplete(output, fingerprint, lambdas, instance.oos.size());
+            System.out.println("COMPARISON_COMPLETE_AUDIT_PASS " + output);
+            return;
+        }
         if (Files.exists(output)) {
             if (!Files.isRegularFile(receipt) || !Files.readString(receipt).trim().equals(fingerprint))
                 throw new IllegalStateException("Output input/configuration/runtime mismatch; use a new directory");
@@ -123,6 +134,73 @@ public final class TRBSVULambdaDecisionComparison {
         if (allRecorded) TRBSVUScaleExperiment.atomicText(output.resolve("complete.txt"),
                 "fingerprint=" + fingerprint + "\nlambdaCount=" + lambdas.length + "\n");
         if (failures > 0) throw new IllegalStateException("Saved partial sweep; failed model/lambda tasks=" + failures);
+    }
+
+    /** Read-only audit of saved solves and the hash-sealed fixed-decision OOS cache. */
+    static void auditComplete(Path output, String fingerprint, double[] lambdas, int oosCount) throws Exception {
+        if (!Files.readString(output.resolve("input_fingerprint.txt")).trim().equals(fingerprint))
+            throw new IllegalStateException("Comparison input fingerprint mismatch");
+        String complete = Files.readString(output.resolve("complete.txt"));
+        if (!complete.lines().anyMatch(line -> line.equals("fingerprint=" + fingerprint))
+                || !complete.lines().anyMatch(line -> line.equals("lambdaCount=" + lambdas.length)))
+            throw new IllegalStateException("Comparison completion receipt mismatch");
+        List<String> rows = Files.readAllLines(output.resolve("comparison.csv"));
+        if (rows.size() != lambdas.length + 1 || !rows.get(0).equals(header().trim()))
+            throw new IllegalStateException("Incomplete comparison table");
+        for (int index = 0; index < lambdas.length; index++) {
+            double lambda = lambdas[index];
+            String[] resultRow = csvFields(rows.get(index + 1));
+            if (resultRow.length != csvFields(rows.get(0)).length || resultRow[3].equals("MODEL_FAILURE"))
+                throw new IllegalStateException("Malformed/failed comparison result");
+            if (Double.parseDouble(resultRow[2]) != lambda)
+                throw new IllegalStateException("Comparison lambda/order mismatch");
+            Path dir = output.resolve("lambda_" + Double.toString(lambda));
+            for (String name : METHODS) {
+                if (Files.exists(dir.resolve(name + "_failure.txt")))
+                    throw new IllegalStateException("Saved comparison failure: " + dir);
+                Map<String, String> solve = csvRecord(dir.resolve(name + "_solve.csv"));
+                if (!name.equals(solve.get("method")) || Double.parseDouble(solve.get("selected_parameter")) != lambda)
+                    throw new IllegalStateException("Comparison solve method/parameter mismatch");
+                String decision = solve.get("decision_vector");
+                if (decision == null) throw new IllegalStateException("Missing decision column");
+                if (decision.equals("NA")) continue; // Writer's explicit no-incumbent outcome has no OOS.
+                Map<String, String> summary = csvRecord(dir.resolve(name + "_oos_summary.csv"));
+                if (!name.equals(summary.get("method")) || !Double.isFinite(Double.parseDouble(summary.get("mean"))))
+                    throw new IllegalStateException("Invalid comparison OOS summary");
+                Properties pointer = TRBSVUScaleExperiment.readProperties(dir.resolve(name + "_oos_details.txt"));
+                Path cache = dir.resolve(required(pointer, "relativeDirectory")).toAbsolutePath().normalize();
+                if (!cache.startsWith(output.toAbsolutePath().normalize())
+                        || !"decision_draws.csv".equals(required(pointer, "draws")))
+                    throw new IllegalStateException("Invalid OOS cache pointer");
+                String key = String.join("", decision.split(";", -1));
+                if (!cache.getFileName().toString().equals(key) || !key.matches("[01]+"))
+                    throw new IllegalStateException("OOS cache decision mismatch");
+                Properties sealed = TRBSVUScaleExperiment.readProperties(cache.resolve("oos_complete.properties"));
+                if (!fingerprint.equals(required(sealed, "fingerprint"))
+                        || !TRBSVUScaleExperiment.sha256(cache.resolve("decision_summary.csv")).equals(required(sealed, "summarySha"))
+                        || !TRBSVUScaleExperiment.sha256(cache.resolve("decision_draws.csv")).equals(required(sealed, "drawsSha"))
+                        || !TRBSVUCompletionMarker.oosDrawsComplete(cache.resolve("decision_draws.csv"), oosCount))
+                    throw new IllegalStateException("Incomplete/corrupt comparison OOS cache");
+            }
+        }
+    }
+
+    private static Map<String, String> csvRecord(Path file) throws Exception {
+        List<String> lines = Files.readAllLines(file);
+        if (lines.size() != 2) throw new IllegalStateException("Expected one result record: " + file);
+        String[] keys = csvFields(lines.get(0)), values = csvFields(lines.get(1));
+        if (keys.length != values.length) throw new IllegalStateException("Malformed result CSV: " + file);
+        Map<String, String> record = new LinkedHashMap<>();
+        for (int i = 0; i < keys.length; i++) record.put(keys[i], values[i]);
+        return record;
+    }
+
+    private static String[] csvFields(String row) {
+        String[] fields = row.split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", -1);
+        for (int i = 0; i < fields.length; i++)
+            if (fields[i].startsWith("\"") && fields[i].endsWith("\""))
+                fields[i] = fields[i].substring(1, fields[i].length() - 1).replace("\"\"", "\"");
+        return fields;
     }
 
     static double[] validateConfiguration(Properties p) {

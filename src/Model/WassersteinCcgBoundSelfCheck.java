@@ -8,6 +8,15 @@ public final class WassersteinCcgBoundSelfCheck {
         require(Double.isNaN(ContextualWassersteinBoxCcgSolver.certifiedGap(Double.POSITIVE_INFINITY, 10)), "Infinite UB certified");
         require(Math.abs(ContextualWassersteinBoxCcgSolver.certifiedGap(100, 90) - .1) < 1e-12, "Wrong gap");
         require(ContextualWassersteinBoxCcgSolver.certifiedGap(100, 100) == 0, "Exact bounds rejected");
+        double stalledGap = ContextualWassersteinBoxCcgSolver.certifiedGap(100.009, 99.991);
+        require(ContextualWassersteinBoxCcgSolver.stalledWithoutCuts(false, stalledGap, 1e-4),
+                "Unchanged model with unresolved gap would repeat");
+        require(!ContextualWassersteinBoxCcgSolver.stalledWithoutCuts(true, stalledGap, 1e-4),
+                "New support points must permit another iteration");
+        require(!ContextualWassersteinBoxCcgSolver.stalledWithoutCuts(false, 5e-5, 1e-4),
+                "Converged pass classified as stalled");
+        require(ContextualWassersteinBoxCcgSolver.stalledWithoutCuts(false, Double.NaN, 1e-4),
+                "Unchanged model with unavailable bound would repeat");
         if (args.length > 0 && args[0].equals("--native")) {
             var params = new Basic.ProcurementParams(java.util.List.of("carrier"), 1,
                     new double[]{3}, new double[]{2}, new double[]{1},

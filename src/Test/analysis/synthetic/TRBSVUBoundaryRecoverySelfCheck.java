@@ -49,6 +49,15 @@ public final class TRBSVUBoundaryRecoverySelfCheck {
             Path marker = output.resolve("complete.txt");
             TRBSVUCompletionMarker.writeAtomically(marker, "protocol=gate\n");
             require(TRBSVUCompletionMarker.matches(marker, "protocol=gate"), "Valid integrity seal rejected");
+            var markerTime = Files.getLastModifiedTime(marker);
+            TRBSVUCompletionMarker.requireMatchingProtocol(marker, "gate");
+            boolean mismatchRejected = false;
+            try { TRBSVUCompletionMarker.requireMatchingProtocol(marker, "changed"); }
+            catch (TRBSVUCompletionMarker.ProtocolMismatchException expected) { mismatchRejected = true; }
+            require(mismatchRejected && Files.getLastModifiedTime(marker).equals(markerTime),
+                    "Protocol mismatch must reject without changing saved output");
+            require(!TRBSVUCompletionMarker.queryArtifactsComplete(output, List.of(0),
+                    "oos/draws.csv", "solve/final_weights.csv"), "Missing weights treated as complete");
             Files.writeString(draws, rows.toString().replace(",10,20", ",10,21"));
             require(!TRBSVUCompletionMarker.matches(marker, "protocol=gate"), "Same-length corruption reused");
             Files.writeString(draws, rows.append("C-MM,Feasible,999,10,20\n"));

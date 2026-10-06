@@ -16,20 +16,23 @@ function Event($job,$state,$detail){[pscustomobject]@{time=(Get-Date -Format o);
 function HasFile($path){return [IO.File]::Exists($path)-and([IO.FileInfo]$path).Length-gt0}
 function Complete($job){
     if(-not(HasFile "$($job.output)\complete.txt")){return $false}
-    if($job.kind-eq'comparison'){
-        if(-not(HasFile "$($job.output)\comparison.csv")-or-not(HasFile $job.config)){return $false}
-        $grid=@(Get-Content -LiteralPath $job.config|Where-Object{$_-match'^lambdaGrid='})
-        if($grid.Count-ne1){return $false}
-        $expected=@($grid[0].Substring('lambdaGrid='.Length).Split(',')|ForEach-Object{[double]::Parse($_,[Globalization.CultureInfo]::InvariantCulture)})
-        $rows=@(Import-Csv -LiteralPath "$($job.output)\comparison.csv")
-        $actual=@($rows|ForEach-Object{[double]::Parse($_.lambda,[Globalization.CultureInfo]::InvariantCulture)})
-        return $rows.Count-eq$expected.Count-and@($actual|Select-Object -Unique).Count-eq$expected.Count-and@($expected|Where-Object{$_-notin$actual}).Count-eq0
+    $auditDir=Join-Path $control 'completion_audit'
+    [void][IO.Directory]::CreateDirectory($auditDir)
+    try{
+        $p=Start-Process -FilePath $plan.java -ArgumentList ((AuditArguments $job)-join' ') -WorkingDirectory $plan.deployment -WindowStyle Hidden -PassThru `
+            -RedirectStandardOutput "$auditDir\$($job.id).stdout.log" -RedirectStandardError "$auditDir\$($job.id).stderr.log"
+        $handle=$p.Handle;$p.WaitForExit();$code=$p.ExitCode;$p.Dispose()
+        if($code-eq20){
+            $job.state='BLOCKED';Event $job 'PROTOCOL_MISMATCH' 'Preserved existing results; no automatic recomputation'
+            return $false
+        }
+        if($null-eq$code){throw 'Completion audit exit code unavailable'}
+        if($code-ne0){Event $job 'INCOMPLETE_ARTIFACTS' "auditExit=$code"}
+        return $code-eq0
+    }catch{
+        $job.state='BLOCKED';Event $job 'AUDIT_ERROR' $_.Exception.Message
+        return $false
     }
-    foreach($q in 0..39){
-        $dir=Join-Path $job.output ('queries\query_{0:D3}'-f$q)
-        $files=if($job.kind-eq'base'){@('query_metadata.txt','solve\final_solve.csv','oos\summary.csv','oos\draws.csv')}else{@('query_metadata.txt','solve\experiment2_final_solves.csv','oos\experiment2_summary.csv','oos\experiment2_draws.csv')}
-        foreach($f in $files){if(-not(HasFile (Join-Path $dir $f))){return $false}}
-    };return $true
 }
 function Stopped($job){return $job.method-in@('C-MM','C-PCM')-and(HasFile "$control\moment_stop\$($job.method).stop.txt")}
 function MainStageBlocked($job,$queue){
@@ -58,7 +61,25 @@ function Arguments($job){
     $phase=if($job.method-in@('C-MM','C-PCM')){'MOMENT'}else{'PRIMARY'}
     return $workerArguments+@('Test.analysis.synthetic.TRBSVUExperiment2IdeMain','--worker',('"'+$job.input+'"'),('"'+$job.choice+'"'),('"'+$job.output+'"'),$job.rep,'4','0',$phase,$job.method)
 }
+function AuditArguments($job){
+    $argsList=@(Arguments $job)
+    if($job.kind-in@('base','robust')){
+        $index=[Array]::IndexOf($argsList,'--worker');$argsList[$index]='--check-complete'
+        return $argsList
+    }
+    if($job.kind-eq'comparison'){
+        $index=[Array]::IndexOf($argsList,'Test.analysis.synthetic.TRBSVULambdaDecisionComparison')
+        return @($argsList[0..$index])+@('--check-complete')+@($argsList[($index+1)..($argsList.Length-1)])
+    }
+    $index=[Array]::IndexOf($argsList,'Test.analysis.synthetic.TRBSVURcsaaStagedGridMain')
+    return @($argsList[0..($index-1)])+@('Test.analysis.synthetic.TRBSVUExperiment2IdeMain','--check-complete',
+        ('"'+$job.input+'"'),('"'+$job.choice+'"'),('"'+$job.output+'"'),$job.rep,'4','0','PRIMARY','RCSAA',$job.grid)
+}
 try{
+    # Refuse a script-only upgrade against workers lacking the read-only audit entry points.
+    if(-not(HasFile "$($plan.deployment)\bin\Test\analysis\synthetic\TRBSVUCompletionMarker`$ProtocolMismatchException.class")){
+        throw 'Completion audit classes must be compiled/deployed with this scheduler; no workers started'
+    }
     if(@($jobs.id|Select-Object -Unique).Count-ne$jobs.Count){throw 'Duplicate task ids'}
     foreach($job in $jobs){
         foreach($id in @($job.depends)){
@@ -79,6 +100,7 @@ try{
         $job|Add-Member state 'QUEUED';$job|Add-Member attempt 0;$job|Add-Member pid 0
         if(Stopped $job){$job.state='STOPPED';continue}
         if(Complete $job){$job.state='COMPLETE';continue}
+        if($job.state-eq'BLOCKED'){continue}
         $expectedArguments=Arguments $job
         $live=@(Get-Process java -ErrorAction SilentlyContinue|Where-Object{
             try{WorkerCommandMatches ([OlistWindowsProcess]::CommandLine($_.Id)) $expectedArguments}catch{$false}
@@ -130,6 +152,7 @@ try{
             if(-not$item.process.HasExited){continue}
             $item.process.WaitForExit();$job=$item.job;$code=$item.process.ExitCode
             if(Complete $job){$job.state='COMPLETE';Event $job 'COMPLETE' $code}
+            elseif($job.state-eq'BLOCKED'){Event $job 'BLOCKED' 'Completion audit requires review; preserved outputs'}
             elseif(Stopped $job){$job.state='STOPPED';Event $job 'STOPPED' "exit=$code; preserved partial outputs"}
             elseif($job.attempt-lt2){$job.state='QUEUED';Event $job 'RETRY' $code}
             else{$job.state='FAILED';Event $job 'FAILED' $code}

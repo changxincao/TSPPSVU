@@ -18,6 +18,17 @@ import java.security.MessageDigest;
 final class TRBSVUCompletionMarker {
     private TRBSVUCompletionMarker() { }
 
+    static final class ProtocolMismatchException extends IllegalStateException {
+        ProtocolMismatchException(Path marker) {
+            super("Completion protocol differs; preserve saved results and review before resuming: " + marker);
+        }
+    }
+
+    static void requireMatchingProtocol(Path marker, String expected) throws Exception {
+        if (nonempty(marker) && !expected.equals(value(Files.readAllLines(marker), "protocol")))
+            throw new ProtocolMismatchException(marker);
+    }
+
     static void invalidate(Path marker) throws Exception {
         Files.deleteIfExists(marker);
     }
@@ -151,10 +162,19 @@ final class TRBSVUCompletionMarker {
 
     // The formal protocol fixes 1000 independent OOS draws per method/query.
     static boolean oosDrawsComplete(Path path) throws Exception {
-        return oosDrawsComplete(path, null);
+        return oosDrawsComplete(path, null, TRBSVUFormalProtocol.OOS_DRAWS);
+    }
+
+    static boolean oosDrawsComplete(Path path, int expectedCount) throws Exception {
+        return oosDrawsComplete(path, null, expectedCount);
     }
 
     private static boolean oosDrawsComplete(Path path, Set<String> expectedMethods) throws Exception {
+        return oosDrawsComplete(path, expectedMethods, TRBSVUFormalProtocol.OOS_DRAWS);
+    }
+
+    private static boolean oosDrawsComplete(Path path, Set<String> expectedMethods, int expectedCount) throws Exception {
+        if (expectedCount <= 0) return false;
         try (var reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
             String header = reader.readLine();
             if (header == null) return false;
@@ -167,14 +187,14 @@ final class TRBSVUCompletionMarker {
                 String[] fields = row.split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", -1);
                 if (fields.length != columns.size()) return false;
                 int index = Integer.parseInt(fields[draw]);
-                if (index < 0 || index >= TRBSVUFormalProtocol.OOS_DRAWS
+                if (index < 0 || index >= expectedCount
                         || fields[method].isBlank() || !Double.isFinite(Double.parseDouble(fields[cost]))
                         || !Double.isFinite(Double.parseDouble(fields[demand]))
                         || !indices.computeIfAbsent(fields[method], key -> new HashSet<>()).add(index)) return false;
             }
             return !indices.isEmpty() && (expectedMethods == null || expectedMethods.equals(indices.keySet()))
                     && indices.values().stream()
-                    .allMatch(set -> set.size() == TRBSVUFormalProtocol.OOS_DRAWS);
+                    .allMatch(set -> set.size() == expectedCount);
         } catch (IllegalArgumentException ex) {
             return false;
         }

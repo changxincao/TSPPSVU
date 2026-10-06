@@ -60,6 +60,13 @@ public final class TRBSVUExperiment2IdeMain {
     private TRBSVUExperiment2IdeMain() { }
 
     public static void main(String[] args) throws Exception {
+        if (args.length > 0 && "--check-complete".equals(args[0])) {
+            try { runWorker(Arrays.copyOfRange(args, 1, args.length), true); }
+            catch (TRBSVUCompletionMarker.ProtocolMismatchException ex) {
+                System.err.println(ex.getMessage()); System.exit(20);
+            }
+            return;
+        }
         if (args.length > 0 && "--worker".equals(args[0])) {
             if (args.length < 4) throw new IllegalArgumentException("Missing worker input/selection/output");
             try (var workerLock = TRBSVUWorkerLock.acquire(Path.of(args[3]))) {
@@ -143,6 +150,10 @@ public final class TRBSVUExperiment2IdeMain {
     }
 
     private static void runWorker(String[] args) throws Exception {
+        runWorker(args, false);
+    }
+
+    private static void runWorker(String[] args, boolean checkOnly) throws Exception {
         if (args.length != 8 && args.length != 9)
             throw new IllegalArgumentException("Worker usage: <replicationInput> <selectedContext.csv> "
                     + "<output> <replication> <solverThreads> <limitSeconds> <phase> <method> "
@@ -167,7 +178,7 @@ public final class TRBSVUExperiment2IdeMain {
         double[] w1Grid = args.length == 9 && "C-W1".equals(requestedMethod)
                 ? parsePositiveGrid(args[8]) : TRBSVUExperiment2Runner.W1_RADIUS;
         Set<String> requestedMethods = Set.of(requestedMethod);
-        Files.createDirectories(output);
+        if (!checkOnly) Files.createDirectories(output);
         List<TRBSVUExperiment1IdeMain.QueryInput> queries =
                 TRBSVUExperiment1IdeMain.loadQueries(replicationInput);
         TRBSVUSyntheticCase reference = TRBSVUSyntheticCaseIO.loadText(queries.get(0).file());
@@ -201,6 +212,7 @@ public final class TRBSVUExperiment2IdeMain {
                 + "|momentPythonEnvironment=" + momentPythonEnvironment)
                 .getBytes(StandardCharsets.UTF_8));
         Path complete = output.resolve("complete.txt");
+        if (checkOnly) TRBSVUCompletionMarker.requireMatchingProtocol(complete, protocol);
         Path incomplete = output.resolve("incomplete.txt");
         List<Integer> queryIndices = queries.stream().map(
                 TRBSVUExperiment1IdeMain.QueryInput::index).toList();
@@ -215,6 +227,7 @@ public final class TRBSVUExperiment2IdeMain {
             System.out.println("Already complete with matching protocol: " + output);
             return;
         }
+        if (checkOnly) throw new IllegalStateException("Incomplete Experiment 2 artifacts: " + output);
         TRBSVUCompletionMarker.invalidate(complete);
         TRBSVUCompletionMarker.invalidate(incomplete);
         Settings settings = new Settings(threads, limit, 1e-4,
