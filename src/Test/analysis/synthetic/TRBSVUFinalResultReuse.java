@@ -43,7 +43,8 @@ final class TRBSVUFinalResultReuse {
         var query = queries.get(contextKey(instance));
         if (query == null) throw new IllegalStateException("Reuse query is not in the frozen input pool");
         Path source = baseline.resolve(String.format(java.util.Locale.ROOT, "queries/query_%03d", query.index()));
-        String experiment = method.equals("C-Chi2") || method.equals("RCSAA") ? "2" : "1";
+        String experiment = method.equals("C-Chi2") || method.equals("RCSAA")
+                || method.equals("C-W1") ? "2" : "1";
         String safe = method.replaceAll("[^A-Za-z0-9_-]", "_");
         Path checkpoint = source.resolve("solve_checkpoints/" + safe + ".checkpoint");
         if (!Files.isRegularFile(checkpoint)) return null;

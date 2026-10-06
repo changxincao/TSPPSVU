@@ -14,12 +14,17 @@ $jobs=@($plan.jobs)
 function AtomicJson($value,$path){$value|ConvertTo-Json -Depth 10|Set-Content -LiteralPath "$path.tmp" -Encoding UTF8;Move-Item -LiteralPath "$path.tmp" -Destination $path -Force}
 function Event($job,$state,$detail){[pscustomobject]@{time=(Get-Date -Format o);id=$job.id;method=$job.method;state=$state;attempt=$job.attempt;detail=$detail}|Export-Csv -LiteralPath "$control\events.csv" -Append -NoTypeInformation -Encoding UTF8}
 function HasFile($path){return [IO.File]::Exists($path)-and([IO.FileInfo]$path).Length-gt0}
+function WorkingDirectory($job){
+    if($job.kind-in@('w1-validation','w1-merge')){return $job.deployment}
+    return $plan.deployment
+}
 function Complete($job){
-    if(-not(HasFile "$($job.output)\complete.txt")){return $false}
+    $marker=if($job.kind-eq'w1-validation'){'validation_only_complete.txt'}else{'complete.txt'}
+    if(-not(HasFile "$($job.output)\$marker")){return $false}
     $auditDir=Join-Path $control 'completion_audit'
     [void][IO.Directory]::CreateDirectory($auditDir)
     try{
-        $p=Start-Process -FilePath $plan.java -ArgumentList ((AuditArguments $job)-join' ') -WorkingDirectory $plan.deployment -WindowStyle Hidden -PassThru `
+        $p=Start-Process -FilePath $plan.java -ArgumentList ((AuditArguments $job)-join' ') -WorkingDirectory (WorkingDirectory $job) -WindowStyle Hidden -PassThru `
             -RedirectStandardOutput "$auditDir\$($job.id).stdout.log" -RedirectStandardError "$auditDir\$($job.id).stderr.log"
         $handle=$p.Handle;$p.WaitForExit();$code=$p.ExitCode;$p.Dispose()
         if($code-eq20){
@@ -48,9 +53,19 @@ function WorkerCommandMatches($command,$expectedArguments){
 }
 function Arguments($job){
     $jobClasspath=if($job.kind-eq'rcsaa-staged'){"$($job.tools)\bin;$classpath"}else{$classpath}
+    if($job.kind-in@('w1-validation','w1-merge')){
+        $jobClasspath="$($job.tools)\bin;$($job.deployment)\bin;$($plan.cplexJar);$($plan.deployment)\lib\mosek.jar"
+    }
     $workerArguments=@('-Xmx2g',('"-Djava.library.path='+$plan.native+'"'),('"-Dtrb.svu.python='+$plan.python+'"'),('"-Dtrb.svu.momentStopDirectory='+$control+'\moment_stop"'),'-cp',('"'+$jobClasspath+'"'))
     if($job.kind-eq'rcsaa-staged'){
         return $workerArguments+@('Test.analysis.synthetic.TRBSVURcsaaStagedGridMain','run',('"'+$job.input+'"'),('"'+$job.baseline+'"'),('"'+$job.output+'"'),$job.rep,('"'+$job.choice+'"'),$job.oldGrid,$job.grid)
+    }
+    if($job.kind-in@('w1-validation','w1-merge')){
+        $mode=if($job.kind-eq'w1-validation'){'validate'}else{'merge'}
+        $split=@('Test.analysis.synthetic.TRBSVUSplitW1Main',$mode,('"'+$job.input+'"'),
+            ('"'+$job.choice+'"'),('"'+$job.output+'"'),$job.rep)
+        if($job.kind-eq'w1-merge'){$split+=@(('"'+$job.small+'"'),('"'+$job.tail+'"'))}
+        return $workerArguments+$split
     }
     if($job.kind-eq'comparison'){
         return $workerArguments+@('Test.analysis.synthetic.TRBSVULambdaDecisionComparison',('"'+$job.config+'"'),('"'+$job.input+'"'),('"'+$job.weights+'"'),('"'+$job.output+'"'))
@@ -63,6 +78,11 @@ function Arguments($job){
 }
 function AuditArguments($job){
     $argsList=@(Arguments $job)
+    if($job.kind-in@('w1-validation','w1-merge')){
+        $index=[Array]::IndexOf($argsList,'Test.analysis.synthetic.TRBSVUSplitW1Main')
+        $argsList[$index+1]=if($job.kind-eq'w1-validation'){'check-validation'}else{'check-merge'}
+        return $argsList
+    }
     if($job.kind-in@('base','robust')){
         $index=[Array]::IndexOf($argsList,'--worker');$argsList[$index]='--check-complete'
         return $argsList
@@ -87,7 +107,10 @@ try{
         foreach($id in @($job.depends)){
             if($id-eq$job.id-or@($jobs|Where-Object{$_.id-eq$id}).Count-ne1){throw "Invalid dependency: $($job.id) -> $id"}
         }
-        if($job.kind-notin@('base','robust','comparison','rcsaa-staged')){throw "Unknown worker kind $($job.kind)"}
+        if($job.kind-notin@('base','robust','comparison','rcsaa-staged','w1-validation','w1-merge')){throw "Unknown worker kind $($job.kind)"}
+        if($job.kind-in@('w1-validation','w1-merge')){
+            if($job.method-ne'C-W1'-or-not(HasFile "$($job.tools)\bin\Test\analysis\synthetic\TRBSVUSplitW1Main.class")-or-not(HasFile $job.choice)-or-not(Test-Path -LiteralPath "$($job.deployment)\src")){throw "Invalid split W1 worker $($job.id)"}
+        }
         if($job.kind-eq'rcsaa-staged'-and($job.method-ne'RCSAA'-or-not(HasFile "$($job.tools)\bin\Test\analysis\synthetic\TRBSVURcsaaStagedGridMain.class")-or-not(HasFile $job.choice)-or-not$job.oldGrid-or-not$job.grid)){throw "Invalid staged RCSAA worker $($job.id)"}
         if(-not(HasFile $(if($job.kind-eq'comparison'){$job.input}else{"$($job.input)\queries\queries.tsv"}))){throw "Missing input $($job.id)"}
         if($job.kind-eq'comparison'-and(-not(HasFile $job.config)-or-not(HasFile $job.weights))){throw "Missing comparison configuration $($job.id)"}
@@ -133,6 +156,7 @@ try{
             $ready=@($jobs|Where-Object{
                 $j=$_
                 if($j.state-ne'QUEUED'){return $false}
+                if($j.kind-eq'w1-merge'-and-not(HasFile $j.readyFile)){return $false}
                 if(@($j.depends|Where-Object{ $id=$_;@($jobs|Where-Object{$_.id-eq$id})[0].state-ne'COMPLETE' }).Count){return $false}
                 if($plan.mode-eq'MAIN'-and(MainStageBlocked $j $jobs)){return $false}
                 return $true
@@ -144,7 +168,7 @@ try{
             $stderr="$control\logs\$($job.id)_$($job.attempt).stderr.log"
             try{
                 $workerArguments=Arguments $job
-                $p=Start-Process -FilePath $plan.java -ArgumentList ($workerArguments-join' ') -WorkingDirectory $plan.deployment -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+                $p=Start-Process -FilePath $plan.java -ArgumentList ($workerArguments-join' ') -WorkingDirectory (WorkingDirectory $job) -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
                 $handle=$p.Handle;$job.state='RUNNING';$job.pid=$p.Id
                 $running.Add([pscustomobject]@{job=$job;process=$p});Event $job 'STARTED' ($workerArguments-join' ')
             }catch{$job.state='FAILED';Event $job 'START_FAILED' $_.Exception.Message}
