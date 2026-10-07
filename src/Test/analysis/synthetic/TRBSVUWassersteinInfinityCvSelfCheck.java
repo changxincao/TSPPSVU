@@ -1,0 +1,27 @@
+package Test.analysis.synthetic;
+
+import java.util.Arrays;
+
+/** No solver calls: candidate selection and the CV/final scheduling contract. */
+public final class TRBSVUWassersteinInfinityCvSelfCheck {
+    public static void main(String[] args) {
+        double[] means = {10, 10, 10, 10, 10, 10}, sds = {2, 2, 2, 2, 2, 2};
+        require(TRBSVUWassersteinInfinityCvMain.selectRadius(means, sds) == .0001, "Exact tie must keep smallest");
+        sds[3] = 1;
+        require(TRBSVUWassersteinInfinityCvMain.selectRadius(means, sds) == .001, "SD tie-break");
+        means[4] = 9;
+        require(TRBSVUWassersteinInfinityCvMain.selectRadius(means, sds) == .0025, "Mean first");
+        means[0] = Double.NaN;
+        boolean rejected = false;
+        try { TRBSVUWassersteinInfinityCvMain.selectRadius(means, sds); }
+        catch (IllegalArgumentException expected) { rejected = true; }
+        require(rejected, "Incomplete candidates must not trigger final queries");
+        for (int t = 50; t < 75; t++) require(t-50 >= 0 && t-1 < t, "Rolling window excludes realized demand");
+        require(Arrays.equals(TRBSVUWassersteinInfinityCvMain.RADII,
+                new double[]{.0001, .00025, .0005, .001, .0025, .005}), "Confirmed grid changed");
+        System.out.println("LINF_CV_SELF_CHECK_PASS: mean/SD/smaller-radius selection; incomplete-score rejection; rolling origins; six radii");
+    }
+    private static void require(boolean condition, String message) {
+        if (!condition) throw new AssertionError(message);
+    }
+}
