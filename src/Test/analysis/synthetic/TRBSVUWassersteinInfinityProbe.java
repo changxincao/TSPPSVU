@@ -18,11 +18,12 @@ import java.util.Map;
 /** Isolated local fixed-radius pilot; reuses saved RF probabilities and the original OOS pool. */
 public final class TRBSVUWassersteinInfinityProbe {
     private static final String VERSION = "W1_LINF_MONOTONE_PILOT_V1";
-    private static final double[] RADII = {.001, .005, .01, .025};
+    private static final double[] RADII = {.0001, .00025, .0005, .001, .0025, .005};
     private static final String ROBUST = "W1-Linf", BASELINE = "RF-CSAA";
 
     public static void main(String[] args) throws Exception {
-        if (args.length != 4) throw new IllegalArgumentException("sourceRoot outputRoot shard queryCount");
+        if (args.length < 4 || args.length > 6)
+            throw new IllegalArgumentException("sourceRoot outputRoot shard queryCount [radiiCsv [frozenScopeOnlyControlClass]]");
         Path source = Path.of(args[0]).toAbsolutePath().normalize();
         Path root = Path.of(args[1]).toAbsolutePath().normalize();
         if (source.equals(root) || root.startsWith(source))
@@ -30,10 +31,28 @@ public final class TRBSVUWassersteinInfinityProbe {
         int shard = Integer.parseInt(args[2]), count = Integer.parseInt(args[3]);
         if (shard < 0 || shard > 1 || count < 1 || count > 40)
             throw new IllegalArgumentException("Two shards (0/1), queryCount in 1..40 required");
-        String code = codeFingerprint();
+        double[] radii = args.length >= 5 ? Arrays.stream(args[4].split(","))
+                .mapToDouble(Double::parseDouble).distinct().sorted().toArray() : RADII;
+        if (radii.length == 0) throw new IllegalArgumentException("Empty radius set");
+        for (double radius : radii)
+            if (Arrays.stream(RADII).noneMatch(allowed -> Double.compare(radius, allowed) == 0))
+                throw new IllegalArgumentException("Radius must be from the existing fixed pilot set: " + radius);
+        Path frozenControl = args.length == 6 ? Path.of(args[5]).toAbsolutePath().normalize() : null;
+        if (frozenControl != null && !frozenControl.equals(root.resolve(
+                "classes/Test/analysis/synthetic/TRBSVUWassersteinInfinityProbe.class")))
+            throw new IllegalArgumentException("Scope-only continuation must use original frozen control class");
+        String executionCode = codeFingerprint(null);
+        // Explicit compatibility bridge ONLY for this scope-only queue extension.
+        // All solver, input, weight and evaluator classes remain in the unchanged frozen classpath.
+        // Only the driver's loop count/radius list differs; record both identities, never conceal the change.
+        String code = codeFingerprint(frozenControl);
         int failed = 0, completed = 0;
         try (TRBSVUWorkerLock lock = TRBSVUWorkerLock.acquire(root.resolve("worker_" + shard))) {
-            for (double radius : RADII) for (int rep = 1; rep <= 5; rep++)
+            TRBSVUScaleExperiment.atomicText(root.resolve("worker_" + shard + "/control_metadata.txt"),
+                    "executionCodeSha256=" + executionCode + "\ncompatibleSolveCodeSha256=" + code
+                    + "\nfrozenScopeOnlyControlClass=" + frozenControl + "\nqueryCount=" + count
+                    + "\nradii=" + Arrays.toString(radii) + "\nstarted=" + Instant.now() + "\n");
+            for (double radius : radii) for (int rep = 1; rep <= 5; rep++)
                 for (int query = 0; query < count; query++) {
                     if (((rep - 1) * count + query) % 2 != shard) continue;
                     String id = String.format(java.util.Locale.ROOT, "rep_%03d/queries/query_%03d", rep, query);
@@ -197,7 +216,7 @@ public final class TRBSVUWassersteinInfinityProbe {
         return true;
     }
 
-    private static String codeFingerprint() throws Exception {
+    private static String codeFingerprint(Path frozenScopeOnlyControlClass) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         for (String file : List.of("/Model/WassersteinBoxInput.class", "/Model/WassersteinBoxInput$GroundNorm.class",
                 "/Model/WassersteinInfinityMonotoneOracle.class", "/Model/ContextualWassersteinBoxCcgSolver.class",
@@ -207,7 +226,10 @@ public final class TRBSVUWassersteinInfinityProbe {
             // Class bytes identify the actually loaded deployment, not a possibly different source tree.
             try (var stream = TRBSVUWassersteinInfinityProbe.class.getResourceAsStream(file)) {
                 if (stream == null) throw new IllegalStateException("Missing runtime class " + file);
-                digest.update(file.getBytes(StandardCharsets.UTF_8)); digest.update(stream.readAllBytes());
+                digest.update(file.getBytes(StandardCharsets.UTF_8));
+                digest.update(frozenScopeOnlyControlClass != null
+                        && file.equals("/Test/analysis/synthetic/TRBSVUWassersteinInfinityProbe.class")
+                        ? Files.readAllBytes(frozenScopeOnlyControlClass) : stream.readAllBytes());
             }
         }
         return HexFormat.of().formatHex(digest.digest());
