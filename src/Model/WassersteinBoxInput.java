@@ -15,6 +15,8 @@ import java.util.List;
  * probabilities are normalized once here.</p>
  */
 public final class WassersteinBoxInput {
+    public enum GroundNorm { L1, L_INFINITY }
+    public final GroundNorm groundNorm;
     public final ProcurementParams params;
     public final double[][] demand;
     public final double[] probability;
@@ -40,7 +42,14 @@ public final class WassersteinBoxInput {
                                double[] upper,
                                double[] scale,
                                double radius) {
+        this(params, demand, probability, lower, upper, scale, radius, GroundNorm.L1);
+    }
+
+    public WassersteinBoxInput(ProcurementParams params, double[][] demand,
+                               double[] probability, double[] lower, double[] upper,
+                               double[] scale, double radius, GroundNorm groundNorm) {
         if (params == null) throw new IllegalArgumentException("params required");
+        if (groundNorm == null) throw new IllegalArgumentException("Ground norm required.");
         if (demand == null || demand.length == 0) {
             throw new IllegalArgumentException("At least one demand sample is required.");
         }
@@ -66,6 +75,7 @@ public final class WassersteinBoxInput {
             throw new IllegalArgumentException("Probabilities must have positive support.");
 
         this.params = params;
+        this.groundNorm = groundNorm;
         this.demand = new double[positiveCount][params.J];
         this.probability = new double[positiveCount];
         this.lower = lower.clone();
@@ -162,7 +172,9 @@ public final class WassersteinBoxInput {
         double bound = 0.0;
         for (int j = 0; j < params.J; j++) {
             double slopeMagnitude = Math.max(params.e[j], -alphaLowerBound(j));
-            bound = Math.max(bound, slopeMagnitude * scale[j]);
+            bound = groundNorm == GroundNorm.L1
+                    ? Math.max(bound, slopeMagnitude * scale[j])
+                    : bound + slopeMagnitude * scale[j];
         }
         return bound;
     }
@@ -181,7 +193,8 @@ public final class WassersteinBoxInput {
     public double distance(int sample, double[] point) {
         double value = 0.0;
         for (int j = 0; j < params.J; j++) {
-            value += Math.abs(point[j] - demand[sample][j]) / scale[j];
+            double movement = Math.abs(point[j] - demand[sample][j]) / scale[j];
+            value = groundNorm == GroundNorm.L1 ? value + movement : Math.max(value, movement);
         }
         return value;
     }

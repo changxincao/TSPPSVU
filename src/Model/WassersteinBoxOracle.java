@@ -29,6 +29,8 @@ final class WassersteinBoxOracle {
 
     static Result solve(WassersteinBoxInput input, int sample, double[] y, double eta,
                         int threads, double timeLimitSeconds, boolean allowFeasible) throws Exception {
+        if (input.groundNorm != WassersteinBoxInput.GroundNorm.L1)
+            throw new IllegalArgumentException("Scaled-L1 oracle requires L1 ground norm.");
         long started = System.nanoTime();
         ProcurementParams params = input.params;
         if (y == null || y.length != params.I) {

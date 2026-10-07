@@ -11,11 +11,13 @@ import java.util.List;
 
 /**
  * Exact primal-block column-and-constraint generation for weighted,
- * box-supported, scaled-L1 1-Wasserstein two-stage procurement.
+ * box-supported 1-Wasserstein two-stage procurement (scaled L1 or monotone L-infinity).
  */
 public final class ContextualWassersteinBoxCcgSolver {
     public Result solve(WassersteinBoxInput input, Config config) throws Exception {
         requireEquality(config);
+        if (input.groundNorm == WassersteinBoxInput.GroundNorm.L_INFINITY)
+            WassersteinInfinityMonotoneOracle.requireMonotone(input);
         List<List<double[]>> points = new ArrayList<>(input.sampleCount());
         for (int s = 0; s < input.sampleCount(); s++) {
             List<double[]> samplePoints = new ArrayList<>();
@@ -102,8 +104,11 @@ public final class ContextualWassersteinBoxCcgSolver {
                 }
                 WassersteinBoxOracle.Result oracle;
                 try {
-                    oracle = WassersteinBoxOracle.solve(input, s, master.y, master.eta,
-                            config.threads, remaining, true);
+                    oracle = input.groundNorm == WassersteinBoxInput.GroundNorm.L_INFINITY
+                            ? WassersteinInfinityMonotoneOracle.solve(input, s, master.y,
+                                    master.eta, config.threads, remaining)
+                            : WassersteinBoxOracle.solve(input, s, master.y, master.eta,
+                                    config.threads, remaining, true);
                 } catch (IllegalStateException ex) {
                     if ((ex instanceof WassersteinBoxOracle.TimeLimitException
                             || remainingSeconds(start, config.timeLimitSeconds) <= 0.0) && bestY != null) {
