@@ -57,6 +57,9 @@ function Arguments($job){
         $jobClasspath="$($job.tools)\bin;$($job.deployment)\bin;$($plan.cplexJar);$($plan.deployment)\lib\mosek.jar"
     }
     $workerArguments=@('-Xmx2g',('"-Djava.library.path='+$plan.native+'"'),('"-Dtrb.svu.python='+$plan.python+'"'),('"-Dtrb.svu.momentStopDirectory='+$control+'\moment_stop"'),'-cp',('"'+$jobClasspath+'"'))
+    if($job.kind -eq 'w1-validation' -and ($job.PSObject.Properties.Name -contains 'oracleDiagnosticDirectory') -and $job.oracleDiagnosticDirectory){
+        $workerArguments=@(('"-Dtrb.svu.w1OracleDiagnosticDirectory='+$job.oracleDiagnosticDirectory+'"'))+$workerArguments
+    }
     if($job.kind-eq'rcsaa-staged'){
         return $workerArguments+@('Test.analysis.synthetic.TRBSVURcsaaStagedGridMain','run',('"'+$job.input+'"'),('"'+$job.baseline+'"'),('"'+$job.output+'"'),$job.rep,('"'+$job.choice+'"'),$job.oldGrid,$job.grid)
     }

@@ -4,6 +4,14 @@ import Basic.ProcurementParams;
 import ilog.concert.IloLinearNumExpr;
 import ilog.concert.IloNumVar;
 import ilog.cplex.IloCplex;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.time.Instant;
+import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicLong;
 
 /** Exact sample-wise separation oracle for box-supported scaled-L1 W1 DRO. */
 final class WassersteinBoxOracle {
@@ -30,8 +38,11 @@ final class WassersteinBoxOracle {
             throw new IllegalArgumentException("Invalid eta " + eta);
         }
         IloCplex cplex = new IloCplex();
+        Diagnostics diagnostics = null;
         try {
-            cplex.setOut(null);
+            diagnostics = Diagnostics.open();
+            cplex.setOut(diagnostics == null ? null : diagnostics.log);
+            if (diagnostics != null) cplex.setWarning(diagnostics.log);
             cplex.setParam(IloCplex.Param.Threads, threads);
             if (Double.isFinite(timeLimitSeconds))
                 cplex.setParam(IloCplex.Param.TimeLimit, Math.max(1e-3, timeLimitSeconds));
@@ -112,9 +123,11 @@ final class WassersteinBoxOracle {
             double remaining = timeLimitSeconds - (System.nanoTime() - started) / 1e9;
             if (remaining <= 0.0) throw new TimeLimitException("W1 oracle budget exhausted during modeling");
             if (Double.isFinite(remaining)) cplex.setParam(IloCplex.Param.TimeLimit, remaining);
+            if (diagnostics != null) diagnostics.begin(cplex, input, sample, y, eta, threads, remaining);
             long optimizerStart = System.nanoTime();
             boolean solved = cplex.solve();
             double optimizerTimeSec = (System.nanoTime() - optimizerStart) / 1e9;
+            if (diagnostics != null) diagnostics.end(cplex, solved, optimizerTimeSec);
             if (!solved || (!allowFeasible && cplex.getStatus() != IloCplex.Status.Optimal)) {
                 if (String.valueOf(cplex.getCplexStatus()).contains("TimeLim"))
                     throw new TimeLimitException("W1 oracle has no accepted incumbent: " + cplex.getStatus());
@@ -154,7 +167,67 @@ final class WassersteinBoxOracle {
                     constant, worstDemand, affineConstant, etaCoefficient,
                     optimizerTimeSec, cplex.getBestObjValue());
         } finally {
-            cplex.end();
+            try { cplex.end(); }
+            finally { if (diagnostics != null) diagnostics.log.close(); }
+        }
+    }
+
+    /** Opt-in diagnostics only: no model, solver parameter, or acceptance-policy changes. */
+    private static final class Diagnostics {
+        private static final AtomicLong SEQUENCE = new AtomicLong();
+        private final Path directory;
+        private final PrintStream log;
+        private final long sequence;
+
+        private Diagnostics(Path directory, PrintStream log) {
+            this.directory = directory;
+            this.log = log;
+            this.sequence = SEQUENCE.incrementAndGet();
+        }
+
+        static Diagnostics open() throws Exception {
+            String configured = System.getProperty("trb.svu.w1OracleDiagnosticDirectory", "");
+            if (configured.isBlank()) return null;
+            Path directory = Path.of(configured).toAbsolutePath().normalize();
+            Files.createDirectories(directory);
+            PrintStream log = new PrintStream(Files.newOutputStream(directory.resolve("oracle.log"),
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND), true, StandardCharsets.UTF_8);
+            return new Diagnostics(directory, log);
+        }
+
+        void begin(IloCplex cplex, WassersteinBoxInput input, int sample, double[] y,
+                   double eta, int threads, double remaining) throws Exception {
+            // Keep one current model, not a separate large model for every sample/iteration.
+            cplex.exportModel(directory.resolve("current_oracle.sav").toString());
+            Files.writeString(directory.resolve("current_oracle.txt"),
+                    "diagnosticOnly=true\npid=" + ProcessHandle.current().pid()
+                    + "\nsequence=" + sequence + "\nstarted=" + Instant.now()
+                    + "\nsample=" + sample + "\nradius=" + input.radius + "\neta=" + eta
+                    + "\nthreads=" + threads + "\ntimeLimitSeconds=" + remaining
+                    + "\ny=" + Arrays.toString(y) + "\nnominal=" + Arrays.toString(input.demand[sample])
+                    + "\nprobability=" + input.probability[sample]
+                    + "\nlower=" + Arrays.toString(input.lower) + "\nupper=" + Arrays.toString(input.upper)
+                    + "\nscale=" + Arrays.toString(input.scale) + "\n", StandardCharsets.UTF_8);
+            String marker = String.format(java.util.Locale.ROOT,
+                    "W1_ORACLE_BEGIN sequence=%d sample=%d eta=%.17g threads=%d time=%s%n",
+                    sequence, sample, eta, threads, Instant.now());
+            log.print(marker);
+            log.flush();
+            System.out.print(marker);
+            System.out.flush();
+        }
+
+        void end(IloCplex cplex, boolean solved, double seconds) throws Exception {
+            log.printf(java.util.Locale.ROOT,
+                    "W1_ORACLE_END sequence=%d solved=%s status=%s cplexStatus=%s seconds=%.6f%n",
+                    sequence, solved, cplex.getStatus(), cplex.getCplexStatus(), seconds);
+            if (solved) log.printf(java.util.Locale.ROOT,
+                    "W1_ORACLE_BOUNDS incumbent=%.17g bestBound=%.17g%n",
+                    cplex.getObjValue(), cplex.getBestObjValue());
+            log.flush();
+            System.out.printf(java.util.Locale.ROOT,
+                    "W1_ORACLE_END sequence=%d solved=%s status=%s seconds=%.6f%n",
+                    sequence, solved, cplex.getStatus(), seconds);
         }
     }
 
