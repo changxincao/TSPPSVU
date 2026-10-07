@@ -20,12 +20,17 @@ import java.util.Map;
 
 /** Local Linf W1: one rolling CV per market, then ONE selected radius for all queries. */
 public final class TRBSVUWassersteinInfinityCvMain {
-    static final double[] RADII = {.0001, .00025, .0005, .001, .0025, .005};
+    static final boolean EXTENDED = Boolean.getBoolean("trb.svu.linf.extended");
+    static final double[] SMALL_RADII = {.0001, .00025, .0005, .001, .0025, .005};
+    static final double[] RADII = EXTENDED
+            ? new double[]{.0001, .00025, .0005, .001, .0025, .005, .01, .025, .05, .1, .25, .5}
+            : SMALL_RADII;
+    private static final String MODULE = EXTENDED ? "cv_large" : "cv";
     private static final String VERSION = "W1_LINF_ROLLING_CV_V1", NAME = "W1-Linf";
     private static final int TRAIN = 50, ORIGINS = 25, QUERIES = 40;
     private record Market(int rep, TRBSVUSyntheticCase instance,
                           TRBSVUExperiment1Runner.ContextualChoice choice,
-                          String inputHash, String protocol) { }
+                          String inputHash, String protocol, String baseProtocol) { }
 
     public static void main(String[] args) throws Exception {
         if (args.length != 4) throw new IllegalArgumentException(
@@ -44,16 +49,17 @@ public final class TRBSVUWassersteinInfinityCvMain {
         var contextual = new TRBSVUExperiment1Runner(
                 TRBSVUSolveMethods.Settings.unlimitedRobust(4), forest, ORIGINS);
         int failed = 0;
-        try (var lock = TRBSVUWorkerLock.acquire(pilot.resolve("cv/worker_" + shard))) {
+        try (var lock = TRBSVUWorkerLock.acquire(pilot.resolve(MODULE + "/worker_" + shard))) {
             for (int rep = 1; rep <= 5; rep++) {
                 if (!check && (rep - 1) % 2 != shard) continue;
-                Path output = pilot.resolve(String.format("cv/results/rep_%03d", rep));
+                Path output = pilot.resolve(String.format(MODULE + "/results/rep_%03d", rep));
                 try {
-                    Market market = market(source, rep, frozenCode);
+                    Market market = market(source, pilot, rep, frozenCode);
                     if (check) {
                         auditReferenceWeights(source, market, contextual);
+                        if (EXTENDED) auditOriginalValidation(pilot, market);
                         System.out.println("CV_PREFLIGHT_PASS rep=" + rep + " origins=25 training=50"
-                                + " candidates=6 finalQueries=40 metric=L_INFINITY frozenCode=" + frozenCode);
+                                + " candidates=" + RADII.length + " finalQueries=40 metric=L_INFINITY frozenCode=" + frozenCode);
                     } else run(source, pilot, output, market, contextual, frozenCode);
                 } catch (Exception failure) {
                     if (check) throw failure;
@@ -63,13 +69,13 @@ public final class TRBSVUWassersteinInfinityCvMain {
                     failure.printStackTrace(System.err);
                 }
             }
-            if (!check) TRBSVUScaleExperiment.atomicText(pilot.resolve("cv/worker_" + shard + "/finished.txt"),
+            if (!check) TRBSVUScaleExperiment.atomicText(pilot.resolve(MODULE + "/worker_" + shard + "/finished.txt"),
                     "failedMarkets=" + failed + "\n");
         }
         if (failed > 0) throw new IllegalStateException("Incomplete markets=" + failed);
     }
 
-    private static Market market(Path source, int rep, String frozenCode) throws Exception {
+    private static Market market(Path source, Path pilot, int rep, String frozenCode) throws Exception {
         String repName = String.format("rep_%03d", rep);
         Path input = source.resolve("inputs/main_input/" + repName + "/queries");
         Path first = input.resolve("query_000.instance.tsv");
@@ -88,13 +94,25 @@ public final class TRBSVUWassersteinInfinityCvMain {
         if (!choice.family().equals("RF")) throw new IllegalArgumentException("Expected frozen RF family");
         var rf = TRBSVUExperiment2IdeMain.rfFingerprint(choice,
                 Path.of(System.getProperty("trb.svu.python")));
-        String protocol = hash((VERSION + "|pool=" + HexFormat.of().formatHex(digest.digest())
-                + "|frozenSolveCode=" + frozenCode + "|driver=" + driverHash()
-                + "|choice=" + choice + "|radii=" + Arrays.toString(RADII)
-                + "|origins=50..74|training=50|threads=4|limit=3600|tol=1e-4"
+        String poolHash = HexFormat.of().formatHex(digest.digest());
+        String suffix = "|choice=" + choice + "|radii=";
+        String settings = "|origins=50..74|training=50|threads=4|limit=3600|tol=1e-4"
                 + "|support=full_window_min_max|scale=U|metric=max_abs_over_U"
-                + "|tie=mean,sd,smaller_radius" + rf.protocolSuffix()).getBytes(StandardCharsets.UTF_8));
-        return new Market(rep, instance, choice, TRBSVUScaleExperiment.sha256(first), protocol);
+                + "|tie=mean,sd,smaller_radius" + rf.protocolSuffix();
+        String prefix = VERSION + "|pool=" + poolHash + "|frozenSolveCode=" + frozenCode + "|driver=";
+        String protocol = hash((prefix + driverHash(null) + suffix + Arrays.toString(RADII)
+                + settings).getBytes(StandardCharsets.UTF_8));
+        String baseProtocol = null;
+        if (EXTENDED) {
+            // Reconstruct the ORIGINAL protocol from the unchanged, running deployment, not the new driver.
+            baseProtocol = hash((prefix + driverHash(pilot.resolve(
+                    "cv/classes/Test/analysis/synthetic/TRBSVUWassersteinInfinityCvMain.class"))
+                    + suffix + Arrays.toString(SMALL_RADII) + settings).getBytes(StandardCharsets.UTF_8));
+            Path file = pilot.resolve("cv/results/" + repName + "/protocol.txt");
+            if (Files.exists(file) && !Files.readString(file).trim().equals(baseProtocol))
+                throw new IllegalStateException("Original CV input/runtime protocol changed; refusing reuse: " + file);
+        }
+        return new Market(rep, instance, choice, TRBSVUScaleExperiment.sha256(first), protocol, baseProtocol);
     }
 
     @SuppressWarnings("unchecked")
@@ -113,12 +131,43 @@ public final class TRBSVUWassersteinInfinityCvMain {
                 throw new IllegalStateException("RF reference weight changed at sample " + s);
     }
 
+    private static void auditOriginalValidation(Path pilot, Market market) throws Exception {
+        Path root = pilot.resolve(String.format("cv/results/rep_%03d", market.rep));
+        if (!Files.exists(root.resolve("protocol.txt"))) return; // this market is still queued
+        var saved = new TRBSVUValidationCheckpoint(root.resolve("validation_checkpoints"),
+                market.inputHash, market.baseProtocol);
+        int reusable = 0;
+        for (double radius : SMALL_RADII) for (int t = TRAIN; t < TRAIN + ORIGINS; t++) {
+            var trace = saved.load(NAME, radius, t).orElse(null);
+            if (trace == null) continue;
+            var window = market.instance.validationWindow(t, TRAIN);
+            if (trace.trainingStart() != window.train().get(0).period.tIndex
+                    || trace.trainingEnd() != window.train().get(TRAIN-1).period.tIndex
+                    || trace.scenarioCount() != TRAIN || trace.decision() == null
+                    || trace.decision().length != market.instance.params.I
+                    || !Double.isFinite(trace.realizedValidationCost()))
+                throw new IllegalStateException("Invalid original validation checkpoint at " + radius + "/" + t);
+            reusable++;
+        }
+        System.out.println("CV_REUSE_PREFLIGHT_PASS rep=" + market.rep + " reusableOrigins=" + reusable);
+    }
+
     private static void run(Path source, Path pilot, Path output, Market market,
                             TRBSVUExperiment1Runner contextual, String frozenCode) throws Exception {
         Files.deleteIfExists(output.resolve("complete.txt"));
         TRBSVUScaleExperiment.atomicText(output.resolve("protocol.txt"), market.protocol + "\n");
         var saved = new TRBSVUValidationCheckpoint(output.resolve("validation_checkpoints"),
                 market.inputHash, market.protocol);
+        TRBSVUValidationCheckpoint original = null;
+        if (EXTENDED) {
+            Path originalRoot = pilot.resolve(String.format("cv/results/rep_%03d", market.rep));
+            if (!Files.readString(originalRoot.resolve("protocol.txt")).trim().equals(market.baseProtocol))
+                throw new IllegalStateException("Original CV protocol missing/changed; refusing reuse");
+            original = new TRBSVUValidationCheckpoint(originalRoot.resolve("validation_checkpoints"),
+                    market.inputHash, market.baseProtocol);
+            TRBSVUScaleExperiment.atomicText(output.resolve("validation_reuse_source.txt"),
+                    "source=" + originalRoot + "\nverifiedProtocol=" + market.baseProtocol + "\n");
+        }
         var traces = new ArrayList<TRBSVUValidationTrace>();
         double[] means = new double[RADII.length], sds = new double[RADII.length];
         StringBuilder curve = new StringBuilder("radius,origins,mean,sd\n");
@@ -128,6 +177,15 @@ public final class TRBSVUWassersteinInfinityCvMain {
             for (int t = TRAIN; t < TRAIN + ORIGINS; t++) {
                 var window = market.instance.validationWindow(t, TRAIN);
                 var trace = saved.load(NAME, radius, t).orElse(null);
+                if (trace == null && original != null
+                        && Arrays.stream(SMALL_RADII).anyMatch(r -> Double.compare(r, radius) == 0)) {
+                    trace = original.load(NAME, radius, t).orElse(null);
+                    if (trace != null) {
+                        saved.save(trace);
+                        System.out.println("CV_ORIGIN_REUSED rep=" + market.rep + " radius=" + radius
+                                + " origin=" + t + " source=cv");
+                    }
+                }
                 if (trace == null) {
                     var weightResult = contextual.contextualWeightResult(market.instance,
                             window.train(), window.realized().theta, market.choice);
@@ -202,12 +260,13 @@ public final class TRBSVUWassersteinInfinityCvMain {
         }
         Files.deleteIfExists(output.resolve("failure.txt"));
         TRBSVUScaleExperiment.atomicText(output.resolve("complete.txt"),
-                "protocol=" + market.protocol + "\nselectedRadius=" + selected + "\norigins=150\nqueries=40\n");
+                "protocol=" + market.protocol + "\nselectedRadius=" + selected + "\norigins="
+                        + RADII.length * ORIGINS + "\nqueries=40\n");
     }
 
     static double selectRadius(double[] means, double[] sds) {
         if (means.length != RADII.length || sds.length != RADII.length)
-            throw new IllegalArgumentException("All six complete candidate scores are required");
+            throw new IllegalArgumentException("All " + RADII.length + " complete candidate scores are required");
         int best = -1;
         for (int i = 0; i < RADII.length; i++) {
             if (!Double.isFinite(means[i]) || !Double.isFinite(sds[i]))
@@ -262,12 +321,14 @@ public final class TRBSVUWassersteinInfinityCvMain {
         }
     }
 
-    private static String driverHash() throws Exception {
+    private static String driverHash(Path originalMainClass) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         for (String name : List.of("TRBSVUWassersteinInfinityCvMain.class",
                 "TRBSVUExperiment1Runner.class", "TRBSVUForestWeights.class", "TRBSVUStatistics.class",
                 "TRBSVUSyntheticCase.class", "TRBSVUValidationCheckpoint.class", "TRBSVUFinalCheckpoint.class")) {
-            try (var stream = TRBSVUWassersteinInfinityCvMain.class.getResourceAsStream(name)) {
+            try (var stream = originalMainClass != null && name.equals("TRBSVUWassersteinInfinityCvMain.class")
+                    ? Files.newInputStream(originalMainClass)
+                    : TRBSVUWassersteinInfinityCvMain.class.getResourceAsStream(name)) {
                 if (stream == null) throw new IllegalStateException("Missing CV runtime class: " + name);
                 digest.update(name.getBytes(StandardCharsets.UTF_8));
                 digest.update(stream.readAllBytes());
