@@ -17,6 +17,14 @@ public final class WassersteinCcgBoundSelfCheck {
                 "Converged pass classified as stalled");
         require(ContextualWassersteinBoxCcgSolver.stalledWithoutCuts(false, Double.NaN, 1e-4),
                 "Unchanged model with unavailable bound would repeat");
+        // rep004, epsilon=.05, origin52: iteration12 added seven points,
+        // but its existing certified UB/LB already met the requested 1e-4 gap.
+        double savedGap = ContextualWassersteinBoxCcgSolver.certifiedGap(2147643.223178, 2147521.130272);
+        require(ContextualWassersteinBoxCcgSolver.withinTolerance(savedGap, 1e-4),
+                "Certified pass would repeat merely because new points were added");
+        require(!ContextualWassersteinBoxCcgSolver.withinTolerance(1.1e-4, 1e-4), "Gap relaxed");
+        require(!ContextualWassersteinBoxCcgSolver.withinTolerance(Double.NaN, 1e-4), "Missing gap accepted");
+        require(!ContextualWassersteinBoxCcgSolver.withinTolerance(Double.POSITIVE_INFINITY, 1e-4), "Infinite gap accepted");
         if (args.length > 0 && args[0].equals("--native")) {
             var params = new Basic.ProcurementParams(java.util.List.of("carrier"), 1,
                     new double[]{3}, new double[]{2}, new double[]{1},
@@ -38,6 +46,12 @@ public final class WassersteinCcgBoundSelfCheck {
                     "Iteration-limited CCG lost its incumbent/bounds");
             require(!limited.certifiedOptimal && limited.solverStatus.startsWith("ITERATION_LIMIT"),
                     "Limited CCG invented optimality");
+            // Deliberately loose test-only tolerance makes the first pass a
+            // valid certificate while at least one support point is still new.
+            config.tol = .8; config.maxBendersIter = 5;
+            Solution converged = new ContextualWassersteinBoxCcgSolver().solve(input, config).solution();
+            require(converged.certifiedOptimal && converged.iterationCount == 1 && converged.cutCount > 0,
+                    "Valid gap with new cuts did not stop after the first pass");
         }
         System.out.println("WassersteinCcgBoundSelfCheck PASS");
     }

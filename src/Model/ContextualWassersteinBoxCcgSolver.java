@@ -166,7 +166,12 @@ public final class ContextualWassersteinBoxCcgSolver {
                     "W1-CCG iter=%d done LB=%.6f bestUB=%.6f gap=%.4f%% added=%d points=%d totalSec=%.3f%n",
                     iterations, bestLower, bestUpper, 100.0 * currentGap,
                     addedThisIteration, points.stream().mapToInt(List::size).sum(), secondsSince(start));
-            if (!added && Double.isFinite(currentGap) && currentGap <= tolerance) {
+            // A complete oracle pass already gives a valid global UB. New cuts
+            // cannot invalidate a certificate that meets the requested gap.
+            if (withinTolerance(currentGap, tolerance)) {
+                System.out.printf(java.util.Locale.ROOT,
+                        "W1-CCG certificateAccepted iter=%d gap=%.17g tolerance=%.17g added=%d%n",
+                        iterations, currentGap, tolerance, addedThisIteration);
                 converged = true;
                 break;
             }
@@ -251,6 +256,10 @@ public final class ContextualWassersteinBoxCcgSolver {
 
     static boolean stalledWithoutCuts(boolean added, double gap, double tolerance) {
         return !added && !(Double.isFinite(gap) && gap <= tolerance);
+    }
+
+    static boolean withinTolerance(double gap, double tolerance) {
+        return Double.isFinite(gap) && gap >= 0.0 && gap <= tolerance;
     }
 
     static double allSpotUpperBound(WassersteinBoxInput input, double[] y) {
