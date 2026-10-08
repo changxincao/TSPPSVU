@@ -18,21 +18,27 @@ public final class TRBSVUSplitW1SelfCheck {
             var poolMethod = context.getClass().getDeclaredMethod("pool"); poolMethod.setAccessible(true);
             String pool = (String) poolMethod.invoke(context);
             String smallProtocol = (String) protocol.invoke(null, context, TRBSVUSplitW1Main.SMALL);
-            String tailProtocol = (String) protocol.invoke(null, context, TRBSVUSplitW1Main.TAIL);
+            String tailProtocol = (String) protocol.invoke(null, context, TRBSVUSplitW1Main.LEGACY_TAIL);
             var old = new TRBSVUValidationCheckpoint(Path.of(args[2]).resolve("validation_checkpoints"), pool, smallProtocol);
             var sample = old.load("C-W1", TRBSVUSplitW1Main.SMALL[0], 50).orElseThrow();
             var checkpoint = new TRBSVUValidationCheckpoint(root.resolve("validation_checkpoints"), pool, tailProtocol);
             expectFailure(() -> TRBSVUSplitW1Main.main(new String[]{"check-validation", args[0], args[1], root.toString(), "1"}));
-            for (double radius : TRBSVUSplitW1Main.TAIL) for (int origin = 50; origin < 75; origin++) {
+            for (double radius : TRBSVUSplitW1Main.LEGACY_TAIL) for (int origin = 50; origin < 75; origin++) {
                 checkpoint.save(new TRBSVUValidationTrace("C-W1", radius, origin, origin-50, origin-1,
                         sample.effectiveContextBandwidth(), sample.scenarioCount(), sample.positiveWeightCount(),
                         sample.effectiveSampleSize(), sample.trainingObjective(), sample.solverStatus(), sample.bestBound(),
                         sample.relativeGap(), sample.solveTimeSec(), sample.optimizerTimeSec(), sample.certifiedOptimal(),
                         sample.decision(), sample.realizedValidationCost()));
             }
-            String[] call = {"validate", args[0], args[1], root.toString(), "1"};
-            TRBSVUSplitW1Main.main(call); // all restored: no optimizer call, no final/OOS call
+            String[] call = {"finish-validation", args[0], args[1], root.toString(), "1"};
+            TRBSVUSplitW1Main.main(call); // only retained origins; no optimizer call
             call[0]="check-validation"; TRBSVUSplitW1Main.main(call);
+            call[0]="validate"; TRBSVUSplitW1Main.main(call);
+            call[0]="check-validation";
+            if (TRBSVUSplitW1Main.fullGrid().length != 10
+                    || TRBSVUSplitW1Main.fullGrid()[9] != 0.1
+                    || !Files.readString(root.resolve("validation_only_complete.txt")).contains("originCount=100\n"))
+                throw new AssertionError("Truncated grid/count not applied");
             if (Files.exists(root.resolve("queries"))) throw new AssertionError("Validation-only ran finals");
             Path file = root.resolve("validation_checkpoints/C-W1_p"
                     + Long.toUnsignedString(Double.doubleToLongBits(TRBSVUSplitW1Main.TAIL[0]),16) + "_o50.checkpoint");
@@ -43,7 +49,7 @@ public final class TRBSVUSplitW1SelfCheck {
             Files.write(file, original);
             Files.writeString(file, Files.readString(file).replace("solveTimeSec=", "solveTimeSec=1"));
             expectFailure(() -> TRBSVUSplitW1Main.main(call));
-            System.out.println("PASS: compatible existing small protocol; 150 restored tail origins; no final solve; "
+            System.out.println("PASS: compatible legacy protocol; 100 retained tail origins; excluded larger radii; no solve; "
                     + "missing marker, wrong protocol and tampered artifact rejected");
         } finally {
             try (var paths = Files.walk(root)) {
