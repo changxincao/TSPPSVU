@@ -21,21 +21,25 @@ import java.util.Map;
 /** Local Linf W1: one rolling CV per market, then ONE selected radius for all queries. */
 public final class TRBSVUWassersteinInfinityCvMain {
     static final boolean EXTENDED = Boolean.getBoolean("trb.svu.linf.extended");
+    static final boolean CAPPED = Boolean.getBoolean("trb.svu.linf.cap01");
     static final double[] SMALL_RADII = {.0001, .00025, .0005, .001, .0025, .005};
+    private static final double[] ORIGINAL_EXTENDED_RADII =
+            {.0001, .00025, .0005, .001, .0025, .005, .01, .025, .05, .1, .25, .5};
     static final double[] RADII = EXTENDED
-            ? new double[]{.0001, .00025, .0005, .001, .0025, .005, .01, .025, .05, .1, .25, .5}
+            ? (CAPPED ? Arrays.copyOf(ORIGINAL_EXTENDED_RADII, 10) : ORIGINAL_EXTENDED_RADII)
             : SMALL_RADII;
-    private static final String MODULE = EXTENDED ? "cv_large" : "cv";
+    private static final String MODULE = CAPPED ? "cv_upto01" : EXTENDED ? "cv_large" : "cv";
     private static final String VERSION = "W1_LINF_ROLLING_CV_V1", NAME = "W1-Linf";
     private static final int TRAIN = 50, ORIGINS = 25, QUERIES = 40;
     private record Market(int rep, TRBSVUSyntheticCase instance,
                           TRBSVUExperiment1Runner.ContextualChoice choice,
-                          String inputHash, String protocol, String baseProtocol) { }
+                          String inputHash, String protocol, String baseProtocol, String extendedProtocol) { }
 
     public static void main(String[] args) throws Exception {
         if (args.length != 4) throw new IllegalArgumentException(
                 "preflight|worker sourceRoot existingFixedRadiusRoot shard");
         boolean check = args[0].equals("preflight");
+        if (CAPPED && !EXTENDED) throw new IllegalArgumentException("Capped mode requires extended mode");
         if (!check && !args[0].equals("worker")) throw new IllegalArgumentException("Unknown mode");
         int shard = Integer.parseInt(args[3]);
         if (shard < 0 || shard > 1) throw new IllegalArgumentException("Shard must be 0 or 1");
@@ -58,6 +62,7 @@ public final class TRBSVUWassersteinInfinityCvMain {
                     if (check) {
                         auditReferenceWeights(source, market, contextual);
                         if (EXTENDED) auditOriginalValidation(pilot, market);
+                        if (CAPPED) previousExtended(pilot, market);
                         System.out.println("CV_PREFLIGHT_PASS rep=" + rep + " origins=25 training=50"
                                 + " candidates=" + RADII.length + " finalQueries=40 metric=L_INFINITY frozenCode=" + frozenCode);
                     } else run(source, pilot, output, market, contextual, frozenCode);
@@ -103,6 +108,7 @@ public final class TRBSVUWassersteinInfinityCvMain {
         String protocol = hash((prefix + driverHash(null) + suffix + Arrays.toString(RADII)
                 + settings).getBytes(StandardCharsets.UTF_8));
         String baseProtocol = null;
+        String extendedProtocol = null;
         if (EXTENDED) {
             // Reconstruct the ORIGINAL protocol from the unchanged, running deployment, not the new driver.
             baseProtocol = hash((prefix + driverHash(pilot.resolve(
@@ -112,7 +118,25 @@ public final class TRBSVUWassersteinInfinityCvMain {
             if (Files.exists(file) && !Files.readString(file).trim().equals(baseProtocol))
                 throw new IllegalStateException("Original CV input/runtime protocol changed; refusing reuse: " + file);
         }
-        return new Market(rep, instance, choice, TRBSVUScaleExperiment.sha256(first), protocol, baseProtocol);
+        if (CAPPED) {
+            // Read the unchanged old driver bytes, rather than relabelling old
+            // checkpoints as having been produced by the capped driver.
+            extendedProtocol = hash((prefix + driverHash(pilot.resolve(
+                    "cv_large/classes/Test/analysis/synthetic/TRBSVUWassersteinInfinityCvMain.class"))
+                    + suffix + Arrays.toString(ORIGINAL_EXTENDED_RADII) + settings)
+                    .getBytes(StandardCharsets.UTF_8));
+        }
+        return new Market(rep, instance, choice, TRBSVUScaleExperiment.sha256(first), protocol,
+                baseProtocol, extendedProtocol);
+    }
+
+    private static TRBSVUValidationCheckpoint previousExtended(Path pilot, Market market) throws Exception {
+        Path root = pilot.resolve(String.format("cv_large/results/rep_%03d", market.rep));
+        if (!Files.exists(root.resolve("protocol.txt"))) return null;
+        if (!Files.readString(root.resolve("protocol.txt")).trim().equals(market.extendedProtocol))
+            throw new IllegalStateException("Extended CV input/runtime protocol changed; refusing reuse: " + root);
+        return new TRBSVUValidationCheckpoint(root.resolve("validation_checkpoints"),
+                market.inputHash, market.extendedProtocol);
     }
 
     @SuppressWarnings("unchecked")
@@ -159,6 +183,9 @@ public final class TRBSVUWassersteinInfinityCvMain {
         var saved = new TRBSVUValidationCheckpoint(output.resolve("validation_checkpoints"),
                 market.inputHash, market.protocol);
         TRBSVUValidationCheckpoint original = null;
+        TRBSVUValidationCheckpoint extended = CAPPED ? previousExtended(pilot, market) : null;
+        if (extended != null) TRBSVUScaleExperiment.atomicText(output.resolve("extended_validation_reuse_source.txt"),
+                "source=cv_large\nverifiedProtocol=" + market.extendedProtocol + "\nexcludedRadii=0.25,0.5\n");
         if (EXTENDED) {
             Path originalRoot = pilot.resolve(String.format("cv/results/rep_%03d", market.rep));
             if (!Files.readString(originalRoot.resolve("protocol.txt")).trim().equals(market.baseProtocol))
@@ -177,6 +204,14 @@ public final class TRBSVUWassersteinInfinityCvMain {
             for (int t = TRAIN; t < TRAIN + ORIGINS; t++) {
                 var window = market.instance.validationWindow(t, TRAIN);
                 var trace = saved.load(NAME, radius, t).orElse(null);
+                if (trace == null && extended != null) {
+                    trace = extended.load(NAME, radius, t).orElse(null);
+                    if (trace != null) {
+                        saved.save(trace);
+                        System.out.println("CV_ORIGIN_REUSED rep=" + market.rep + " radius=" + radius
+                                + " origin=" + t + " source=cv_large");
+                    }
+                }
                 if (trace == null && original != null
                         && Arrays.stream(SMALL_RADII).anyMatch(r -> Double.compare(r, radius) == 0)) {
                     trace = original.load(NAME, radius, t).orElse(null);

@@ -22,9 +22,13 @@ public final class TRBSVUWassersteinInfinityCvSelfCheck {
         require(Arrays.equals(TRBSVUWassersteinInfinityCvMain.SMALL_RADII,
                 new double[]{.0001, .00025, .0005, .001, .0025, .005}), "Small grid changed");
         if (TRBSVUWassersteinInfinityCvMain.EXTENDED) {
-            means[0] = 10; means[11] = 8;
-            require(TRBSVUWassersteinInfinityCvMain.selectRadius(means, sds) == .5, "Extended candidate selection");
-            require(TRBSVUWassersteinInfinityCvMain.RADII.length == 12, "Extended grid size");
+            boolean capped = TRBSVUWassersteinInfinityCvMain.CAPPED;
+            means[0] = 10; means[means.length - 1] = 8;
+            require(TRBSVUWassersteinInfinityCvMain.selectRadius(means, sds) == (capped ? .1 : .5),
+                    "Extended candidate selection");
+            require(TRBSVUWassersteinInfinityCvMain.RADII.length == (capped ? 10 : 12), "Extended grid size");
+            if (capped) for (double radius : TRBSVUWassersteinInfinityCvMain.RADII)
+                require(radius <= .1, "Cancelled radius reintroduced");
         }
         System.out.println("LINF_CV_SELF_CHECK_PASS: mean/SD/smaller-radius selection; incomplete-score rejection; rolling origins; radii="
                 + TRBSVUWassersteinInfinityCvMain.RADII.length);
