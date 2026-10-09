@@ -19,6 +19,7 @@ public final class TRBSVUProtocolRegressionSelfCheck {
     private TRBSVUProtocolRegressionSelfCheck() { }
 
     public static void main(String[] args) throws Exception {
+        verifyFixedMmParameter();
         require(Arrays.equals(TRBSVUExperiment1Runner.BANDWIDTH,
                         new double[]{0.1, 0.25, 0.5, 0.8, 0.9, 1, 2, 3, 5, 10, 30, 50, 100}),
                 "Experiment 1 bandwidth grid is not the locked 13-point tuning grid.");
@@ -114,6 +115,27 @@ public final class TRBSVUProtocolRegressionSelfCheck {
             }
         }
         System.out.println("TRBSVUProtocolRegressionSelfCheck PASS");
+    }
+
+    private static void verifyFixedMmParameter() {
+        String key = "trb.svu.mm.fixedKappa";
+        String previous = System.getProperty(key);
+        try {
+            System.clearProperty(key);
+            require(TRBSVUExperiment2IdeMain.configuredMmKappa() == null, "MM CV default changed.");
+            System.setProperty(key, "1.0");
+            require(TRBSVUExperiment2IdeMain.configuredMmKappa() == 1.0, "Fixed MM kappa not read.");
+            for (String invalid : List.of("0", "-1", "NaN", "Infinity", "invalid")) {
+                System.setProperty(key, invalid);
+                boolean rejected = false;
+                try { TRBSVUExperiment2IdeMain.configuredMmKappa(); }
+                catch (IllegalArgumentException expected) { rejected = true; }
+                require(rejected, "Invalid fixed MM kappa accepted: " + invalid);
+            }
+        } finally {
+            if (previous == null) System.clearProperty(key);
+            else System.setProperty(key, previous);
+        }
     }
 
     private static void verifyBandwidthRefreshSummarySchema(Path root) throws Exception {

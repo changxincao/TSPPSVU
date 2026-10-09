@@ -53,10 +53,16 @@ function WorkerCommandMatches($command,$expectedArguments){
 }
 function Arguments($job){
     $jobClasspath=if($job.kind-eq'rcsaa-staged'){"$($job.tools)\bin;$classpath"}else{$classpath}
+    $fixedMm=$job.method-eq'C-MM'-and($job.PSObject.Properties.Name-contains'fixedMomentKappa')
+    if($fixedMm){
+        if(-not(HasFile "$($job.fixedMomentTools)\bin\Test\analysis\synthetic\TRBSVUExperiment2IdeMain.class")-or[double]$job.fixedMomentKappa-le0){throw 'Invalid fixed MM configuration'}
+        $jobClasspath="$($job.fixedMomentTools)\bin;$jobClasspath"
+    }
     if($job.kind-in@('w1-validation','w1-merge')){
         $jobClasspath="$($job.tools)\bin;$($job.deployment)\bin;$($plan.cplexJar);$($plan.deployment)\lib\mosek.jar"
     }
     $workerArguments=@('-Xmx2g',('"-Djava.library.path='+$plan.native+'"'),('"-Dtrb.svu.python='+$plan.python+'"'),('"-Dtrb.svu.momentStopDirectory='+$control+'\moment_stop"'),'-cp',('"'+$jobClasspath+'"'))
+    if($fixedMm){$workerArguments=@(('"-Dtrb.svu.mm.fixedKappa='+$job.fixedMomentKappa+'"'))+$workerArguments}
     if($job.kind -eq 'w1-validation' -and ($job.PSObject.Properties.Name -contains 'oracleDiagnosticDirectory') -and $job.oracleDiagnosticDirectory){
         $workerArguments=@(('"-Dtrb.svu.w1OracleDiagnosticDirectory='+$job.oracleDiagnosticDirectory+'"'))+$workerArguments
     }

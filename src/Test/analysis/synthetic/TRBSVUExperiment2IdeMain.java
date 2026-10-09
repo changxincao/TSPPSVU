@@ -178,6 +178,7 @@ public final class TRBSVUExperiment2IdeMain {
         double[] w1Grid = args.length == 9 && "C-W1".equals(requestedMethod)
                 ? parsePositiveGrid(args[8]) : TRBSVUExperiment2Runner.W1_RADIUS;
         Set<String> requestedMethods = Set.of(requestedMethod);
+        Double fixedMmKappa = "C-MM".equals(requestedMethod) ? configuredMmKappa() : null;
         if (!checkOnly) Files.createDirectories(output);
         List<TRBSVUExperiment1IdeMain.QueryInput> queries =
                 TRBSVUExperiment1IdeMain.loadQueries(replicationInput);
@@ -204,6 +205,7 @@ public final class TRBSVUExperiment2IdeMain {
                 + "|lambda=" + Arrays.toString(lambdaGrid)
                 + "|w1=" + Arrays.toString(w1Grid)
                 + "|momentKappa=" + Arrays.toString(TRBSVUExperiment2Runner.MOMENT_KAPPA)
+                + (fixedMmKappa == null ? "" : "|fixedMmKappa=" + fixedMmKappa + "|momentCV=false")
                 + "|momentValidationLimit="
                 + TRBSVUExperiment2Runner.MOMENT_VALIDATION_LIMIT_SECONDS
                 + "|momentQueryLimit=" + TRBSVUExperiment2Runner.MOMENT_QUERY_LIMIT_SECONDS
@@ -239,9 +241,15 @@ public final class TRBSVUExperiment2IdeMain {
                 settings, forest, TRBSVUFormalProtocol.VALIDATION_ORIGINS);
         TRBSVUValidationCheckpoint validationCheckpoint = new TRBSVUValidationCheckpoint(
                 output.resolve("validation_checkpoints"), queryPoolHash, protocol);
-        Map<String, Double> frozenParameters = null;
-        Map<String, Double> frozenValidationCost = null;
-        Map<String, Map<Double, Double>> frozenValidationCurve = null;
+        Map<String, Double> frozenParameters = fixedMmKappa == null ? null : Map.of("C-MM", fixedMmKappa);
+        Map<String, Double> frozenValidationCost = fixedMmKappa == null ? null : Map.of();
+        Map<String, Map<Double, Double>> frozenValidationCurve = fixedMmKappa == null ? null : Map.of();
+        if (fixedMmKappa != null) {
+            Files.writeString(output.resolve("fixed_moment_parameter.txt"),
+                    "method=C-MM\nkappa=" + fixedMmKappa + "\nselection=FIXED_NO_CV\n",
+                    StandardCharsets.UTF_8);
+            System.out.println("Experiment 2 C-MM fixed kappa=" + fixedMmKappa + "; validation skipped.");
+        }
         List<String> incompleteQueries = new ArrayList<>();
         for (TRBSVUExperiment1IdeMain.QueryInput query : queries) {
             TRBSVUSyntheticCase instance = TRBSVUSyntheticCaseIO.loadText(query.file());
@@ -271,7 +279,8 @@ public final class TRBSVUExperiment2IdeMain {
                 result = runner.runWithSelectedParameters(instance, selected, frozenParameters,
                         frozenValidationCost, frozenValidationCurve);
             }
-            writeResult(queryOutput, replication, instance, selected, result, query.index() == 0);
+            writeResult(queryOutput, replication, instance, selected, result,
+                    query.index() == 0 && fixedMmKappa == null);
             List<String> missingMethods = requestedMethods.stream()
                     .filter(method -> !result.decisions().containsKey(method)).toList();
             if (!missingMethods.isEmpty())
@@ -307,6 +316,7 @@ public final class TRBSVUExperiment2IdeMain {
                 + "\nrfPythonEnvironment=" + rf.pythonEnvironment()
                 + "\nphase=" + phase.directory
                 + "\nrequestedMethods=" + String.join(";", requestedMethods)
+                + (fixedMmKappa == null ? "" : "\nparameterSelection=FIXED_NO_CV\nfixedMmKappa=" + fixedMmKappa)
                 + "\nrcsaaCompactFormulation=SWITCHED_COMPACT"
                 + "\nallRequestedMethodsCompleted=" + incompleteQueries.isEmpty()
                 + "\nincompleteQueries=" + String.join(",", incompleteQueries) + "\n";
@@ -321,6 +331,15 @@ public final class TRBSVUExperiment2IdeMain {
             System.err.println("Experiment 2 phase=" + phase.directory + " finished with missing results: "
                     + String.join(",", incompleteQueries)
                     + ". A later launch will retry them while reusing valid checkpoints.");
+    }
+
+    static Double configuredMmKappa() {
+        String value = System.getProperty("trb.svu.mm.fixedKappa");
+        if (value == null) return null;
+        double kappa = Double.parseDouble(value);
+        if (!(kappa > 0.0) || !Double.isFinite(kappa))
+            throw new IllegalArgumentException("Fixed MM kappa must be positive and finite.");
+        return kappa;
     }
 
     private static TRBSVUExperiment2Runner.Result emptyResult(
