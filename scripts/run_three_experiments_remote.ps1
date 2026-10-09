@@ -53,6 +53,11 @@ function WorkerCommandMatches($command,$expectedArguments){
 }
 function Arguments($job){
     $jobClasspath=if($job.kind-eq'rcsaa-staged'){"$($job.tools)\bin;$classpath"}else{$classpath}
+    $singlePcm=($job.PSObject.Properties.Name-contains'singleMomentQuery')-and$job.singleMomentQuery
+    if($singlePcm){
+        if($job.method-ne'C-PCM'-or-not(HasFile "$($job.tools)\bin\Test\analysis\synthetic\TRBSVUMomentSingleQueryMain.class")){throw 'Invalid single-query PCM pilot'}
+        $jobClasspath="$($job.tools)\bin;$jobClasspath"
+    }
     $fixedMm=$job.method-eq'C-MM'-and($job.PSObject.Properties.Name-contains'fixedMomentKappa')
     if($fixedMm){
         if(-not(HasFile "$($job.fixedMomentTools)\bin\Test\analysis\synthetic\TRBSVUExperiment2IdeMain.class")-or[double]$job.fixedMomentKappa-le0){throw 'Invalid fixed MM configuration'}
@@ -63,6 +68,7 @@ function Arguments($job){
     }
     $workerArguments=@('-Xmx2g',('"-Djava.library.path='+$plan.native+'"'),('"-Dtrb.svu.python='+$plan.python+'"'),('"-Dtrb.svu.momentStopDirectory='+$control+'\moment_stop"'),'-cp',('"'+$jobClasspath+'"'))
     if($fixedMm){$workerArguments=@(('"-Dtrb.svu.mm.fixedKappa='+$job.fixedMomentKappa+'"'))+$workerArguments}
+    if($singlePcm){return $workerArguments+@('Test.analysis.synthetic.TRBSVUMomentSingleQueryMain',('"'+$job.input+'"'),('"'+$job.choice+'"'),('"'+$job.output+'"'),$job.rep,'4')}
     if($job.kind -eq 'w1-validation' -and ($job.PSObject.Properties.Name -contains 'oracleDiagnosticDirectory') -and $job.oracleDiagnosticDirectory){
         $workerArguments=@(('"-Dtrb.svu.w1OracleDiagnosticDirectory='+$job.oracleDiagnosticDirectory+'"'))+$workerArguments
     }
@@ -87,6 +93,10 @@ function Arguments($job){
 }
 function AuditArguments($job){
     $argsList=@(Arguments $job)
+    if(($job.PSObject.Properties.Name-contains'singleMomentQuery')-and$job.singleMomentQuery){
+        $index=[Array]::IndexOf($argsList,'Test.analysis.synthetic.TRBSVUMomentSingleQueryMain')
+        return @($argsList[0..$index])+@('--check-complete')+@($argsList[($index+1)..($argsList.Length-1)])
+    }
     if($job.kind-in@('w1-validation','w1-merge')){
         $index=[Array]::IndexOf($argsList,'Test.analysis.synthetic.TRBSVUSplitW1Main')
         $argsList[$index+1]=if($job.kind-eq'w1-validation'){'check-validation'}else{'check-merge'}
@@ -169,7 +179,7 @@ try{
                 if(@($j.depends|Where-Object{ $id=$_;@($jobs|Where-Object{$_.id-eq$id})[0].state-ne'COMPLETE' }).Count){return $false}
                 if($plan.mode-eq'MAIN'-and(MainStageBlocked $j $jobs)){return $false}
                 return $true
-            }|Sort-Object @{Expression={$lane=$_.lane;@($running|Where-Object{$_.job.lane-eq$lane}).Count}},rank,id)
+            }|Sort-Object @{Expression={if(($_.PSObject.Properties.Name-contains'singleMomentQuery')-and$_.singleMomentQuery){-1}else{0}}},@{Expression={$lane=$_.lane;@($running|Where-Object{$_.job.lane-eq$lane}).Count}},rank,id)
             if(-not$ready.Count){break}
             $job=$ready[0];$job.attempt++
             $stdout="$control\logs\$($job.id)_$($job.attempt).stdout.log"
