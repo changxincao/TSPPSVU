@@ -68,7 +68,13 @@ function Arguments($job){
     }
     $workerArguments=@('-Xmx2g',('"-Djava.library.path='+$plan.native+'"'),('"-Dtrb.svu.python='+$plan.python+'"'),('"-Dtrb.svu.momentStopDirectory='+$control+'\moment_stop"'),'-cp',('"'+$jobClasspath+'"'))
     if($fixedMm){$workerArguments=@(('"-Dtrb.svu.mm.fixedKappa='+$job.fixedMomentKappa+'"'))+$workerArguments}
-    if($singlePcm){return $workerArguments+@('Test.analysis.synthetic.TRBSVUMomentSingleQueryMain',('"'+$job.input+'"'),('"'+$job.choice+'"'),('"'+$job.output+'"'),$job.rep,'4')}
+    if($singlePcm){
+        if(($job.PSObject.Properties.Name-contains'reusePilot')-and$job.reusePilot){
+            $workerArguments=@(('"-Dtrb.svu.pcm.reusePilot='+$job.reusePilot+'"'),('"-Dtrb.svu.pcm.reusePilotClass='+$job.reusePilotClass+'"'))+$workerArguments
+        }
+        $mode=if(($job.PSObject.Properties.Name-contains'allMomentQueries')-and$job.allMomentQueries){@('--all-queries')}else{@()}
+        return $workerArguments+@('Test.analysis.synthetic.TRBSVUMomentSingleQueryMain')+$mode+@(('"'+$job.input+'"'),('"'+$job.choice+'"'),('"'+$job.output+'"'),$job.rep,'4')
+    }
     if($job.kind -eq 'w1-validation' -and ($job.PSObject.Properties.Name -contains 'oracleDiagnosticDirectory') -and $job.oracleDiagnosticDirectory){
         $workerArguments=@(('"-Dtrb.svu.w1OracleDiagnosticDirectory='+$job.oracleDiagnosticDirectory+'"'))+$workerArguments
     }
