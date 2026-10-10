@@ -67,11 +67,20 @@ public final class OlistContextualSelfCheck {
             return; // Diagnostic only: no RF training, MIP or holdout-cost evaluation.
         }
         int checks = 0;
+        sharedLaneScalingFixture();
         for (int test = 53; test < 104; test++) for (int lag = 1; lag <= 3; lag++) {
             var full = data.window(test, lag, 50);
             require(full.startWeek() == test - 50 && full.endWeek() == test - 1, "Final window");
             require(full.target().theta.dim() == lag * data.market.J + (OlistContextualData.INCLUDE_TREND ? 1 : 0),
                     "Explicit context dimension");
+            var finalLaneScaled = OlistContextualData.scale(full);
+            for (int j = 0; j < data.market.J; j++) {
+                double max = 0;
+                for (var sample : full.training()) max = Math.max(max, Math.abs(sample.demand()[j]));
+                for (int position = 0; position < lag; position++)
+                    require(finalLaneScaled.maxima()[position * data.market.J + j] == (max < 1e-12 ? 1 : max),
+                            "Final50 shared lane divisor");
+            }
             if (OlistContextualData.INCLUDE_TREND) {
                 int trend = full.target().theta.dim() - 1;
                 require(full.target().theta.values()[trend] == OlistContextualData.trendValue(test), "Target chronological trend");
@@ -114,9 +123,17 @@ public final class OlistContextualSelfCheck {
                         continue;
                     }
                     double max = 0;
-                    for (var sample : window.training()) max = Math.max(max, sample.theta.values()[k]);
-                    require(scaled.maxima()[k] == (max < 1e-12 ? 1 : max), "Training-only maximum");
+                    int demandDimensions = lag * data.market.J;
+                    for (var sample : window.training()) max = Math.max(max,
+                            k < demandDimensions ? Math.abs(sample.demand()[k % data.market.J])
+                                    : Math.abs(sample.theta.values()[k]));
+                    require(scaled.maxima()[k] == (max < 1e-12 ? 1 : max), "Training-only shared lane maximum");
                     require(scaled.query().values()[k] == window.target().theta.values()[k] / scaled.maxima()[k], "No query clipping");
+                    for (int s = 0; s < window.training().size(); s++) {
+                        require(scaled.training().get(s).theta.values()[k]
+                                == window.training().get(s).theta.values()[k] / scaled.maxima()[k], "Same training/query divisor");
+                        require(Arrays.equals(scaled.training().get(s).demand(), window.training().get(s).demand()), "Response demand unscaled");
+                    }
                 }
                 var weights = TRBSVUScenarioWeights.kernel(scaled.training(), scaled.query(),
                         TRBSVUScenarioWeights.Kernel.EXPONENTIAL, 1);
@@ -126,6 +143,12 @@ public final class OlistContextualSelfCheck {
                         - scaled.training().get(0).theta.values()[0] * scaled.maxima()[0]) < 1e-9, "Source unchanged");
                 checks++;
             }
+        }
+        if (args.length > 0 && args[0].equals("scaling-only")) {
+            System.out.println("OLIST_LANE_SHARED_MAX_PASS windows=" + checks
+                    + " includeTrend=" + OlistContextualData.INCLUDE_TREND
+                    + " fixedTrend104=" + OlistContextualData.FIXED_TREND_104);
+            return;
         }
         var scaled = OlistContextualData.scale(data.window(53, 2, 35));
         TRBSVUForestWeights forest = new TRBSVUForestWeights(OlistContextualRunner.PYTHON.toString(),
@@ -272,6 +295,30 @@ public final class OlistContextualSelfCheck {
             System.out.println("OLIST_PIPELINE_RESUME_PASS");
         }
         System.out.println("OLIST_SELF_CHECK_PASS windows=" + checks + " RF500_four_leaves=PASS");
+    }
+    private static void sharedLaneScalingFixture() {
+        int dim = 6 + (OlistContextualData.INCLUDE_TREND ? 1 : 0);
+        double[][] contexts = {{500, 4, 40, 8, 20, 12}, {30, 2, 100, 6, 50, 10}, {300, 20, 200, 30, 100, 40}};
+        double[][] demands = {{10, 0}, {100, 0}, {1e9, 1e9}};
+        List<Basic.Sample> samples = new java.util.ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            double[] context = Arrays.copyOf(contexts[i], dim);
+            if (OlistContextualData.INCLUDE_TREND) context[dim - 1] = OlistContextualData.trendValue(i);
+            var date = java.time.LocalDate.of(2020, 1, 1).plusWeeks(i);
+            var period = new Basic.PeriodData(i, date, date.plusDays(6), demands[i], 0, 0, 0, 0);
+            samples.add(new Basic.Sample(i, period, new CovariateVector(context), .5));
+        }
+        var window = new OlistContextualData.Window(samples.subList(0, 2), samples.get(2), 0, 1);
+        var scaled = OlistContextualData.scale(window);
+        for (int k = 0; k < 6; k++) {
+            require(scaled.maxima()[k] == (k % 2 == 0 ? 100 : 1), "Shared divisor and zero-lane fallback");
+            require(scaled.query().values()[k] == contexts[2][k] / scaled.maxima()[k], "Target excluded and un-clipped");
+            for (int s = 0; s < 2; s++)
+                require(scaled.training().get(s).theta.values()[k] == contexts[s][k] / scaled.maxima()[k], "Lag positions share divisor");
+        }
+        require(scaled.training().get(0).theta.values()[0] == 5, "Earlier lag value above training-demand max not clipped");
+        require(samples.get(0).theta.values()[0] == 500 && samples.get(2).theta.values()[0] == 300, "Source contexts untouched");
+        for (int s = 0; s < 2; s++) require(Arrays.equals(scaled.training().get(s).demand(), demands[s]), "Fixture demands untouched");
     }
     private static void require(boolean condition, String name) {
         if (!condition) throw new AssertionError(name);

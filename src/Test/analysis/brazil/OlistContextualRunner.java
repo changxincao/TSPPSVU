@@ -314,7 +314,8 @@ public final class OlistContextualRunner {
                 + "includeTrend=" + OlistContextualData.INCLUDE_TREND + "\ntrendFeature="
                 + (OlistContextualData.FIXED_TREND_104 ? "FIXED_ONE_BASED_WEEK_DIV_104_NO_WINDOW_SCALING" : "DETERMINISTIC_ONE_BASED_WEEK_TRAINING_MAX") + "\n"
                 + "baselineD=MEAN_OF_50\nbaselineSAA=ALL_50_EQUAL\nbaselineValidation=NONE\n"
-                + "scaling=" + (OlistContextualData.FIXED_TREND_104 ? "DEMAND_TRAINING_MAX_FIXED_TREND_NO_CLIPPING" : "TRAINING_MAX_NO_CLIPPING")
+                + "scaling=LANE_SHARED_MAX_OF_TRAINING_DEMAND_NO_CLIPPING\ntrendScaling="
+                + (OlistContextualData.FIXED_TREND_104 ? "FIXED_TREND_UNSCALED" : "TRAINING_MAX")
                 + "\nB=" + Arrays.toString(BANDWIDTH) + "\nleaf=" + Arrays.toString(LEAF) + "\n";
         Path file = OUTPUT.resolve("protocol.txt");
         if (Files.exists(file)) {

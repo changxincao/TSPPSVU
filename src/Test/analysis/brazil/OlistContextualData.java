@@ -8,7 +8,6 @@ import Helper.basicHelper.Config;
 import Helper.basicHelper.InstanceGenerator;
 import Helper.basicHelper.SampleBuilder;
 import Helper.basicHelper.WeeklyWideLoader;
-import Helper.calculateHelper.StandardScaler;
 import Test.BatchRunner;
 import Test.analysis.synthetic.TRBSVUProcurementGenerator;
 
@@ -228,27 +227,36 @@ public final class OlistContextualData {
     public static Scaled scale(Window window) {
         List<Sample> training = BatchRunner.deepCopySamples(window.training());
         int dimension = window.target().theta.dim();
+        int lanes = window.target().demand().length;
+        int demandDimensions = dimension - (INCLUDE_TREND ? 1 : 0);
+        if (training.isEmpty() || lanes == 0 || demandDimensions % lanes != 0)
+            throw new IllegalArgumentException("Invalid Olist lag-demand context dimensions");
+        // One divisor per lane, fitted on the observed demands of this training window.
+        // All lag positions of that lane share it; the target demand is never used.
+        double[] laneMaxima = new double[lanes];
+        for (Sample sample : training)
+            for (int j = 0; j < lanes; j++)
+                laneMaxima[j] = Math.max(laneMaxima[j], Math.abs(sample.demand()[j]));
+        for (int j = 0; j < lanes; j++) if (laneMaxima[j] < 1e-12) laneMaxima[j] = 1.0;
         double[] maxima = new double[dimension];
-        for (Sample sample : training)
-            for (int k = 0; k < dimension; k++)
-                maxima[k] = Math.max(maxima[k], Math.abs(sample.theta.values()[k]));
-        for (int k = 0; k < dimension; k++) if (maxima[k] < 1e-12) maxima[k] = 1.0;
-        StandardScaler scaler = new StandardScaler(StandardScaler.Mode.TRAINING_MAX);
-        scaler.fit(training, dimension);
-        for (Sample sample : training)
-            sample.theta = new CovariateVector(scaler.transform(sample.theta.values()));
-        double[] query = scaler.transform(window.target().theta.values());
-        if (INCLUDE_TREND && FIXED_TREND_104) {
+        for (int k = 0; k < demandDimensions; k++) maxima[k] = laneMaxima[k % lanes];
+        if (INCLUDE_TREND) {
             int trend = dimension - 1;
-            // Keep the fixed calendar encoding; only demand features use window maxima.
-            for (int i = 0; i < training.size(); i++) {
-                double[] values = training.get(i).theta.values().clone();
-                values[trend] = window.training().get(i).theta.values()[trend];
-                training.get(i).theta = new CovariateVector(values);
+            // Preserve the existing trend policy, independently of lane scaling.
+            if (FIXED_TREND_104) maxima[trend] = 1.0;
+            else {
+                for (Sample sample : training)
+                    maxima[trend] = Math.max(maxima[trend], Math.abs(sample.theta.values()[trend]));
+                if (maxima[trend] < 1e-12) maxima[trend] = 1.0;
             }
-            query[trend] = window.target().theta.values()[trend];
-            maxima[trend] = 1.0; // Effective divisor: no additional scaling.
         }
+        for (Sample sample : training) {
+            double[] values = sample.theta.values().clone();
+            for (int k = 0; k < dimension; k++) values[k] /= maxima[k];
+            sample.theta = new CovariateVector(values);
+        }
+        double[] query = window.target().theta.values().clone();
+        for (int k = 0; k < dimension; k++) query[k] /= maxima[k];
         return new Scaled(training, new CovariateVector(query), maxima);
     }
 }

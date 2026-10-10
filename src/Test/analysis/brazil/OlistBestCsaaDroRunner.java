@@ -219,6 +219,7 @@ public final class OlistBestCsaaDroRunner {
         String protocol = "OLIST_GLOBAL_OOS_CSAA_CHI2_V1\nmethod=" + method + "\nformalTrainingOnly=" + FIXED_RF + "\n"
                 + (OlistContextualData.FIXED_TREND_104 ? "trendFeature=FIXED_ONE_BASED_WEEK_DIV_104_NO_WINDOW_SCALING\n" : "")
                 + "includeTrend=" + Boolean.getBoolean("olist.includeTrend") + "\n"
+                + "scaling=LANE_SHARED_MAX_OF_TRAINING_DEMAND_NO_CLIPPING\n"
                 + "lambdaGrid=" + Arrays.toString(LAMBDA) + "\nthreads=4\nlimitSec=14400\nvalidation=15x35\nfinal=50\n"
                 + "inputSha256=" + sha(base.resolve("inputs/" + market + "/instance.tsv")) + "\n"
                 + "baselineProtocolSha256=" + sha(base.resolve("results/" + market + "/protocol.txt")) + "\n";
