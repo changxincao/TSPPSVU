@@ -30,7 +30,7 @@ def write(path, data):
 def main(baseline, output, csaa_only=False):
     target = output / "comparison"
     target.mkdir(exist_ok=True)
-    results, changes, audit = [], [], []
+    results, changes, audit, query_results = [], [], [], []
     methods = ("D", "SAA-All") + CSAA + (() if csaa_only else ("C-Chi2",))
     for rep in range(1, 6):
         name = f"rep_{rep:03}"
@@ -64,6 +64,8 @@ def main(baseline, output, csaa_only=False):
                 if not all(math.isfinite(float(summary[0][k])) for k in METRICS):
                     raise ValueError(f"Non-finite metric: {root}")
                 summaries.append(summary[0])
+                query_results.append(dict(rep=rep, method=method, query=q,
+                                          **{k: float(summary[0][k]) for k in METRICS}))
                 audit.append(dict(rep=rep, method=method, query=q,
                                   status=summary[0]["solve_status"],
                                   certified_optimal=summary[0]["certified_optimal"],
@@ -83,11 +85,18 @@ def main(baseline, output, csaa_only=False):
                                     new_parameter=new[parameter], changed=float(old[parameter]) != float(new[parameter]),
                                     old_mean=old_mean, new_mean=result["mean"],
                                     improvement_pct=100 * (old_mean - result["mean"]) / old_mean))
-    for result in results:
-        base = next(r for r in results if r["rep"] == result["rep"] and r["method"] == "SAA-All")
+    query_bases = {(r["rep"], r["query"]): r for r in query_results if r["method"] == "SAA-All"}
+    for result in query_results:
+        base = query_bases[result["rep"], result["query"]]
         for k in METRICS:
+            if base[k] <= 0:
+                raise ValueError(f"Non-positive SAA denominator: {result['rep']}, {result['query']}, {k}")
             result[k + "_vs_saa_pct"] = 100 * (base[k] - result[k]) / base[k]
-    overall = [dict(method=method, **{k + "_vs_saa_pct": statistics.mean(r[k + "_vs_saa_pct"] for r in results if r["method"] == method) for k in METRICS})
+    for result in results:
+        for k in METRICS:
+            result[k + "_vs_saa_pct"] = statistics.mean(r[k + "_vs_saa_pct"] for r in query_results
+                if r["rep"] == result["rep"] and r["method"] == result["method"])
+    overall = [dict(method=method, **{k + "_vs_saa_pct": statistics.mean(r[k + "_vs_saa_pct"] for r in query_results if r["method"] == method) for k in METRICS})
                for method in methods]
     rankings = [dict(rep=rep, **{k + "_ranking": ";".join(r["method"] for r in sorted(
                     (r for r in results if r["rep"] == rep and r["method"] in CSAA), key=lambda r: r[k]))
@@ -97,10 +106,11 @@ def main(baseline, output, csaa_only=False):
     write(target / "parameter_changes.csv", changes)
     write(target / "rankings.csv", rankings)
     write(target / "query_audit.csv", audit)
+    write(target / "per_query_improvements.csv", query_results)
     (target / "audit_complete.json").write_text(json.dumps(dict(
         captured=datetime.now(timezone.utc).isoformat(), baseline=str(baseline), output=str(output),
         markets=5, queries_per_market=40, oos_per_query=1000,
-        aggregation="Mean each metric over 40 queries within market, then mean market-relative improvements",
+        aggregation="Mean of 200 paired decision-level relative improvements over SAA-All; market metric means retained for rankings only",
         risk_metrics="average conditional query metrics, not pooled risk", selection="no market filtering",
         scope="CSAA_ONLY" if csaa_only else "CSAA_AND_RF_CHI2"), indent=2), encoding="utf-8")
 
